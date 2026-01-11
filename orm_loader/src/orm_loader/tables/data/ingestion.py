@@ -1,0 +1,184 @@
+from dataclasses import dataclass, field
+from typing import Any, List, Dict, Iterable, Type, cast
+import logging
+from pathlib import Path
+import pandas as pd
+import sqlalchemy as sa
+import sqlalchemy.orm as so
+from ..base.typing import CSVTableProtocol
+from .data_type_management import _safe_cast
+
+logger = logging.getLogger(__name__)
+
+@dataclass
+class ColumnCastingStats:
+    """
+    Casting statistics for a single column.
+    """
+    count: int = 0
+    examples: List[Any] = field(default_factory=list)
+
+    def record(self, value: Any, example_limit: int = 3):
+        self.count += 1
+        if len(self.examples) < example_limit:
+            self.examples.append(value)
+
+@dataclass
+class TableCastingStats:
+    """
+    Aggregated casting statistics for a table, keyed by column.
+    """
+    table_name: str
+    columns: Dict[str, ColumnCastingStats] = field(default_factory=dict)
+
+    def record(
+        self,
+        *,
+        column: str,
+        value: Any,
+        example_limit: int = 3,
+    ):
+        if column not in self.columns:
+            self.columns[column] = ColumnCastingStats()
+        self.columns[column].record(value, example_limit=example_limit)
+
+    @property
+    def total_failures(self) -> int:
+        return sum(stats.count for stats in self.columns.values())
+
+    def has_failures(self) -> bool:
+        return self.total_failures > 0
+    
+    def to_dict(self) -> dict[str, dict[str, Any]]:
+        return {
+            col: {
+                "count": stats.count,
+                "examples": stats.examples,
+            }
+            for col, stats in self.columns.items()
+        }
+    
+
+def cast_dataframe_to_model(
+    *,
+    df: pd.DataFrame,
+    model_columns: dict[str, sa.ColumnElement],
+    table_name: str,
+) -> pd.DataFrame:
+    
+    """
+    Cast DataFrame columns to SQLAlchemy model column types.
+
+    - Applies per-column type casting
+    - Drops rows violating required (non-nullable, no-default) constraints
+    - Emits warnings with example values for cast failures
+
+    Policy decisions (whether to call this, how strict to be)
+    are handled by the table mixin.
+    """
+    if df.empty:
+        return df
+
+    stats = TableCastingStats(table_name=table_name)
+
+    for col_name, sa_col in model_columns.items():
+        if col_name not in df.columns:
+            continue
+
+        def _on_cast_error(value, *, _col=col_name):
+            stats.record(column=_col, value=value)
+
+        df[col_name] = df[col_name].map(
+            lambda v: _safe_cast(v, sa_col.type, on_error=_on_cast_error)
+        )
+
+    required_cols = [
+        name
+        for name, col in model_columns.items()
+        if not col.nullable and not col.default and not col.server_default
+    ]
+
+    if required_cols:
+        null_mask = df[required_cols].isna()
+        for col in required_cols:
+            null_count = int(null_mask[col].sum())
+            if null_count > 0:
+                logger.warning(
+                    "Found %d rows with unexpected nulls in %s.%s",
+                    null_count,
+                    table_name,
+                    col,
+                )
+
+        # Drop rows violating required constraints
+        df = df.loc[~null_mask.any(axis=1)]
+
+    if stats.has_failures():
+        for col, col_stats in stats.columns.items():
+            logger.warning(f"CAST {table_name}.{col}: {col_stats.count} row(s) failed. Examples: {col_stats.examples}")
+
+    return df
+
+
+def load_chunk(
+    *,
+    cls,
+    session: so.Session,
+    dataframe: pd.DataFrame,
+    commit: bool = False,
+) -> int:
+    """Load a chunk of data into the given ORM table class."""
+
+    records = cast(
+        Iterable[Dict[str, Any]],
+        dataframe.to_dict(orient="records"),
+    )
+    session.bulk_insert_mappings(cls, records)
+    if commit:
+        session.commit()
+
+    return len(dataframe)
+
+def load_file(
+    *,
+    cls: Type[CSVTableProtocol],
+    session: so.Session,
+    path: Path,
+    delimiter: str = "\t",
+    dtype=str,
+    chunksize: int | None = None,
+    commit_per_chunk: bool = False,
+    normalise: bool = True,
+    dedupe: bool = True,
+    dedupe_incl_db: bool = False,
+) -> int:
+    """
+    Load a file into a table, delegating chunking to pandas.
+
+    If chunksize is None, pandas returns a single DataFrame, which we
+    normalise to a one-element iterator for unified processing.
+    """
+    total = 0
+
+    reader = pd.read_csv(
+        path,
+        delimiter=delimiter,
+        dtype=dtype,
+        chunksize=chunksize,
+    )
+
+    chunks = (reader,) if isinstance(reader, pd.DataFrame) else reader
+
+    for chunk in chunks:
+        if normalise:
+            chunk = cls.normalise_dataframe(chunk)
+        if dedupe:
+            chunk = cls.dedupe_dataframe(chunk, session=session if dedupe_incl_db else None)
+        total += load_chunk(
+            cls=cls,
+            session=session,
+            dataframe=chunk,
+            commit=commit_per_chunk,
+        )
+
+    return total

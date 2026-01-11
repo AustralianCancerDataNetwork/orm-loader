@@ -1,0 +1,32 @@
+[project]
+name = "orm-loader"
+version = "0.1.0"
+description = "Generic base classes to handle ORM functionality for multiple downstream datamodels"
+readme = "README.md"
+authors = [
+    { name = "gkennos", email = "georgina.kennedy@unsw.edu.au" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "pandas>=2.3.3",
+    "sqlalchemy>=2.0.45",
+]
+
+[build-system]
+requires = ["uv_build>=0.9.2,<0.10.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.19.1",
+    "pytest>=9.0.2",
+    "ruff>=0.14.11",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
