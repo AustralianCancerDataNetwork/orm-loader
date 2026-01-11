@@ -29,6 +29,7 @@ class CSVLoadableTableInterface(ORMTableBase):
         dedupe: bool = False,
         chunksize: int | None = None,
         commit_on_chunk: bool = False,
+        dedupe_incl_db: bool = False,
     ) -> int:
         logger.debug("Loading CSV for %s", cls.__tablename__)
 
@@ -46,6 +47,7 @@ class CSVLoadableTableInterface(ORMTableBase):
             commit_per_chunk=commit_on_chunk,
             normalise=normalise,
             dedupe=dedupe,
+            dedupe_incl_db=dedupe_incl_db
         )
         
         return total
