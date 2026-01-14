@@ -11,6 +11,8 @@ from ..data.ingestion import cast_dataframe_to_model, load_file
 
 logger = logging.getLogger(__name__)
 
+
+
 class CSVLoadableTableInterface(ORMTableBase):
     """
     Mixin for ORM tables that can be loaded from CSV files.
@@ -42,7 +44,6 @@ class CSVLoadableTableInterface(ORMTableBase):
             cls=cls,
             session=session,
             path=path,
-            delimiter=delimiter,
             chunksize=chunksize,
             commit_per_chunk=commit_on_chunk,
             normalise=normalise,

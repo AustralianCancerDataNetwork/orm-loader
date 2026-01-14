@@ -4,3 +4,6 @@
 
 ## 0.1.1
 - modified load_csv to split out file dedupe & db dedupe
+
+## 0.1.2
+- adding inference for delimiter and encoding on load

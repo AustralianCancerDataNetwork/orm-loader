@@ -5,6 +5,7 @@ from pathlib import Path
 import pandas as pd
 import sqlalchemy as sa
 import sqlalchemy.orm as so
+import chardet
 from ..base.typing import CSVTableProtocol
 from .data_type_management import _safe_cast
 
@@ -58,7 +59,22 @@ class TableCastingStats:
             for col, stats in self.columns.items()
         }
     
+def infer_encoding(file):
+    with open(file, 'rb') as infile:
+        encoding = chardet.detect(infile.read(10000))
+    if encoding['encoding'] == 'ascii':
+        encoding['encoding'] = 'utf-8' # utf-8 valid superset of ascii, so being more conservative here just because it flakes occasionally
+    return encoding
 
+def infer_delim(file):
+    with open(file, 'r') as infile:
+        line = infile.readline()
+        tabs = line.count('\t')
+        commas = line.count(',')
+        if tabs > commas:
+            return '\t'
+        return ','
+    
 def cast_dataframe_to_model(
     *,
     df: pd.DataFrame,
@@ -144,7 +160,6 @@ def load_file(
     cls: Type[CSVTableProtocol],
     session: so.Session,
     path: Path,
-    delimiter: str = "\t",
     dtype=str,
     chunksize: int | None = None,
     commit_per_chunk: bool = False,
@@ -160,11 +175,15 @@ def load_file(
     """
     total = 0
 
+    delimiter = infer_delim(path)
+    encoding = infer_encoding(path)['encoding']
+
     reader = pd.read_csv(
         path,
         delimiter=delimiter,
         dtype=dtype,
         chunksize=chunksize,
+        encoding=encoding,
     )
 
     chunks = (reader,) if isinstance(reader, pd.DataFrame) else reader
