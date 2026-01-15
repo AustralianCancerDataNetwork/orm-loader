@@ -7,3 +7,6 @@
 
 ## 0.1.2
 - adding inference for delimiter and encoding on load
+
+## 0.1.3
+- minimal logging updates

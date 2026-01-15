@@ -151,6 +151,7 @@ def load_chunk(
     )
     session.bulk_insert_mappings(cls, records)
     if commit:
+        logger.debug(f"Committing chunk of {len(dataframe)} rows to {cls.__tablename__}")
         session.commit()
 
     return len(dataframe)
@@ -185,6 +186,8 @@ def load_file(
         chunksize=chunksize,
         encoding=encoding,
     )
+    logger.info(f"Detected encoding {encoding} for file {path.name}")
+    logger.info(f"Detected delimiter '{delimiter}' for file {path.name}")
 
     chunks = (reader,) if isinstance(reader, pd.DataFrame) else reader
 
