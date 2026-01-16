@@ -174,7 +174,7 @@ def load_file(
     path: Path,
     dtype=str,
     chunksize: int | None = None,
-    commit_per_chunk: bool = False,
+    commit_on_chunk: bool = False,
     normalise: bool = True,
     dedupe: bool = True,
     dedupe_incl_db: bool = False,
@@ -217,7 +217,7 @@ def load_file(
             cls=cls,
             session=session,
             dataframe=chunk,
-            commit=commit_per_chunk,
+            commit=commit_on_chunk,
             table_override=table_override,
         )
 

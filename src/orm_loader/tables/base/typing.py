@@ -83,7 +83,7 @@ class ParquetTableProtocol(ORMTableProtocol, Protocol):
         *,
         columns: list[str] | None = None,
         filters: list[tuple] | None = None,
-        commit_per_chunk: bool = False,
+        commit_on_chunk: bool = False,
     ) -> int: ...
 
 

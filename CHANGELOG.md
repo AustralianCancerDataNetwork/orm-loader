@@ -19,3 +19,6 @@
 
 ## 0.2.2
 - bugfix for staging load on postgres
+
+## 0.2.3
+- consistent api for loader args

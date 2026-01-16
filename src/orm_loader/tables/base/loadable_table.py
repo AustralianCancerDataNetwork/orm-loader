@@ -100,7 +100,7 @@ class CSVLoadableTableInterface(ORMTableBase):
             session=session,
             path=path,
             chunksize=chunksize,
-            commit_per_chunk=commit_on_chunk,
+            commit_on_chunk=commit_on_chunk,
             normalise=normalise,
             dedupe=dedupe,
             dedupe_incl_db=dedupe_incl_db
@@ -382,7 +382,7 @@ class ParquetLoadableTableMixin(ORMTableBase):
         *,
         columns: list[str] | None = None,
         filters: list[tuple] | None = None,
-        commit_per_chunk: bool = False,
+        commit_on_chunk: bool = False,
     ) -> int:
         raise NotImplementedError("Parquet loading not implemented for this table")
 
