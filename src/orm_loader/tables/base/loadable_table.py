@@ -51,6 +51,7 @@ class CSVLoadableTableInterface(ORMTableBase):
             raise NotImplementedError(
                 f"Staging table creation not implemented for dialect '{dialect}'"
             )
+        session.commit()
         
     @classmethod
     def load_csv_to_staging(

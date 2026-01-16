@@ -16,3 +16,6 @@
 
 ## 0.2.1
 - bugfix for bulk load
+
+## 0.2.2
+- bugfix for staging load on postgres
