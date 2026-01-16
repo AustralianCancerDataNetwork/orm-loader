@@ -13,3 +13,6 @@
 
 ## 0.2.0
 - added merge functionality with staging table for upsert
+
+## 0.2.1
+- bugfix for bulk load

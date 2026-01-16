@@ -108,20 +108,19 @@ class CSVLoadableTableInterface(ORMTableBase):
         return total
 
     @classmethod
-    def merge_from_staging(cls: Type[CSVTableProtocol], session: so.Session):
-        target = cls.__tablename__
-        staging = cls.staging_tablename()
-        pk_cols = cls.pk_names()
-
+    def _merge_replace(
+        cls: Type[CSVTableProtocol],
+        session: so.Session, 
+        target: str, 
+        staging: str, 
+        pk_cols: list[str],
+        dialect: str
+    ):
+   
         pk_join = " AND ".join(
             f't."{c}" = s."{c}"' for c in pk_cols
         )
 
-        if not session.bind:
-            raise RuntimeError("Session is not bound to an engine")
-        
-        dialect = session.bind.dialect.name
-        
         if dialect == "postgresql":
             pk_join = " AND ".join(
                 f't."{c}" = s."{c}"' for c in pk_cols
@@ -153,10 +152,101 @@ class CSVLoadableTableInterface(ORMTableBase):
                         WHERE {pk_match}
                     );
                 """))
+
+    @classmethod
+    def _merge_upsert(
+        cls: Type[CSVTableProtocol], 
+        session: so.Session, 
+        target: str, 
+        staging: str, 
+        pk_cols: list[str],
+        dialect: str
+    ):
+        if dialect == "postgresql":
+            # INSERT … ON CONFLICT DO NOTHING
+            session.execute(sa.text(f"""
+                INSERT INTO "{target}"
+                SELECT * FROM "{staging}"
+                ON CONFLICT ({", ".join(f'"{c}"' for c in pk_cols)}) DO NOTHING;
+            """))
+
+        elif dialect == "sqlite":
+            session.execute(sa.text(f"""
+                INSERT OR IGNORE INTO "{target}"
+                SELECT * FROM "{staging}";
+            """))
+
         else:
-            raise NotImplementedError(
-                f"Merge not implemented for dialect '{dialect}'"
+            raise NotImplementedError
+
+    @classmethod
+    def merge_from_staging(
+        cls: Type[CSVTableProtocol], 
+        session: so.Session, 
+        merge_strategy: str = "replace"
+    ):
+        target = cls.__tablename__
+        staging = cls.staging_tablename()
+        pk_cols = cls.pk_names()
+
+        if not session.bind:
+            raise RuntimeError("Session is not bound to an engine")
+        
+        dialect = session.bind.dialect.name
+        if merge_strategy == "replace":
+            cls._merge_replace(
+                session=session,
+                target=target,
+                staging=staging,
+                pk_cols=pk_cols,
+                dialect=dialect,
             )
+        elif merge_strategy == "upsert":
+            cls._merge_upsert(
+                session=session,
+                target=target,
+                staging=staging,
+                pk_cols=pk_cols,
+                dialect=dialect,
+            )
+        else:
+            raise ValueError(f"Unknown merge strategy '{merge_strategy}'")
+        
+        # # if dialect == "postgresql":
+        # #     pk_join = " AND ".join(
+        # #         f't."{c}" = s."{c}"' for c in pk_cols
+        # #     )
+
+        # #     session.execute(sa.text(f"""
+        # #         DELETE FROM "{target}" t
+        # #         USING "{staging}" s
+        # #         WHERE {pk_join};
+        # #     """))
+
+        # # elif dialect == "sqlite":
+        # #     if len(pk_cols) == 1:
+        # #         pk = pk_cols[0]
+        # #         session.execute(sa.text(f"""
+        # #             DELETE FROM "{target}"
+        # #             WHERE "{pk}" IN (
+        # #                 SELECT "{pk}" FROM "{staging}"
+        # #             );
+        # #         """))
+        # #     else:
+        # #         pk_match = " AND ".join(
+        # #             f't."{c}" = s."{c}"' for c in pk_cols
+        # #         )
+        # #         session.execute(sa.text(f"""
+        # #             DELETE FROM "{target}" t
+        # #             WHERE EXISTS (
+        # #                 SELECT 1 FROM "{staging}" s
+        # #                 WHERE {pk_match}
+        # #             );
+        # #         """))
+        # else:
+        #     raise NotImplementedError(
+        #         f"Merge not implemented for dialect '{dialect}'"
+        #     )
 
 
         # 2. insert replacements
@@ -176,12 +266,13 @@ class CSVLoadableTableInterface(ORMTableBase):
         cls: Type[CSVTableProtocol],
         session: so.Session,
         path: Path,
+        merge_strategy: str = "replace",
         **kwargs,
     ) -> int:
         logger.info("Replacing data in %s from %s", cls.__tablename__, path.name)
 
         total = cls.load_csv_to_staging(session, path, **kwargs)
-        cls.merge_from_staging(session)
+        cls.merge_from_staging(session, merge_strategy=merge_strategy)
         cls.drop_staging_table(session)
 
         return total

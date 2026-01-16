@@ -1,6 +1,7 @@
 from contextlib import contextmanager
 from sqlalchemy import text, Engine
 from sqlalchemy.orm import Session
+import sqlalchemy as sa
 from .logging import get_logger
 
 logger = get_logger(__name__)

@@ -191,13 +191,18 @@ def load_file(
     delimiter = infer_delim(path)
     encoding = infer_encoding(path)['encoding']
 
-    reader = pd.read_csv(
-        path,
-        delimiter=delimiter,
-        dtype=dtype,
-        chunksize=chunksize,
-        encoding=encoding,
-    )
+    try:
+        reader = pd.read_csv(
+            path,
+            delimiter=delimiter,
+            dtype=dtype,
+            chunksize=chunksize,
+            encoding=encoding,
+        )
+    except pd.errors.EmptyDataError:
+        logger.info(f"File {path.name} is empty — skipping load for {cls.__tablename__}")
+        return 0
+    
     logger.info(f"Detected encoding {encoding} for file {path.name}")
     logger.info(f"Detected delimiter '{delimiter}' for file {path.name}")
 
