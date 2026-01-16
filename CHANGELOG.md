@@ -10,3 +10,6 @@
 
 ## 0.1.3
 - minimal logging updates
+
+## 0.2.0
+- added merge functionality with staging table for upsert

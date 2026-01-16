@@ -142,14 +142,25 @@ def load_chunk(
     session: so.Session,
     dataframe: pd.DataFrame,
     commit: bool = False,
+    table_override: sa.Table | None = None,
 ) -> int:
     """Load a chunk of data into the given ORM table class."""
-
+    if dataframe.empty:
+        return 0
     records = cast(
         Iterable[Dict[str, Any]],
         dataframe.to_dict(orient="records"),
     )
-    session.bulk_insert_mappings(cls, records)
+    
+    # this is for when we are inserting into staging tables instead 
+    # of the ORM-mapped table to support upsert/merge workflows
+    if table_override is not None:
+        session.execute( 
+            table_override.insert(),
+            records, # type: ignore
+        )
+    else:
+        session.bulk_insert_mappings(cls, records)
     if commit:
         logger.debug(f"Committing chunk of {len(dataframe)} rows to {cls.__tablename__}")
         session.commit()
@@ -167,6 +178,7 @@ def load_file(
     normalise: bool = True,
     dedupe: bool = True,
     dedupe_incl_db: bool = False,
+    table_override: sa.Table | None = None,
 ) -> int:
     """
     Load a file into a table, delegating chunking to pandas.
@@ -201,6 +213,7 @@ def load_file(
             session=session,
             dataframe=chunk,
             commit=commit_per_chunk,
+            table_override=table_override,
         )
 
     return total

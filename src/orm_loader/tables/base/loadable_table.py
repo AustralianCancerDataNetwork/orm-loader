@@ -12,7 +12,6 @@ from ..data.ingestion import cast_dataframe_to_model, load_file
 logger = logging.getLogger(__name__)
 
 
-
 class CSVLoadableTableInterface(ORMTableBase):
     """
     Mixin for ORM tables that can be loaded from CSV files.
@@ -21,12 +20,67 @@ class CSVLoadableTableInterface(ORMTableBase):
     __abstract__ = True
 
     @classmethod
+    def staging_tablename(cls: Type[CSVTableProtocol]) -> str:
+        return f"_staging_{cls.__tablename__}"
+    
+    @classmethod
+    def create_staging_table(cls: Type[CSVTableProtocol], session: so.Session):
+        table = cls.__table__
+        staging_name = cls.staging_tablename()
+
+        session.execute(sa.text(f"""
+            DROP TABLE IF EXISTS "{staging_name}";
+        """))
+
+        if session.bind is None:
+            raise RuntimeError("Session is not bound to an engine")
+        
+        dialect = session.bind.dialect.name 
+
+        if dialect == "postgresql":
+            session.execute(sa.text(f'''
+                CREATE UNLOGGED TABLE "{staging_name}"
+                (LIKE "{table.name}" INCLUDING ALL);
+            '''))
+        elif dialect == "sqlite":
+            session.execute(sa.text(f'''
+                CREATE TABLE "{staging_name}" AS
+                SELECT * FROM "{table.name}" WHERE 0;
+            '''))
+        else:
+            raise NotImplementedError(
+                f"Staging table creation not implemented for dialect '{dialect}'"
+            )
+        
+    @classmethod
+    def load_csv_to_staging(
+        cls: Type[CSVTableProtocol],
+        session: so.Session,
+        path: Path,
+        **kwargs,
+    ) -> int:
+        cls.create_staging_table(session)
+
+        staging_table = sa.Table(
+            cls.staging_tablename(),
+            cls.metadata,
+            autoload_with=session.bind,
+        )
+
+        return load_file(
+            cls=cls,
+            session=session,
+            path=path,
+            table_override=staging_table,
+            **kwargs,
+        )
+
+    @classmethod
     def load_csv(
         cls: Type[CSVTableProtocol],
         session: so.Session,
         path: Path,
         *,
-        delimiter: str = "\t",
         normalise: bool = True,
         dedupe: bool = False,
         chunksize: int | None = None,
@@ -51,6 +105,85 @@ class CSVLoadableTableInterface(ORMTableBase):
             dedupe_incl_db=dedupe_incl_db
         )
         
+        return total
+
+    @classmethod
+    def merge_from_staging(cls: Type[CSVTableProtocol], session: so.Session):
+        target = cls.__tablename__
+        staging = cls.staging_tablename()
+        pk_cols = cls.pk_names()
+
+        pk_join = " AND ".join(
+            f't."{c}" = s."{c}"' for c in pk_cols
+        )
+
+        if not session.bind:
+            raise RuntimeError("Session is not bound to an engine")
+        
+        dialect = session.bind.dialect.name
+        
+        if dialect == "postgresql":
+            pk_join = " AND ".join(
+                f't."{c}" = s."{c}"' for c in pk_cols
+            )
+
+            session.execute(sa.text(f"""
+                DELETE FROM "{target}" t
+                USING "{staging}" s
+                WHERE {pk_join};
+            """))
+
+        elif dialect == "sqlite":
+            if len(pk_cols) == 1:
+                pk = pk_cols[0]
+                session.execute(sa.text(f"""
+                    DELETE FROM "{target}"
+                    WHERE "{pk}" IN (
+                        SELECT "{pk}" FROM "{staging}"
+                    );
+                """))
+            else:
+                pk_match = " AND ".join(
+                    f't."{c}" = s."{c}"' for c in pk_cols
+                )
+                session.execute(sa.text(f"""
+                    DELETE FROM "{target}" t
+                    WHERE EXISTS (
+                        SELECT 1 FROM "{staging}" s
+                        WHERE {pk_match}
+                    );
+                """))
+        else:
+            raise NotImplementedError(
+                f"Merge not implemented for dialect '{dialect}'"
+            )
+
+
+        # 2. insert replacements
+        session.execute(sa.text(f"""
+            INSERT INTO "{target}"
+            SELECT * FROM "{staging}";
+        """))
+
+    @classmethod
+    def drop_staging_table(cls: Type[CSVTableProtocol], session: so.Session):
+        session.execute(
+            sa.text(f'DROP TABLE IF EXISTS "{cls.staging_tablename()}"')
+        )
+
+    @classmethod
+    def replace_from_csv(
+        cls: Type[CSVTableProtocol],
+        session: so.Session,
+        path: Path,
+        **kwargs,
+    ) -> int:
+        logger.info("Replacing data in %s from %s", cls.__tablename__, path.name)
+
+        total = cls.load_csv_to_staging(session, path, **kwargs)
+        cls.merge_from_staging(session)
+        cls.drop_staging_table(session)
+
         return total
 
     @classmethod

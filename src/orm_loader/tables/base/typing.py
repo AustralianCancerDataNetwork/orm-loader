@@ -4,6 +4,8 @@ import sqlalchemy as sa
 import pandas as pd
 from pathlib import Path
 
+
+
 @runtime_checkable
 class ORMTableProtocol(Protocol):
     
@@ -12,6 +14,8 @@ class ORMTableProtocol(Protocol):
     """
 
     __tablename__: ClassVar[str]
+    __table__: ClassVar[sa.Table]
+    metadata: ClassVar[sa.MetaData]
 
     @classmethod
     def mapper_for(cls) -> so.Mapper: ...
@@ -25,19 +29,38 @@ class ORMTableProtocol(Protocol):
     @classmethod
     def model_columns(cls) -> dict[str, sa.ColumnElement]: ...
 
+
 @runtime_checkable
 class CSVTableProtocol(ORMTableProtocol, Protocol):
     """
     Protocol for ORM tables that support CSV-based ingestion.
     """
-    
+
+    @classmethod
+    def staging_tablename(cls) -> str: ...
+
     @classmethod
     def normalise_dataframe(cls, df: pd.DataFrame) -> pd.DataFrame: ...
 
     @classmethod
     def dedupe_dataframe(cls, df: pd.DataFrame, *, session: so.Session | None = None, max_bind_vars: int = 10_000) -> pd.DataFrame: ...
-    
 
+    @classmethod
+    def create_staging_table(cls, session: so.Session) -> None: ...
+
+    @classmethod
+    def load_csv(cls, session: so.Session, path: Path, *, normalise: bool = True, dedupe: bool = False, chunksize: int | None = None, commit_on_chunk: bool = False, dedupe_incl_db: bool = False) -> int: ...
+
+    @classmethod
+    def load_csv_to_staging(cls, session: so.Session, path: Path, **kwargs) -> int: ...
+
+    @classmethod
+    def merge_from_staging(cls, session: so.Session) -> None: ...
+
+    @classmethod
+    def drop_staging_table(cls, session: so.Session) -> None: ...
+
+    
 @runtime_checkable
 class ParquetTableProtocol(ORMTableProtocol, Protocol):
     """
