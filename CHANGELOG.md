@@ -22,3 +22,6 @@
 
 ## 0.2.3
 - consistent api for loader args
+
+## 0.2.4
+- changed date parse for non-onco-branch vocab files

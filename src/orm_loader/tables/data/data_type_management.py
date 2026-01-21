@@ -2,14 +2,34 @@ from typing import Any, Callable
 import re, math
 from datetime import datetime, date
 from sqlalchemy.types import Integer, Float, Boolean, Date, DateTime, String, Text
+from dateutil import parser 
 
 _NUMERIC_RE = re.compile(r"^[+-]?\d+(\.\d+)?$")
 
 _AVAILABLE_DATE_FORMATS = (
-    "%d-%b-%Y",        # 24-AUG-2017 (Athena standard)
-    "%Y-%m-%d",        # ISO (sometimes appears)
-    "%d/%m/%Y",        # defensive
+    "%Y%m%d",          # 20170824 (athena standard)
+    "%d-%b-%Y",        # 24-AUG-2017 (oncology-branch vocab)
+    "%Y-%m-%d",        # 2017-08-24 (ISO)
+    "%d/%m/%Y",        # 24/08/2017 
 )
+
+def _dateutil_fallback(value: str) -> datetime | None:
+    try:
+        dt = parser.parse(
+            value,
+            dayfirst=True,
+            yearfirst=False,
+            fuzzy=False,  
+        )
+    except (ValueError, OverflowError):
+        return None
+
+    normalised = dt.strftime("%Y-%m-%d")
+    if normalised not in value:
+        return None
+
+    return dt
+
 
 def _parse_date(value: str) -> date | None:
     for fmt in _AVAILABLE_DATE_FORMATS:
@@ -18,7 +38,6 @@ def _parse_date(value: str) -> date | None:
         except ValueError:
             continue
     return None
-
 
 def _parse_datetime(value: str) -> datetime | None:
     # Try datetime first
@@ -32,7 +51,9 @@ def _parse_datetime(value: str) -> datetime | None:
     if d:
         return datetime.combine(d, datetime.min.time())
 
-    return None
+    return _dateutil_fallback(value)
+
+
 
 def _to_bool(value: Any) -> bool | None:
     if value is None or (isinstance(value, float) and math.isnan(value)):
