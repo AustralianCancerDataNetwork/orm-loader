@@ -1,7 +1,6 @@
-import datetime
 from sqlalchemy.types import Integer, Float, Boolean, Date, DateTime, String, Text
 from typing import Any, Callable
-import math, datetime
+import math
 from dataclasses import dataclass
 import pyarrow as pa
 import pyarrow.compute as pc

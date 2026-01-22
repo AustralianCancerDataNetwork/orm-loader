@@ -1,8 +1,8 @@
-from typing import Any, Callable
+from typing import Any
 import re, math
 from datetime import datetime, date
 from dateutil import parser 
-from sqlalchemy.types import Integer, Float, Boolean, Date, DateTime, String, Text
+from sqlalchemy.types import String, Text
 
 _NUMERIC_RE = re.compile(r"^[+-]?\d+(\.\d+)?$")
 

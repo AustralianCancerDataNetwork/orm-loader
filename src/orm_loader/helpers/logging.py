@@ -1,6 +1,6 @@
 from __future__ import annotations
 import logging
-from typing import Literal, Optional
+from typing import Optional
 import re
 
 SENSITIVE_KEYS = {

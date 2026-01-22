@@ -2,7 +2,9 @@
 from dataclasses import dataclass
 from typing import Optional, Type
 import sqlalchemy as sa
-import csv, importlib, pkgutil
+import csv
+import importlib
+import pkgutil
 import logging
 from ..tables.typing import ORMTableProtocol
 

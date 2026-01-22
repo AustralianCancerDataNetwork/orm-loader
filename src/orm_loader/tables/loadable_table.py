@@ -1,10 +1,8 @@
 import sqlalchemy as sa
 import sqlalchemy.orm as so
-import pandas as pd
-import pyarrow as pa
 import logging
 
-from typing import Type, ClassVar, Optional, Any
+from typing import Type, ClassVar, Optional
 from pathlib import Path
 
 from .orm_table import ORMTableBase

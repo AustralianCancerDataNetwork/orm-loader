@@ -1,7 +1,6 @@
 from typing import Protocol, ClassVar, runtime_checkable, TYPE_CHECKING, Optional, Type, Dict, Any
 import sqlalchemy.orm as so
 import sqlalchemy as sa
-import pandas as pd
 from pathlib import Path
 if TYPE_CHECKING:
     from ..loaders import LoaderContext, LoaderInterface

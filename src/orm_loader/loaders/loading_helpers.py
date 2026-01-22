@@ -1,10 +1,10 @@
 from __future__ import annotations
 from pathlib import Path
+import chardet
 import sqlalchemy as sa
 import sqlalchemy.orm as so
-import logging, chardet
+import logging
 import pyarrow as pa
-import pyarrow.dataset as ds
 import pyarrow.compute as pc
 import pyarrow.csv as pv
 
