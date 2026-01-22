@@ -1,5 +1,9 @@
 ## orm-loader
 
+[![Tests](https://github.com/AustralianCancerDataNetwork/orm-loader/actions/workflows/tests.yml/badge.svg)](
+https://github.com/AustralianCancerDataNetwork/orm-loader/actions/workflows/tests.yml
+)
+
 A lightweight, reusable foundation for building and validating SQLAlchemy-based clinical (and non-clinical) data models.
 
 This library provides general-purpose ORM infrastructure that sits below any specific data model (OMOP, PCORnet, custom CDMs, etc.), focusing on:
