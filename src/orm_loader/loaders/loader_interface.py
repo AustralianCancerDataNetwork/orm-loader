@@ -237,10 +237,7 @@ class ParquetLoader(LoaderInterface):
 
         if suffix == ".parquet":
             dataset = ds.dataset(ctx.path, format="parquet")
-            scanner = dataset.scan(
-                batch_size=ctx.chunksize or 64_000
-            )
-            yield from scanner.to_batches()
+            yield from dataset.to_batches(batch_size=ctx.chunksize or 64_000)
 
         elif suffix in {".csv", ".tsv"}:
             yield from conservative_load_parquet(ctx.path, wanted_cols=wanted_cols, chunksize=ctx.chunksize)
