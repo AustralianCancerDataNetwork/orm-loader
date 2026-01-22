@@ -1,6 +1,6 @@
 site_name: orm-loader
 site_description: Infrastructure primitives for SQLAlchemy-based data models
-site_url: https://example.org/orm-loader
+site_url: https://AustralianCancerDataNetwork.github.io/orm-loader
 repo_url: https://github.com/AustralianCancerDataNetwork/orm-loader
 repo_name: orm-loader
 
@@ -24,6 +24,8 @@ plugins:
   - mkdocstrings:
       handlers:
         python:
+          paths:
+            - src
           options:
             show_source: false
             docstring_style: numpy
