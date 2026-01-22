@@ -35,7 +35,7 @@ def arrow_drop_duplicates(
         return table
 
     sort_keys = [(name, "ascending") for name in pk_names]
-    sorted_idx = pc.sort_indices(table, sort_keys=sort_keys).   # type: ignore
+    sorted_idx = pc.sort_indices(table, sort_keys=sort_keys)    # type: ignore
     sorted_table = table.take(sorted_idx)
     diffs = []
     for name in pk_names:
