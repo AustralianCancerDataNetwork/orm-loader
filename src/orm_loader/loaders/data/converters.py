@@ -4,6 +4,12 @@ import math
 from dataclasses import dataclass
 import pyarrow as pa
 import pyarrow.compute as pc
+from .data_type_management import (
+    _parse_date,
+    _parse_datetime,
+    _to_bool,
+    _cast_string
+)
 
 _ARROW_TYPE_MAP = {
     Integer: pa.int64(),
@@ -12,13 +18,6 @@ _ARROW_TYPE_MAP = {
     Date: pa.date32(),
     DateTime: pa.timestamp("us"),
 }
-
-from .data_type_management import (
-    _parse_date,
-    _parse_datetime,
-    _to_bool,
-    _cast_string
-)
 
 @dataclass(frozen=True)
 class CastRule:
