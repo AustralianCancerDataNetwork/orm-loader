@@ -3,8 +3,6 @@ import sqlalchemy as sa
 import sqlalchemy.orm as so
 from sqlalchemy.orm import declarative_base
 
-from orm_loader.tables.serialisable_table import SerialisableTableInterface
-
 Base = declarative_base()
 
 class ExampleTable(SerialisableTableInterface, Base):

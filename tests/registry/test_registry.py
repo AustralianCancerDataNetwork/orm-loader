@@ -1,4 +1,3 @@
-from pathlib import Path
 import io
 from orm_loader.registry.registry import ModelRegistry
 import sqlalchemy as sa
