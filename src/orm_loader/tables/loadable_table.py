@@ -9,14 +9,44 @@ from pathlib import Path
 
 from .orm_table import ORMTableBase
 from .typing import CSVTableProtocol
-from ...loaders.loader_interface import LoaderInterface, LoaderContext, PandasLoader, ParquetLoader
-from ...loaders.loading_helpers import quick_load_pg
+from ..loaders.loader_interface import LoaderInterface, LoaderContext, PandasLoader, ParquetLoader
+from ..loaders.loading_helpers import quick_load_pg
 
 logger = logging.getLogger(__name__)
 
+
+"""
+CSV Loadable Table Mixins
+==================================
+
+This module provides mixins that add staged, file-based ingestion
+capabilities to SQLAlchemy ORM-mapped tables.
+
+The functionality here is intentionally infrastructure-focused and
+model-agnostic, supporting:
+- CSV-based bulk ingestion via staging tables
+- optional fast-path database COPY operations
+- database-portable merge strategies
+- pluggable loader implementations
+
+No schema semantics or domain rules are imposed.
+"""
+
+
 class CSVLoadableTableInterface(ORMTableBase):
     """
-    Mixin for ORM tables that can be loaded from CSV files.
+    Mixin for ORM tables that support staged CSV-based ingestion.
+
+    This interface implements a database-portable ingestion workflow
+    based on temporary staging tables. It supports:
+    - dialect-aware staging table creation
+    - fast-path COPY-based loading where available
+    - ORM-based fallback loading
+    - configurable merge strategies
+    - explicit staging table lifecycle management
+
+    The class is designed for controlled ingestion pipelines and does
+    not attempt to provide concurrency guarantees.
     """
 
     __abstract__ = True
@@ -24,6 +54,18 @@ class CSVLoadableTableInterface(ORMTableBase):
 
     @classmethod
     def staging_tablename(cls: Type[CSVTableProtocol]) -> str:
+        """
+        Return the name of the staging table for this model.
+
+        If a custom staging table name has been set on the class, it is
+        used; otherwise a default name derived from ``__tablename__``
+        is returned.
+
+        Returns
+        -------
+        str
+            The staging table name.
+        """
         if cls._staging_tablename:
             return cls._staging_tablename
         return f"_staging_{cls.__tablename__}"
@@ -33,6 +75,24 @@ class CSVLoadableTableInterface(ORMTableBase):
         cls: Type[CSVTableProtocol], 
         session: so.Session
     ):
+        """
+        Create a fresh staging table for ingestion.
+
+        Any existing staging table with the same name is dropped first.
+        The staging table schema mirrors the target table schema.
+
+        Parameters
+        ----------
+        session
+            An active SQLAlchemy session bound to an engine.
+
+        Raises
+        ------
+        RuntimeError
+            If the session is not bound to an engine.
+        NotImplementedError
+            If the database dialect is unsupported.
+        """
         table = cls.__table__
         session.execute(sa.text(f"""
             DROP TABLE IF EXISTS "{cls.staging_tablename()}";
@@ -69,8 +129,19 @@ class CSVLoadableTableInterface(ORMTableBase):
         cls: Type[CSVTableProtocol],
         session: so.Session,
     ) -> sa.Table:
+
         """
-        Return the reflected staging table, creating it if it does not exist.
+        Return the reflected staging table, creating it if necessary.
+
+        Parameters
+        ----------
+        session
+            An active SQLAlchemy session bound to an engine.
+
+        Returns
+        -------
+        sqlalchemy.Table
+            The reflected staging table.
         """
         if session.bind is None:
             raise RuntimeError("Session is not bound to an engine")
@@ -95,6 +166,24 @@ class CSVLoadableTableInterface(ORMTableBase):
         loader: LoaderInterface,
         loader_context: LoaderContext
     ) -> int:
+        """
+        Load data into the staging table.
+
+        This method attempts a fast-path database-native load where
+        supported, falling back to an ORM-based loader if necessary.
+
+        Parameters
+        ----------
+        loader
+            Loader implementation used for ORM-based loading.
+        loader_context
+            Context object containing session, path, and load options.
+
+        Returns
+        -------
+        int
+            Number of rows loaded into the staging table.
+        """
         if loader_context.session.bind is None:
             raise RuntimeError("Session is not bound to an engine")
 
@@ -129,10 +218,31 @@ class CSVLoadableTableInterface(ORMTableBase):
         loader: LoaderInterface,
         loader_context: LoaderContext
     ) -> int:
+        """
+        Load data into the staging table using an ORM-based loader.
+
+        Returns
+        -------
+        int
+            Number of rows loaded.
+        """
         return loader.orm_file_load(ctx=loader_context)
 
     @classmethod
     def _select_loader(cls: Type[CSVTableProtocol], path: Path) -> LoaderInterface:
+        """
+        Select an appropriate loader based on file type.
+
+        Parameters
+        ----------
+        path
+            Path to the input file.
+
+        Returns
+        -------
+        LoaderInterface
+            A loader instance suitable for the file type.
+        """
         suffix = path.suffix.lower()
         if suffix == ".parquet":
             return ParquetLoader()
@@ -154,6 +264,39 @@ class CSVLoadableTableInterface(ORMTableBase):
         merge_strategy: str = "replace",
     ) -> int:
         
+        """
+        Load a CSV (or CSV-like) file into the target table.
+
+        This method orchestrates the full staged ingestion lifecycle:
+        - staging table creation
+        - file loading
+        - merge into the target table
+        - staging table cleanup
+
+        Parameters
+        ----------
+        session
+            An active SQLAlchemy session.
+        path
+            Path to the input CSV or Parquet file.
+        loader
+            Optional explicit loader instance.
+        normalise
+            Whether to apply table-level normalisation.
+        dedupe
+            Whether to deduplicate incoming rows.
+        chunksize
+            Optional chunk size for incremental loading.
+        dedupe_incl_db
+            Whether deduplication should include existing database rows.
+        merge_strategy
+            Merge strategy to apply (e.g. ``replace`` or ``upsert``).
+
+        Returns
+        -------
+        int
+            Number of rows loaded.
+        """
 
         logger.debug(f"Loading CSV for {cls.__tablename__} via staging table from {path}")
 
@@ -192,6 +335,12 @@ class CSVLoadableTableInterface(ORMTableBase):
         pk_cols: list[str],
         dialect: str
     ):
+        """
+        Merge staging data by replacing existing rows.
+
+        Existing target rows matching the staging primary keys are
+        deleted prior to insertion.
+        """
         if dialect == "postgresql":
             pk_join = " AND ".join(
                 f't."{c}" = s."{c}"' for c in pk_cols
@@ -231,6 +380,9 @@ class CSVLoadableTableInterface(ORMTableBase):
         target: str,
         staging: str
         ):
+        """
+        Insert all rows from the staging table into the target table.
+        """
         session.execute(sa.text(f"""
             INSERT INTO "{target}"
             SELECT * FROM "{staging}";
@@ -246,6 +398,9 @@ class CSVLoadableTableInterface(ORMTableBase):
         pk_cols: list[str],
         dialect: str
     ):
+        """
+        Merge staging data using an upsert strategy.
+        """
         if dialect == "postgresql":
             # INSERT … ON CONFLICT DO NOTHING
             session.execute(sa.text(f"""
@@ -269,6 +424,16 @@ class CSVLoadableTableInterface(ORMTableBase):
         session: so.Session, 
         merge_strategy: str = "replace"
     ):
+        """
+        Merge data from the staging table into the target table.
+
+        Parameters
+        ----------
+        session
+            An active SQLAlchemy session.
+        merge_strategy
+            Merge strategy to apply.
+        """
         target = cls.__tablename__
         staging = cls.staging_tablename()
         pk_cols = cls.pk_names()
@@ -303,6 +468,9 @@ class CSVLoadableTableInterface(ORMTableBase):
     
     @classmethod
     def drop_staging_table(cls: Type[CSVTableProtocol], session: so.Session):
+        """
+        Drop the staging table if it exists.
+        """
         session.execute(
             sa.text(f'DROP TABLE IF EXISTS "{cls.staging_tablename()}"')
         )
@@ -310,28 +478,15 @@ class CSVLoadableTableInterface(ORMTableBase):
     @classmethod
     def csv_columns(cls) -> dict[str, sa.ColumnElement]:
         """
-        Return a mapping of CSV column names to SQLAlchemy columns.
-        By default, this is the same as model_columns().
-        Override this method to provide custom mappings.
+        Return a mapping of CSV column names to model columns.
+
+        By default this is equivalent to :meth:`model_columns`.
+        Override this method to implement custom column mappings.
+
+        Returns
+        -------
+        dict[str, sqlalchemy.ColumnElement]
+            Mapping of input column names to SQLAlchemy columns.
         """
         return cls.model_columns()
     
-class ParquetLoadableTableMixin(ORMTableBase):
-    """
-    Mixin for ORM tables that can be loaded from Parquet files.
-    """
-
-    __abstract__ = True
-
-    @classmethod
-    def load_parquet(
-        cls,
-        session: so.Session,
-        path: Path,
-        *,
-        columns: list[str] | None = None,
-        filters: list[tuple] | None = None,
-        commit_on_chunk: bool = False,
-    ) -> int:
-        raise NotImplementedError("Parquet loading not implemented for this table")
-

@@ -40,3 +40,6 @@
 
 ## 0.3.4
 - bugfix: string cast had typing wrong
+
+## 0.3.5
+- added mkdocs and docstrings

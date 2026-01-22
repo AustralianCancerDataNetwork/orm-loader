@@ -1,8 +1,7 @@
 from __future__ import annotations
-from typing import Type, Protocol
+from typing import Protocol
 from .validation_report import ValidationIssue, SeverityLevel
-from .registry import ModelRegistry, ModelDescriptor, TableSpec, FieldSpec
-from ..tables.base.typing import ORMTableProtocol
+from .registry import ModelDescriptor, TableSpec, FieldSpec
 
 class Validator(Protocol):
     def validate(

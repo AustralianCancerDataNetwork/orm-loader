@@ -4,13 +4,23 @@ import sqlalchemy as sa
 import pandas as pd
 from pathlib import Path
 if TYPE_CHECKING:
-    from ...loaders import LoaderContext, LoaderInterface
+    from ..loaders import LoaderContext, LoaderInterface
 
 @runtime_checkable
 class ORMTableProtocol(Protocol):
-    
     """
     Structural protocol for ORM-mapped *table classes*.
+
+    This protocol defines the minimal structural surface expected of
+    SQLAlchemy ORM table classes within ``orm-loader``.
+
+    It is intentionally lightweight and model-agnostic, focusing on:
+    - core SQLAlchemy table attributes
+    - primary key introspection
+    - column discovery helpers
+
+    This protocol is used for static typing, runtime checks, and to
+    decouple higher-level infrastructure from concrete base classes.
     """
 
     __tablename__: ClassVar[str]
@@ -33,7 +43,17 @@ class ORMTableProtocol(Protocol):
 @runtime_checkable
 class CSVTableProtocol(ORMTableProtocol, Protocol):
     """
-    Protocol for ORM tables that support CSV-based ingestion.
+    Structural protocol for ORM tables that support CSV-based ingestion.
+
+    This protocol captures the expected interface for tables that can
+    participate in staged, file-based loading workflows using CSV input.
+
+    It defines the contract for:
+    - staging table management
+    - loader selection
+    - CSV ingestion and merging semantics
+
+    No assumptions are made about the underlying database or schema.
     """
 
     _staging_tablename: ClassVar[Optional[str]] = None
@@ -84,32 +104,18 @@ class CSVTableProtocol(ORMTableProtocol, Protocol):
     @classmethod
     def _merge_upsert(cls, session: so.Session, target: str, staging: str, pk_cols: list[str], dialect: str) -> None: ...
     
-@runtime_checkable
-class ParquetTableProtocol(ORMTableProtocol, Protocol):
-    """
-    Protocol for ORM tables that support Parquet-based ingestion.
-
-    Normalisation and deduplication semantics are inherited
-    from ORMTableProtocol / table mixins.
-    """
-
-    @classmethod
-    def load_parquet(
-        cls: Type["ParquetTableProtocol"],
-        session: so.Session,
-        path: Path,
-        *,
-        columns: list[str] | None = None,
-        filters: list[tuple] | None = None,
-        commit_on_chunk: bool = False,
-    ) -> int: ...
-
 
 @runtime_checkable
 class SerializedTableProtocol(Protocol):
     """
-    Protocol for ORM instances that can be serialized to dict / JSON
-    in a stable, deterministic way.
+    Structural protocol for ORM instances that support stable serialisation.
+
+    This protocol defines the expected interface for ORM row instances
+    that can be converted to dictionaries, JSON strings, and deterministic
+    fingerprints.
+
+    It is primarily used for typing and interoperability with downstream
+    consumers such as validators, APIs, and audit tooling.
     """
 
     def to_dict(

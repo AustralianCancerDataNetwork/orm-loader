@@ -1,0 +1,51 @@
+site_name: orm-loader
+site_description: Infrastructure primitives for SQLAlchemy-based data models
+site_url: https://example.org/orm-loader
+repo_url: https://github.com/AustralianCancerDataNetwork/orm-loader
+repo_name: orm-loader
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.expand
+    - navigation.path
+    - content.code.copy
+
+markdown_extensions:
+  - admonition
+  - footnotes
+  - tables
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            show_source: false
+            docstring_style: numpy
+
+nav:
+  - Home: index.md
+  - Tables:
+      - Overview: tables/index.md
+      - ORMTableBase: tables/orm_table.md
+      - SerialisableTableInterface: tables/serialisable_table.md
+      - Loadable Tables: tables/loadable_table.md
+      - IdAllocator: tables/allocators.md
+      - Typing Protocols: tables/typing.md
+  - Registry & Validation:
+      - Overview: registry/index.md
+      - Model Registry: registry/registry.md
+      - Validation Rules: registry/validation.md
+      - Validation Runner: registry/validation_runner.md
+      - Validation Report: registry/validation_report.md
+      - Model Descriptors: registry/descriptors.md
+  - Loaders:
+      - Overview: loaders/index.md
+      - Loader Context & Diagnostics: loaders/context.md
+      - Loader Implementations: loaders/loaders.md
+      - Loader Helpers: loaders/helpers.md

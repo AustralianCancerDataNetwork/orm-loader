@@ -1,6 +1,6 @@
 [project]
 name = "orm-loader"
-version = "0.3.4"
+version = "0.3.5"
 description = "Generic base classes to handle ORM functionality for multiple downstream datamodels"
 readme = "README.md"
 authors = [
@@ -23,6 +23,9 @@ dev = [
     "mypy>=1.19.1",
     "pytest>=9.0.2",
     "ruff>=0.14.11",
+    "mkdocs-material>=9.7.1",
+    "mkdocstrings-python>=2.0.1",
+    "mkdocs>=1.6.1"
 ]
 
 [tool.setuptools]

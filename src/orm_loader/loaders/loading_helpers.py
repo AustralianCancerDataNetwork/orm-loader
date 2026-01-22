@@ -10,6 +10,22 @@ import pyarrow.csv as pv
 
 logger = logging.getLogger(__name__)
 
+"""
+Loader Helper Functions
+=======================
+
+Utility functions supporting file loading and ingestion workflows.
+
+Includes helpers for:
+- delimiter and encoding detection
+- conservative CSV parsing via pyarrow
+- duplicate detection in columnar data
+- PostgreSQL COPY-based bulk loading
+
+These helpers are intentionally low-level and stateless.
+"""
+
+
 def infer_encoding(file):
     with open(file, 'rb') as infile:
         encoding = chardet.detect(infile.read(10000))

@@ -11,10 +11,53 @@ from logging import getLogger
 logger = getLogger(__name__)
 
 if TYPE_CHECKING:
-    from ..tables.base.typing import CSVTableProtocol
+    from ..tables.typing import CSVTableProtocol
+
+
+"""
+Loader Data Structures
+======================
+
+This module defines shared data structures and base interfaces used by
+file loaders.
+
+It includes:
+- the LoaderContext coordination object
+- the abstract LoaderInterface
+- casting statistics helpers for diagnostics and logging
+
+No file I/O or database-specific loading logic is implemented here.
+"""
+
 
 @dataclass(frozen=True)
 class LoaderContext:
+
+    """
+    Immutable context object passed through loader operations.
+
+    The LoaderContext encapsulates all state required to load a file
+    into a staging table, without relying on global variables.
+
+    Attributes
+    ----------
+    tableclass
+        ORM table class being loaded.
+    session
+        Active SQLAlchemy session.
+    path
+        Path to the source data file.
+    staging_table
+        SQLAlchemy Table object representing the staging table.
+    chunksize
+        Optional chunk size for incremental loading.
+    normalise
+        Whether to apply type casting / normalisation.
+    dedupe
+        Whether to perform deduplication.
+    dedupe_incl_db
+        Whether deduplication should include existing database rows.
+    """
     tableclass: Type["CSVTableProtocol"]
     session: so.Session
     path: Path
@@ -26,9 +69,35 @@ class LoaderContext:
     dedupe_incl_db: bool = False
 
 class LoaderInterface:
+
+    """
+    Abstract interface for file loaders.
+
+    Loader implementations are responsible for:
+    - reading input files
+    - optional chunking
+    - optional deduplication
+    - optional normalisation
+    - loading into a staging table
+
+    Concrete loaders must implement ``orm_file_load`` and ``dedupe``.
+    """
+
     @classmethod
     def orm_file_load(cls, ctx: LoaderContext) -> int:
-        """Load ctx.path into ctx.staging_table and return row count."""
+        """
+        Load a file into the staging table.
+
+        Parameters
+        ----------
+        ctx
+            Loader context.
+
+        Returns
+        -------
+        int
+            Number of rows loaded.
+        """
         raise NotImplementedError
 
     @classmethod
@@ -38,7 +107,23 @@ class LoaderInterface:
         session: so.Session,
         dataframe: pd.DataFrame
     ) -> int:
-        """Load a chunk of data into the given ORM table class (staging table)."""
+        """
+        Load a single DataFrame chunk into the staging table.
+
+        Parameters
+        ----------
+        staging_cls
+            SQLAlchemy Table object representing the staging table.
+        session
+            Active SQLAlchemy session.
+        dataframe
+            DataFrame containing rows to insert.
+
+        Returns
+        -------
+        int
+            Number of rows inserted.
+        """
         if dataframe.empty:
             return 0
         records = cast(
@@ -57,10 +142,42 @@ class LoaderInterface:
     
     @classmethod
     def dedupe(cls, data: pd.DataFrame | pa.Table, ctx: LoaderContext) -> Any:
+        """
+        Deduplicate incoming data.
+
+        Concrete implementations define deduplication semantics.
+
+        Parameters
+        ----------
+        data
+            Input data.
+        ctx
+            Loader context.
+
+        Returns
+        -------
+        Any
+            Deduplicated data.
+        """
         raise NotImplementedError
     
     @classmethod
     def _dedupe_db(cls, df: pd.DataFrame, ctx: LoaderContext) -> pd.DataFrame:
+        """
+        Perform database-level deduplication against existing rows.
+
+        Parameters
+        ----------
+        df
+            Incoming DataFrame.
+        ctx
+            Loader context.
+
+        Returns
+        -------
+        pandas.DataFrame
+            DataFrame with rows already present in the database removed.
+        """
         pk_names = ctx.tableclass.pk_names()
         pk_tuples = list(df[pk_names].itertuples(index=False, name=None))
         if not pk_tuples:
@@ -124,18 +241,30 @@ class TableCastingStats:
         value: Any,
         example_limit: int = 3,
     ):
+        """
+        Record a casting failure for a column.
+        """
         if column not in self.columns:
             self.columns[column] = ColumnCastingStats()
         self.columns[column].record(value, example_limit=example_limit)
 
     @property
     def total_failures(self) -> int:
+        """
+        Total number of casting failures.
+        """
         return sum(stats.count for stats in self.columns.values())
 
     def has_failures(self) -> bool:
+        """
+        Whether any casting failures occurred.
+        """
         return self.total_failures > 0
     
     def to_dict(self) -> dict[str, dict[str, Any]]:
+        """
+        Return a dictionary representation of casting statistics.
+        """
         return {
             col: {
                 "count": stats.count,

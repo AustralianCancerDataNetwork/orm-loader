@@ -1,14 +1,52 @@
 
 from dataclasses import dataclass
-from typing import Optional, Iterable, Type
+from typing import Optional, Type
 import sqlalchemy as sa
 import csv, importlib, pkgutil
 import logging
-from ..tables.base.typing import ORMTableProtocol
+from ..tables.typing import ORMTableProtocol
+
 logger = logging.getLogger(__name__)
+
+
+"""
+Model Registry and Specifications
+=================================
+
+This module provides infrastructure for registering ORM models and
+comparing them against external table and field specifications.
+
+It is designed to support:
+- schema-aware but domain-agnostic validation
+- external specifications (currently CSV-based, OMOP-style)
+- structural inspection of ORM models
+- downstream validation and reporting workflows
+
+No domain rules or business logic are enforced here.
+"""
 
 @dataclass(frozen=True)
 class TableSpec:
+
+    """
+    Table-level specification descriptor.
+
+    Represents metadata about a table as defined in an external
+    specification source.
+
+    Attributes
+    ----------
+    table_name
+        Logical name of the table.
+    schema
+        Schema or namespace in which the table is defined.
+    is_required
+        Whether the table is required by the specification.
+    description
+        Human-readable description of the table.
+    user_guidance
+        Optional additional guidance for implementers.
+    """
     table_name: str
     schema: str
     is_required: bool
@@ -17,6 +55,31 @@ class TableSpec:
 
 @dataclass(frozen=True)
 class FieldSpec:
+    """
+    Field-level specification descriptor.
+
+    Represents metadata about a field/column as defined in an external
+    specification source.
+
+    Attributes
+    ----------
+    table_name
+        Name of the table to which the field belongs.
+    field_name
+        Name of the field/column.
+    data_type
+        Declared data type in the specification.
+    is_required
+        Whether the field is required.
+    is_primary_key
+        Whether the field is part of the primary key.
+    is_foreign_key
+        Whether the field is a foreign key.
+    fk_table
+        Referenced table name, if the field is a foreign key.
+    fk_field
+        Referenced field name, if the field is a foreign key.
+    """
     table_name: str
     field_name: str
     data_type: str
@@ -28,6 +91,27 @@ class FieldSpec:
 
 @dataclass(frozen=True)
 class ModelDescriptor:
+    """
+    Normalised, inspectable descriptor for an ORM model class.
+
+    This descriptor is derived from SQLAlchemy inspection and captures
+    the structural characteristics of a mapped ORM table.
+
+    It is used as the primary input to validation rules.
+
+    Attributes
+    ----------
+    model_class
+        The ORM model class.
+    table_name
+        The database table name.
+    columns
+        Mapping of column names to SQLAlchemy Column objects.
+    primary_keys
+        Set of primary key column names.
+    foreign_keys
+        Mapping of column name to referenced (table, field).
+    """
     model_class: Type[ORMTableProtocol]
     table_name: str
     columns: dict[str, sa.Column]
@@ -37,6 +121,24 @@ class ModelDescriptor:
 
     @classmethod
     def from_model(cls, model: Type[ORMTableProtocol]) -> "ModelDescriptor":
+        """
+        Construct a ModelDescriptor from an ORM model class.
+
+        Parameters
+        ----------
+        model
+            An ORM-mapped table class.
+
+        Returns
+        -------
+        ModelDescriptor
+            A descriptor derived from SQLAlchemy inspection.
+
+        Raises
+        ------
+        TypeError
+            If the provided class is not a mapped ORM model.
+        """
         mapper = sa.inspect(model)
         if not mapper:
             raise TypeError(f"{model.__name__} is not mapped on this base")
@@ -60,11 +162,33 @@ class ModelDescriptor:
     
     @property
     def cls(self) -> Type[ORMTableProtocol]:
+        """
+        Alias for the underlying ORM model class.
+
+        Returns
+        -------
+        Type[ORMTableProtocol]
+            The ORM model class.
+        """
         return self.model_class
 
 
 def load_table_specs(csv_resource) -> dict[str, TableSpec]:
-    """Currently OMOP specifications only."""
+    """
+    Load table specifications from a CSV resource.
+
+    The CSV is expected to follow the OMOP table specification format.
+
+    Parameters
+    ----------
+    csv_resource
+        A resource object providing an ``open`` method.
+
+    Returns
+    -------
+    dict[str, TableSpec]
+        Mapping of table name to table specification.
+    """
     out = {}
     with csv_resource.open("r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
@@ -79,7 +203,22 @@ def load_table_specs(csv_resource) -> dict[str, TableSpec]:
     return out
 
 def load_field_specs(csv_resource) -> dict[str, dict[str, FieldSpec]]:
-    """Currently OMOP specifications only."""
+
+    """
+    Load field specifications from a CSV resource.
+
+    The CSV is expected to follow the OMOP field specification format.
+
+    Parameters
+    ----------
+    csv_resource
+        A resource object providing an ``open`` method.
+
+    Returns
+    -------
+    dict[str, dict[str, FieldSpec]]
+        Mapping of table name to mappings of field name to field specification.
+    """
     out: dict[str, dict[str, FieldSpec]] = {}
     with csv_resource.open("r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
@@ -103,6 +242,12 @@ class ModelRegistry:
     """
     Holds a registry of ORM models along with their specifications.
 
+    The registry coordinates:
+    - loading table and field specifications
+    - registering ORM model classes
+    - identifying missing or required tables
+    - providing model descriptors for validation
+
     Load table and field specifications from CSV files (currently only OMOP format supported).
     TODO: support generalised specification formats via LinkML or similar.
 
@@ -111,9 +256,22 @@ class ModelRegistry:
 
     Model-specific constraints can be created to extend context-specific validation such 
     as OMOP domain constraints, value set adherence, etc.
+
+    Validation logic itself is implemented elsewhere and consumes the
+    registry as contextual input.
     """
 
     def __init__(self, *, model_version: str, model_name: Optional[str] = None):
+        """
+        Initialise a new model registry.
+
+        Parameters
+        ----------
+        model_version
+            Version identifier for the model set.
+        model_name
+            Optional human-readable name for the model set.
+        """
         self.model_version: str = model_version
         self.model_name = model_name
         self._models: dict[str, ModelDescriptor] = {}
@@ -121,33 +279,102 @@ class ModelRegistry:
         self._field_specs: dict[str, dict[str, FieldSpec]] = {}
 
     def load_table_specs(self, *, table_csv, field_csv) -> None:
+        """
+        Load table and field specifications into the registry.
+
+        Parameters
+        ----------
+        table_csv
+            CSV resource containing table specifications.
+        field_csv
+            CSV resource containing field specifications.
+        """
         self._table_specs = load_table_specs(table_csv)
         self._field_specs = load_field_specs(field_csv)
 
     def register_model(self, model: type) -> None:
+        """
+        Register a single ORM model class.
+
+        Parameters
+        ----------
+        model
+            ORM-mapped table class.
+        """
         desc = ModelDescriptor.from_model(model)
         self._models[desc.table_name] = desc
 
     def models(self) -> dict[str, ModelDescriptor]:
+        """
+        Return registered models keyed by table name.
+
+        Returns
+        -------
+        dict[str, ModelDescriptor]
+            Registered model descriptors.
+        """
         return self._models
 
     def register_models(self, models: list[type]) -> None:
+        """
+        Register multiple ORM model classes.
+
+        Parameters
+        ----------
+        models
+            Iterable of ORM-mapped table classes.
+        """
         for m in models:
             self.register_model(m)
 
     def known_tables(self) -> set[str]:
+        """
+        Return table names defined in the specification.
+
+        Returns
+        -------
+        set[str]
+            Known table names.
+        """
         return set(self._table_specs.keys())
 
     def registered_tables(self) -> set[str]:
+        """
+        Return table names registered from ORM models.
+
+        Returns
+        -------
+        set[str]
+            Registered table names.
+        """
         return set(self._models.keys())
 
     def missing_required_tables(self) -> set[str]:
+        """
+        Return required tables missing from the registered models.
+
+        Returns
+        -------
+        set[str]
+            Required table names that are not implemented.
+        """
         return {
             t for t, spec in self._table_specs.items()
             if spec.is_required and t not in self._models
         }
     
     def discover_models(self, package: str) -> None:
+        """
+        Discover and register ORM models from a Python package.
+
+        All non-abstract ORM-mapped classes found in the package and its
+        submodules are registered.
+
+        Parameters
+        ----------
+        package
+            Dotted import path of the package to scan.
+        """
         module = importlib.import_module(package)
 
         for _, modname, _ in pkgutil.walk_packages(

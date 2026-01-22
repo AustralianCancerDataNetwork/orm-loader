@@ -16,16 +16,24 @@ from .data import perform_cast, cast_arrow_column
 logger = logging.getLogger(__name__)
 
 """
+File Loader Implementations
+===========================
+
+This module provides concrete loader implementations for ingesting
+CSV- and Parquet-based datasets into staging tables.
+
+Loaders are intentionally conservative and designed to handle:
+- untrusted data sources
+- incremental loads
+- partial failures
+- schema drift
+
+Where supported (PostgreSQL), fast-path COPY-based loading is available
+via helper utilities.
+
 
 These loader interfaces implement a very conservative loading strategy for handling data 
 from untrusted sources and accommodating updates and deletes for incremental loads.
-
-Within the CSVLoadableTableInterface class, assuming the target database is PostgreSQL,
-a rapid loading pathway is provided via the 'quick_load_pg' helper function. This function
-leverages PostgreSQL's efficient COPY command to facilitate fast data ingestion directly
-from CSV files into staging tables. This approach is particularly beneficial for large datasets,
-as it minimizes the overhead associated with traditional row-by-row insertion methods, but it is 
-brittle if there are any data quality issues.
 
 """
 
