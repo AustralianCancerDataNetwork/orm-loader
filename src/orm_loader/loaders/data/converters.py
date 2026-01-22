@@ -17,7 +17,6 @@ from .data_type_management import (
     _parse_date,
     _parse_datetime,
     _to_bool,
-    _to_numeric_string,
     _cast_string
 )
 

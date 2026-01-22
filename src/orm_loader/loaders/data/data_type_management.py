@@ -1,5 +1,6 @@
 from typing import Any
-import re, math
+import re
+import math
 from datetime import datetime, date
 from dateutil import parser 
 from sqlalchemy.types import String, Text
