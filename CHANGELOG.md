@@ -37,3 +37,6 @@
 
 ## 0.3.3
 - moved data handling converters
+
+## 0.3.4
+- bugfix: string cast had typing wrong

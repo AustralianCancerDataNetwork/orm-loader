@@ -22,13 +22,11 @@ from .data_type_management import (
     _cast_string
 )
 
-
 @dataclass(frozen=True)
 class CastRule:
     sa_type: type
     scalar: Callable[[Any, Any], Any]
     arrow: Callable | None = None   # optional vectorised impl
-
 
 CAST_RULES: list[CastRule] = [
     CastRule(Integer, lambda v, _: int(v) if v is not None else None),

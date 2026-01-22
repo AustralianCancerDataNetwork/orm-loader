@@ -90,7 +90,7 @@ def _to_numeric_string(value: str | None) -> str | None:
     return str(int(value))
 
 
-def _cast_string(value: Any, sa_col) -> str | None:
+def _cast_string(value: Any, sa_type) -> str | None:
     if value is None:
         return None
 
@@ -103,8 +103,8 @@ def _cast_string(value: Any, sa_col) -> str | None:
 
     s = _to_numeric_string(s) or ""
 
-    if isinstance(sa_col.type, (String, Text)) and sa_col.type.length:
-        if len(s) > sa_col.type.length:
-            return s[: sa_col.type.length]
+    if isinstance(sa_type, (String, Text)) and sa_type.length:
+        if len(s) > sa_type.length:
+            return s[: sa_type.length]
 
     return s
