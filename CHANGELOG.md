@@ -31,3 +31,6 @@
 
 ## 0.3.1
 - typo
+
+## 0.3.2
+- bugfix: branching stage-load logic for sqlite 

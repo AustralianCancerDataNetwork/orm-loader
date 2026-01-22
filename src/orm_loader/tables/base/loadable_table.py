@@ -79,10 +79,7 @@ class CSVLoadableTableInterface(ORMTableBase):
         staging_name = cls.staging_tablename()
 
         if not inspector.has_table(staging_name):
-            logger.warning(
-                "Staging table %s does not exist; recreating",
-                staging_name,
-            )
+            logger.warning(f"Staging table {staging_name} does not exist; recreating",)
             cls.create_staging_table(session)
 
         return sa.Table(
@@ -103,7 +100,6 @@ class CSVLoadableTableInterface(ORMTableBase):
         dialect = loader_context.session.bind.dialect.name
         total = 0
 
-
         try:
             cls.create_staging_table(loader_context.session)
 
@@ -114,13 +110,14 @@ class CSVLoadableTableInterface(ORMTableBase):
                         session=loader_context.session,
                         tablename=cls.staging_tablename(),
                     )
+                    return total
                 except Exception as e:
                     logger.warning(f"COPY failed for {cls.staging_tablename()}: {e}")
                     logger.info('Falling back to ORM-based load functionality')
-                    return cls.orm_staging_load(
-                        loader=loader,
-                        loader_context=loader_context
-                    )   
+            total = cls.orm_staging_load(
+                loader=loader,
+                loader_context=loader_context
+            )   
         finally:
             cls._staging_tablename = None
         return total
@@ -216,12 +213,12 @@ class CSVLoadableTableInterface(ORMTableBase):
                 """))
             else:
                 pk_match = " AND ".join(
-                    f't."{c}" = s."{c}"' for c in pk_cols
+                    f'"{target}"."{c}" = "{staging}"."{c}"' for c in pk_cols
                 )
                 session.execute(sa.text(f"""
-                    DELETE FROM "{target}" t
+                    DELETE FROM "{target}"
                     WHERE EXISTS (
-                        SELECT 1 FROM "{staging}" s
+                        SELECT 1 FROM "{staging}"
                         WHERE {pk_match}
                     );
                 """))
