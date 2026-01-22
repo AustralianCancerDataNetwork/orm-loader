@@ -25,3 +25,6 @@
 
 ## 0.2.4
 - changed date parse for non-onco-branch vocab files
+
+## 0.3.0
+- significant updates to handle loaders as class objects

@@ -3,8 +3,7 @@ import sqlalchemy.orm as so
 import sqlalchemy as sa
 import pandas as pd
 from pathlib import Path
-
-
+from ...loaders import LoaderContext, LoaderInterface
 
 @runtime_checkable
 class ORMTableProtocol(Protocol):
@@ -36,29 +35,47 @@ class CSVTableProtocol(ORMTableProtocol, Protocol):
     Protocol for ORM tables that support CSV-based ingestion.
     """
 
+    _staging_tablename: ClassVar[Optional[str]] = None
+
     @classmethod
     def staging_tablename(cls) -> str: ...
 
     @classmethod
-    def normalise_dataframe(cls, df: pd.DataFrame) -> pd.DataFrame: ...
-
-    @classmethod
-    def dedupe_dataframe(cls, df: pd.DataFrame, *, session: so.Session | None = None, max_bind_vars: int = 10_000) -> pd.DataFrame: ...
+    def _select_loader(cls, path: Path) -> LoaderInterface: ...
 
     @classmethod
     def create_staging_table(cls, session: so.Session) -> None: ...
 
     @classmethod
-    def load_csv(cls, session: so.Session, path: Path, *, normalise: bool = True, dedupe: bool = False, chunksize: int | None = None, commit_on_chunk: bool = False, dedupe_incl_db: bool = False) -> int: ...
+    def load_staging(cls: Type["CSVTableProtocol"], loader: LoaderInterface, loader_context: LoaderContext) -> int: ...
 
     @classmethod
-    def load_csv_to_staging(cls, session: so.Session, path: Path, **kwargs) -> int: ...
+    def load_csv(
+        cls, 
+        session: so.Session, 
+        path: Path, 
+        *, 
+        normalise: bool = True, 
+        dedupe: bool = False, 
+        chunksize: int | None = None, 
+        merge_strategy: str = "replace", 
+        dedupe_incl_db: bool = False
+    ) -> int: ...
+
+    @classmethod
+    def orm_staging_load(cls, loader: LoaderInterface,loader_context: LoaderContext) -> int: ...
+
+    @classmethod
+    def get_staging_table(cls, session: so.Session) -> sa.Table: ...
 
     @classmethod
     def merge_from_staging(cls, session: so.Session, merge_strategy: str) -> None: ...
 
     @classmethod
     def drop_staging_table(cls, session: so.Session) -> None: ...
+
+    @classmethod
+    def _merge_insert(cls, session: so.Session, target: str, staging: str) -> None: ...
 
     @classmethod
     def _merge_replace(cls, session: so.Session, target: str, staging: str, pk_cols: list[str], dialect: str) -> None: ...

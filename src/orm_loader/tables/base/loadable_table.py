@@ -1,16 +1,17 @@
-from .orm_table import ORMTableBase
 import sqlalchemy as sa
 import sqlalchemy.orm as so
-from typing import Type
 import pandas as pd
-from pathlib import Path
+import pyarrow as pa
 import logging
 
+from typing import Type, ClassVar, Optional, Any
+from pathlib import Path
+
+from .orm_table import ORMTableBase
 from .typing import CSVTableProtocol
-from ..data.ingestion import cast_dataframe_to_model, load_file
+from ...loaders import LoaderInterface, LoaderContext, PandasLoader, quick_load_pg, ParquetLoader
 
 logger = logging.getLogger(__name__)
-
 
 class CSVLoadableTableInterface(ORMTableBase):
     """
@@ -18,18 +19,22 @@ class CSVLoadableTableInterface(ORMTableBase):
     """
 
     __abstract__ = True
+    _staging_tablename: ClassVar[Optional[str]] = None
 
     @classmethod
     def staging_tablename(cls: Type[CSVTableProtocol]) -> str:
+        if cls._staging_tablename:
+            return cls._staging_tablename
         return f"_staging_{cls.__tablename__}"
     
     @classmethod
-    def create_staging_table(cls: Type[CSVTableProtocol], session: so.Session):
+    def create_staging_table(
+        cls: Type[CSVTableProtocol], 
+        session: so.Session
+    ):
         table = cls.__table__
-        staging_name = cls.staging_tablename()
-
         session.execute(sa.text(f"""
-            DROP TABLE IF EXISTS "{staging_name}";
+            DROP TABLE IF EXISTS "{cls.staging_tablename()}";
         """))
 
         if session.bind is None:
@@ -39,42 +44,103 @@ class CSVLoadableTableInterface(ORMTableBase):
 
         if dialect == "postgresql":
             session.execute(sa.text(f'''
-                CREATE UNLOGGED TABLE "{staging_name}"
+                CREATE UNLOGGED TABLE "{cls.staging_tablename()}"
                 (LIKE "{table.name}" INCLUDING ALL);
             '''))
         elif dialect == "sqlite":
             session.execute(sa.text(f'''
-                CREATE TABLE "{staging_name}" AS
+                CREATE TABLE "{cls.staging_tablename()}" AS
                 SELECT * FROM "{table.name}" WHERE 0;
             '''))
         else:
             raise NotImplementedError(
                 f"Staging table creation not implemented for dialect '{dialect}'"
             )
+        # query the sense of having internal commit here, but for now 
+        # it is required for the ORM-based fallback loader to function 
+        # cleanly for external pipeline purposes
+
         session.commit()
-        
+
+
     @classmethod
-    def load_csv_to_staging(
+    def get_staging_table(
         cls: Type[CSVTableProtocol],
         session: so.Session,
-        path: Path,
-        **kwargs,
-    ) -> int:
-        cls.create_staging_table(session)
+    ) -> sa.Table:
+        """
+        Return the reflected staging table, creating it if it does not exist.
+        """
+        if session.bind is None:
+            raise RuntimeError("Session is not bound to an engine")
 
-        staging_table = sa.Table(
-            cls.staging_tablename(),
+        engine = session.get_bind()
+        inspector = sa.inspect(engine)
+        staging_name = cls.staging_tablename()
+
+        if not inspector.has_table(staging_name):
+            logger.warning(
+                "Staging table %s does not exist; recreating",
+                staging_name,
+            )
+            cls.create_staging_table(session)
+
+        return sa.Table(
+            staging_name,
             cls.metadata,
-            autoload_with=session.bind,
+            autoload_with=engine,
         )
 
-        return load_file(
-            cls=cls,
-            session=session,
-            path=path,
-            table_override=staging_table,
-            **kwargs,
-        )
+    @classmethod   
+    def load_staging(
+        cls: Type[CSVTableProtocol],
+        loader: LoaderInterface,
+        loader_context: LoaderContext
+    ) -> int:
+        if loader_context.session.bind is None:
+            raise RuntimeError("Session is not bound to an engine")
+
+        dialect = loader_context.session.bind.dialect.name
+        total = 0
+
+
+        try:
+            cls.create_staging_table(loader_context.session)
+
+            if dialect == "postgresql":
+                try:
+                    total = quick_load_pg(
+                        path=loader_context.path,
+                        session=loader_context.session,
+                        tablename=cls.staging_tablename(),
+                    )
+                except Exception as e:
+                    logger.warning(f"COPY failed for {cls.staging_tablename()}: {e}")
+                    logger.info('Falling back to ORM-based load functionality')
+                    return cls.orm_staging_load(
+                        loader=loader,
+                        loader_context=loader_context
+                    )   
+        finally:
+            cls._staging_tablename = None
+        return total
+
+    @classmethod
+    def orm_staging_load(
+        cls: Type[CSVTableProtocol],
+        loader: LoaderInterface,
+        loader_context: LoaderContext
+    ) -> int:
+        return loader.orm_file_load(ctx=loader_context)
+
+    @classmethod
+    def _select_loader(cls: Type[CSVTableProtocol], path: Path) -> LoaderInterface:
+        suffix = path.suffix.lower()
+        if suffix == ".parquet":
+            return ParquetLoader()
+        else:
+            return PandasLoader()
+
 
     @classmethod
     def load_csv(
@@ -82,31 +148,42 @@ class CSVLoadableTableInterface(ORMTableBase):
         session: so.Session,
         path: Path,
         *,
+        loader: LoaderInterface | None = None,
         normalise: bool = True,
         dedupe: bool = False,
         chunksize: int | None = None,
-        commit_on_chunk: bool = False,
         dedupe_incl_db: bool = False,
+        merge_strategy: str = "replace",
     ) -> int:
-        logger.debug("Loading CSV for %s", cls.__tablename__)
+        
+
+        logger.debug(f"Loading CSV for {cls.__tablename__} via staging table from {path}")
 
         if path.stem.lower() != cls.__tablename__:
             raise ValueError(
                 f"CSV filename '{path.name}' does not match table '{cls.__tablename__}'"
             )
         
-        total = load_file(
-            cls=cls,
+        loader_context = LoaderContext(
+            tableclass=cls,
             session=session,
             path=path,
+            staging_table=cls.get_staging_table(session),
             chunksize=chunksize,
-            commit_on_chunk=commit_on_chunk,
             normalise=normalise,
             dedupe=dedupe,
-            dedupe_incl_db=dedupe_incl_db
+            dedupe_incl_db=dedupe_incl_db,
         )
-        
+
+        if loader is None:
+            loader = cls._select_loader(path)
+        total = cls.load_staging(loader=loader, loader_context=loader_context)
+
+        cls.merge_from_staging(session, merge_strategy=merge_strategy)
+        cls.drop_staging_table(session)
+
         return total
+        
 
     @classmethod
     def _merge_replace(
@@ -117,11 +194,6 @@ class CSVLoadableTableInterface(ORMTableBase):
         pk_cols: list[str],
         dialect: str
     ):
-   
-        pk_join = " AND ".join(
-            f't."{c}" = s."{c}"' for c in pk_cols
-        )
-
         if dialect == "postgresql":
             pk_join = " AND ".join(
                 f't."{c}" = s."{c}"' for c in pk_cols
@@ -153,6 +225,19 @@ class CSVLoadableTableInterface(ORMTableBase):
                         WHERE {pk_match}
                     );
                 """))
+
+    @classmethod
+    def _merge_insert(
+        cls: Type[CSVTableProtocol],
+        session: so.Session,
+        target: str,
+        staging: str
+        ):
+        session.execute(sa.text(f"""
+            INSERT INTO "{target}"
+            SELECT * FROM "{staging}";
+        """))
+
 
     @classmethod
     def _merge_upsert(
@@ -202,6 +287,11 @@ class CSVLoadableTableInterface(ORMTableBase):
                 pk_cols=pk_cols,
                 dialect=dialect,
             )
+            cls._merge_insert(
+                session=session,
+                target=target,
+                staging=staging,
+            )
         elif merge_strategy == "upsert":
             cls._merge_upsert(
                 session=session,
@@ -212,71 +302,12 @@ class CSVLoadableTableInterface(ORMTableBase):
             )
         else:
             raise ValueError(f"Unknown merge strategy '{merge_strategy}'")
-        
-        # # if dialect == "postgresql":
-        # #     pk_join = " AND ".join(
-        # #         f't."{c}" = s."{c}"' for c in pk_cols
-        # #     )
-
-        # #     session.execute(sa.text(f"""
-        # #         DELETE FROM "{target}" t
-        # #         USING "{staging}" s
-        # #         WHERE {pk_join};
-        # #     """))
-
-        # # elif dialect == "sqlite":
-        # #     if len(pk_cols) == 1:
-        # #         pk = pk_cols[0]
-        # #         session.execute(sa.text(f"""
-        # #             DELETE FROM "{target}"
-        # #             WHERE "{pk}" IN (
-        # #                 SELECT "{pk}" FROM "{staging}"
-        # #             );
-        # #         """))
-        # #     else:
-        # #         pk_match = " AND ".join(
-        # #             f't."{c}" = s."{c}"' for c in pk_cols
-        # #         )
-        # #         session.execute(sa.text(f"""
-        # #             DELETE FROM "{target}" t
-        # #             WHERE EXISTS (
-        # #                 SELECT 1 FROM "{staging}" s
-        # #                 WHERE {pk_match}
-        # #             );
-        # #         """))
-        # else:
-        #     raise NotImplementedError(
-        #         f"Merge not implemented for dialect '{dialect}'"
-        #     )
-
-
-        # 2. insert replacements
-        session.execute(sa.text(f"""
-            INSERT INTO "{target}"
-            SELECT * FROM "{staging}";
-        """))
-
+    
     @classmethod
     def drop_staging_table(cls: Type[CSVTableProtocol], session: so.Session):
         session.execute(
             sa.text(f'DROP TABLE IF EXISTS "{cls.staging_tablename()}"')
         )
-
-    @classmethod
-    def replace_from_csv(
-        cls: Type[CSVTableProtocol],
-        session: so.Session,
-        path: Path,
-        merge_strategy: str = "replace",
-        **kwargs,
-    ) -> int:
-        logger.info("Replacing data in %s from %s", cls.__tablename__, path.name)
-
-        total = cls.load_csv_to_staging(session, path, **kwargs)
-        cls.merge_from_staging(session, merge_strategy=merge_strategy)
-        cls.drop_staging_table(session)
-
-        return total
 
     @classmethod
     def csv_columns(cls) -> dict[str, sa.ColumnElement]:
@@ -287,85 +318,86 @@ class CSVLoadableTableInterface(ORMTableBase):
         """
         return cls.model_columns()
     
-    @classmethod
-    def dedupe_dataframe(
-        cls: Type[CSVTableProtocol],
-        df: pd.DataFrame,
-        *,
-        session: so.Session | None = None,
-        max_bind_vars: int = 10_000,
-    ) -> pd.DataFrame:
-        """
-        Remove rows that already exist in the database or are duplicated
-        within the incoming dataframe, based on primary keys. 
+    # @classmethod
+    # def dedupe_dataframe(
+    #     cls: Type[CSVTableProtocol],
+    #     df: pd.DataFrame,
+    #     *,
+    #     session: so.Session | None = None,
+    #     max_bind_vars: int = 10_000,
+    #     tableclass: sa.Table | None = None,
+    # ) -> pd.DataFrame:
+    #     """
+    #     Remove rows that already exist in the database or are duplicated
+    #     within the incoming dataframe, based on primary keys. 
 
-        If `session` is None, only internal duplicates are removed.
-        """
-        if df.empty:
-            return df
-        pk_names = cls.pk_names()
+    #     If `session` is None, only internal duplicates are removed.
+    #     """
+    #     if df.empty:
+    #         return df
+    #     pk_names = cls.pk_names()
 
-        before = len(df)
-        df = df.drop_duplicates(subset=pk_names, keep="first")
-        dropped_internal = before - len(df)
-        if dropped_internal > 0:
-            logger.info(
-                "Dropped %d duplicate rows within chunk for %s",
-                dropped_internal,
-                cls.__tablename__,
-            )
+    #     before = len(df)
+    #     df = df.drop_duplicates(subset=pk_names, keep="first")
+    #     dropped_internal = before - len(df)
+    #     if dropped_internal > 0:
+    #         logger.info(
+    #             "Dropped %d duplicate rows within chunk for %s",
+    #             dropped_internal,
+    #             cls.__tablename__,
+    #         )
 
-        if session is None:
-            return df
+    #     if session is None:
+    #         return df
         
-        pk_tuples = list(df[pk_names].itertuples(index=False, name=None))
-        if not pk_tuples:
-            return df
+    #     pk_tuples = list(df[pk_names].itertuples(index=False, name=None))
+    #     if not pk_tuples:
+    #         return df
 
-        pk_cols = [getattr(cls, c) for c in pk_names]
+    #     if tableclass is None:
+    #         tableclass = cls.__table__
 
-        vars_per_row = len(pk_cols)
-        chunk_size = max_bind_vars // vars_per_row
-        if chunk_size <= 0:
-            raise ValueError(f"max_bind_vars ({max_bind_vars}) too small for PK size {vars_per_row}")
+    #     pk_cols = [getattr(tableclass.c, c) for c in pk_names]
 
-        existing_rows: list[tuple] = []
+    #     vars_per_row = len(pk_cols)
+    #     chunk_size = max_bind_vars // vars_per_row
+    #     if chunk_size <= 0:
+    #         raise ValueError(f"max_bind_vars ({max_bind_vars}) too small for PK size {vars_per_row}")
 
-        for i in range(0, len(pk_tuples), chunk_size):
-            chunk = pk_tuples[i : i + chunk_size]
+    #     existing_rows: list[tuple] = []
 
-            rows = (
-                session.query(*pk_cols)
-                .filter(sa.tuple_(*pk_cols).in_(chunk))
-                .all()
-            )
-            existing_rows.extend(rows)
+    #     for i in range(0, len(pk_tuples), chunk_size):
+    #         chunk = pk_tuples[i : i + chunk_size]
 
-        if not existing_rows:
-            return df
+    #         rows = (
+    #             session.query(*pk_cols)
+    #             .filter(sa.tuple_(*pk_cols).in_(chunk))
+    #             .all()
+    #         )
+    #         existing_rows.extend(rows)
 
-        existing = pd.DataFrame(existing_rows, columns=pk_names)
+    #     if not existing_rows:
+    #         return df
 
-        logger.warning(
-            "Dropping %d rows from %s that already exist in the database",
-            len(existing),
-            cls.__tablename__,
-        )
-        df = (
-            df.merge(existing, on=pk_names, how="left", indicator=True)
-            .loc[lambda x: x["_merge"] == "left_only"]
-            .drop(columns="_merge")
-        )
-        return df
+    #     existing = pd.DataFrame(existing_rows, columns=pk_names)
+
+    #     logger.warning(f"Dropping {len(existing)} rows from {cls.__tablename__} that already exist in the database")
+    #     df = (
+    #         df.merge(existing, on=pk_names, how="left", indicator=True)
+    #         .loc[lambda x: x["_merge"] == "left_only"]
+    #         .drop(columns="_merge")
+    #     )
+    #     return df
     
-    @classmethod
-    def normalise_dataframe(cls: Type[CSVTableProtocol], df: pd.DataFrame) -> pd.DataFrame:
-        return cast_dataframe_to_model(
-            df=df,
-            model_columns=cls.model_columns(),
-            table_name=cls.__tablename__,
-        )
+    # @classmethod
+    # def normalise(cls: Type[CSVTableProtocol], loader: LoaderInterface, table: pd.DataFrame | pa.Table) -> Any:
+    
+    #     return loader.cast_to_model(
 
+    #         table=table,
+    #         model_columns=cls.model_columns(),
+    #         table_name=cls.__tablename__,
+    #     )
 
 class ParquetLoadableTableMixin(ORMTableBase):
     """

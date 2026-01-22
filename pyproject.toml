@@ -1,6 +1,6 @@
 [project]
 name = "orm-loader"
-version = "0.2.4"
+version = "0.3.0"
 description = "Generic base classes to handle ORM functionality for multiple downstream datamodels"
 readme = "README.md"
 authors = [
@@ -10,6 +10,7 @@ requires-python = ">=3.12"
 dependencies = [
     "chardet>=5.2.0",
     "pandas>=2.3.3",
+    "pyarrow>=23.0.0",
     "sqlalchemy>=2.0.45",
 ]
 
