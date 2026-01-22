@@ -1,7 +1,12 @@
 from .orm_table import ORMTableBase
 from typing import Any
 import json, hashlib, datetime
-from ..data.converters import json_default
+
+def json_default(obj):
+    if isinstance(obj, (datetime.date, datetime.datetime)):
+        return obj.isoformat()
+    raise TypeError(f"Object of type {type(obj)} is not JSON serialisable")
+
     
 class SerialisableTableInterface(ORMTableBase):
     """

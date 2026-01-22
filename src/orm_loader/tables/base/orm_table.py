@@ -46,7 +46,13 @@ class ORMTableBase:
     @classmethod
     def model_columns(cls) -> dict[str, sa.ColumnElement]:
         mapper = cls.mapper_for()
-        return {c.key: c for c in mapper.columns if c.key is not None}
+        mc = {c.key: c for c in mapper.columns if c.key is not None}
+        for name, sa_col in mc.items():
+            print(f"{name}: {sa_col} ({type(sa_col)})")
+
+            assert isinstance(sa_col, sa.Column), f"Unexpected column type: {type(sa_col)}"
+
+        return mc
     
     @classmethod
     def required_columns(cls) -> set[str]:

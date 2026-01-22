@@ -7,10 +7,10 @@ from .base import (
     CSVTableProtocol,
     ParquetTableProtocol,
 )
-from .data import (
-    perform_cast,
-    json_default,
-)
+# from .data import (
+#     perform_cast,
+#     json_default,
+# )
 
 __all__ = [
     "ORMTableBase",
@@ -20,6 +20,6 @@ __all__ = [
     "ORMTableProtocol",
     "CSVTableProtocol",
     "ParquetTableProtocol",
-    "perform_cast",
-    "json_default",
+    # "perform_cast",
+    # "json_default",
 ]

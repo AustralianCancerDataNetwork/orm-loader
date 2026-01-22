@@ -22,10 +22,6 @@ from .data_type_management import (
     _cast_string
 )
 
-def json_default(obj):
-    if isinstance(obj, (datetime.date, datetime.datetime)):
-        return obj.isoformat()
-    raise TypeError(f"Object of type {type(obj)} is not JSON serialisable")
 
 @dataclass(frozen=True)
 class CastRule:
@@ -44,7 +40,7 @@ CAST_RULES: list[CastRule] = [
     CastRule(Text,    _cast_string),
 ]
 
-def cast_scalar(value: Any, sa_col, *, on_error=None):
+def cast_scalar(value: Any, sa_type, *, on_error=None):
     if value is None:
         return None
     if isinstance(value, float) and math.isnan(value):
@@ -53,9 +49,9 @@ def cast_scalar(value: Any, sa_col, *, on_error=None):
         return None
 
     for rule in CAST_RULES:
-        if isinstance(sa_col.type, rule.sa_type):
+        if isinstance(sa_type, rule.sa_type):
             try:
-                return rule.scalar(value, sa_col)
+                return rule.scalar(value, sa_type)
             except Exception:
                 if on_error:
                     on_error(value)

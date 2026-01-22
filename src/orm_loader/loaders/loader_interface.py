@@ -11,7 +11,7 @@ import pyarrow.csv as pv
 from functools import reduce
 from .data_classes import LoaderContext, TableCastingStats, LoaderInterface
 from .loading_helpers import infer_delim, infer_encoding, conservative_load_parquet, arrow_drop_duplicates
-from ..tables.data import perform_cast, cast_arrow_column
+from .data import perform_cast, cast_arrow_column
 
 logger = logging.getLogger(__name__)
 

@@ -3,7 +3,8 @@ import sqlalchemy.orm as so
 import sqlalchemy as sa
 import pandas as pd
 from pathlib import Path
-from ...loaders import LoaderContext, LoaderInterface
+if TYPE_CHECKING:
+    from ...loaders import LoaderContext, LoaderInterface
 
 @runtime_checkable
 class ORMTableProtocol(Protocol):
@@ -41,13 +42,13 @@ class CSVTableProtocol(ORMTableProtocol, Protocol):
     def staging_tablename(cls) -> str: ...
 
     @classmethod
-    def _select_loader(cls, path: Path) -> LoaderInterface: ...
+    def _select_loader(cls, path: Path) -> "LoaderInterface": ...
 
     @classmethod
     def create_staging_table(cls, session: so.Session) -> None: ...
 
     @classmethod
-    def load_staging(cls: Type["CSVTableProtocol"], loader: LoaderInterface, loader_context: LoaderContext) -> int: ...
+    def load_staging(cls: Type["CSVTableProtocol"], loader: "LoaderInterface", loader_context: "LoaderContext") -> int: ...
 
     @classmethod
     def load_csv(
@@ -63,7 +64,7 @@ class CSVTableProtocol(ORMTableProtocol, Protocol):
     ) -> int: ...
 
     @classmethod
-    def orm_staging_load(cls, loader: LoaderInterface,loader_context: LoaderContext) -> int: ...
+    def orm_staging_load(cls, loader: "LoaderInterface",loader_context: "LoaderContext") -> int: ...
 
     @classmethod
     def get_staging_table(cls, session: so.Session) -> sa.Table: ...

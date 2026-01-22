@@ -34,3 +34,6 @@
 
 ## 0.3.2
 - bugfix: branching stage-load logic for sqlite 
+
+## 0.3.3
+- moved data handling converters

@@ -1,6 +1,6 @@
 [project]
 name = "orm-loader"
-version = "0.3.2"
+version = "0.3.3"
 description = "Generic base classes to handle ORM functionality for multiple downstream datamodels"
 readme = "README.md"
 authors = [

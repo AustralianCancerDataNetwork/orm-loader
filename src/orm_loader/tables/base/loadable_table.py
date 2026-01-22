@@ -9,7 +9,8 @@ from pathlib import Path
 
 from .orm_table import ORMTableBase
 from .typing import CSVTableProtocol
-from ...loaders import LoaderInterface, LoaderContext, PandasLoader, quick_load_pg, ParquetLoader
+from ...loaders.loader_interface import LoaderInterface, LoaderContext, PandasLoader, ParquetLoader
+from ...loaders.loading_helpers import quick_load_pg
 
 logger = logging.getLogger(__name__)
 
