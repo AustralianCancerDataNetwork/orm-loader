@@ -28,3 +28,6 @@
 
 ## 0.3.0
 - significant updates to handle loaders as class objects
+
+## 0.3.1
+- typo
