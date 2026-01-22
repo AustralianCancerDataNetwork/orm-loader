@@ -43,3 +43,6 @@
 
 ## 0.3.5
 - added mkdocs and docstrings
+
+## 0.3.6
+- added pytest & actions for linting and tests
