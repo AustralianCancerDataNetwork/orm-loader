@@ -126,7 +126,8 @@ class CSVLoadableTableInterface(ORMTableBase):
                 *staging_columns,
             )
 
-            metadata.create_all(session.bind, tables=[staging_table])
+            conn = session.connection()
+            metadata.create_all(bind=conn, tables=[staging_table])
             # this borks on date cols because it loses the date 
             # specification and reverts to NUM
             # - changing to metadata.create_all approach for sqlite

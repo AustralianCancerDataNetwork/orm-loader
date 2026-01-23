@@ -52,3 +52,6 @@
 
 ## 0.3.8
 - sqlite staging table creation now respects date types
+
+## 0.3.9
+- bugfix
