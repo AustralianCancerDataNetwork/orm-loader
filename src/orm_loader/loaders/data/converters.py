@@ -5,13 +5,9 @@ from dataclasses import dataclass
 import pyarrow as pa
 import pyarrow.compute as pc
 
-from typing import Any
 import re
-import math
 from datetime import datetime, date
 from dateutil import parser 
-from sqlalchemy.types import String, Text
-import sqlalchemy as sa
 
 _NUMERIC_RE = re.compile(r"^[+-]?\d+(\.\d+)?$")
 
