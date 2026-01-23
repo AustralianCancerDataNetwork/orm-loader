@@ -20,7 +20,7 @@ jobs:
 
       - name: Install MkDocs
         run: |
-            pip install mkdocs mkdocs-material mkdocstrings-python
+            pip install mkdocs mkdocs-material mkdocstrings-python mkdocs-mermaid2-plugin
             pip install -e .
 
       - name: Deploy to GitHub Pages
