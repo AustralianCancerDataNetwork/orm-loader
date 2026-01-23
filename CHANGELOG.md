@@ -49,3 +49,6 @@
 
 ## 0.3.7
 - moved data type handling
+
+## 0.3.8
+- sqlite staging table creation now respects date types

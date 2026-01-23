@@ -566,7 +566,7 @@ wheels = [
 
 [[package]]
 name = "orm-loader"
-version = "0.3.6"
+version = "0.3.8"
 source = { editable = "." }
 dependencies = [
     { name = "chardet" },

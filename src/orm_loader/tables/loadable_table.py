@@ -107,10 +107,34 @@ class CSVLoadableTableInterface(ORMTableBase):
                 (LIKE "{table.name}" INCLUDING ALL);
             '''))
         elif dialect == "sqlite":
-            session.execute(sa.text(f'''
-                CREATE TABLE "{cls.staging_tablename()}" AS
-                SELECT * FROM "{table.name}" WHERE 0;
-            '''))
+
+            metadata = sa.MetaData()
+
+            staging_columns = []
+            for col in table.columns:
+                staging_columns.append(
+                    sa.Column(
+                        col.name,
+                        col.type,          
+                        nullable=True,     
+                    )
+                )
+
+            staging_table = sa.Table(
+                cls.staging_tablename(),
+                metadata,
+                *staging_columns,
+            )
+
+            metadata.create_all(session.bind, tables=[staging_table])
+            # this borks on date cols because it loses the date 
+            # specification and reverts to NUM
+            # - changing to metadata.create_all approach for sqlite
+            # but not postgresql for now to keep unlogged table feature
+            # session.execute(sa.text(f'''
+            #     CREATE TABLE "{cls.staging_tablename()}" AS
+            #     SELECT * FROM "{table.name}" WHERE 0;
+            # '''))
         else:
             raise NotImplementedError(
                 f"Staging table creation not implemented for dialect '{dialect}'"
