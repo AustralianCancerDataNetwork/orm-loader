@@ -55,3 +55,6 @@
 
 ## 0.3.9
 - bugfix
+
+## 0.3.10
+- adding in mat views

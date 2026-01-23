@@ -16,8 +16,20 @@ markdown_extensions:
   - admonition
   - footnotes
   - tables
+  - attr_list
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:mermaid2.fence_mermaid
   - toc:
       permalink: true
+
+extra_javascript:
+  - https://unpkg.com/mermaid@10/dist/mermaid.min.js
+  - js/mermaid-init.js
 
 plugins:
   - search
@@ -39,6 +51,7 @@ nav:
       - Loadable Tables: tables/loadable_table.md
       - IdAllocator: tables/allocators.md
       - Typing Protocols: tables/typing.md
+      - Materialised Views: tables/mat_view.md
   - Registry & Validation:
       - Overview: registry/index.md
       - Model Registry: registry/registry.md

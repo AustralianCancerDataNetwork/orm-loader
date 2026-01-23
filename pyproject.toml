@@ -1,6 +1,6 @@
 [project]
 name = "orm-loader"
-version = "0.3.9"
+version = "0.3.10"
 description = "Generic base classes to handle ORM functionality for multiple downstream datamodels"
 readme = "README.md"
 authors = [
@@ -32,6 +32,7 @@ dev = [
     "mkdocs-material>=9.7.1",
     "mkdocstrings-python>=2.0.1",
     "mkdocs>=1.6.1",
+    "mkdocs-mermaid2-plugin"
 ]
 
 [tool.setuptools]
