@@ -46,3 +46,6 @@
 
 ## 0.3.6
 - added pytest & actions for linting and tests
+
+## 0.3.7
+- moved data type handling
