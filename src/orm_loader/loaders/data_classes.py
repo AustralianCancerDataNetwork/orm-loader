@@ -126,6 +126,8 @@ class LoaderInterface:
         """
         if dataframe.empty:
             return 0
+        # convert NaN to None for proper NULL insertion
+        dataframe = dataframe.where(pd.notna(dataframe), None) # type: ignore
         records = cast(
             Iterable[Dict[str, Any]],
             dataframe.to_dict(orient="records"),

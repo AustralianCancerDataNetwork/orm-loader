@@ -58,3 +58,6 @@
 
 ## 0.3.10
 - adding in mat views
+
+# 0.3.11
+- convert NaN to None for proper NULL insertion
