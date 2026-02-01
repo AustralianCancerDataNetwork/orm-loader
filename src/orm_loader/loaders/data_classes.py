@@ -184,7 +184,11 @@ class LoaderInterface:
         pk_tuples = list(df[pk_names].itertuples(index=False, name=None))
         if not pk_tuples:
             return df
-        tableclass = ctx.staging_table or ctx.tableclass.__table__
+        tableclass = (
+            ctx.staging_table
+            if ctx.staging_table is not None
+            else ctx.tableclass.__table__
+        )        
         pk_cols = [getattr(tableclass.c, pk) for pk in pk_names]
 
         vars_per_row = len(pk_cols)

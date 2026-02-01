@@ -61,3 +61,6 @@
 
 # 0.3.11
 - convert NaN to None for proper NULL insertion
+
+# 0.3.12
+- db dedupe issue for checking existence of staging table
