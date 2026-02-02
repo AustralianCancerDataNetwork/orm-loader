@@ -78,8 +78,7 @@ class CSVTableProtocol(ORMTableProtocol, Protocol):
         normalise: bool = True, 
         dedupe: bool = False, 
         chunksize: int | None = None, 
-        merge_strategy: str = "replace", 
-        dedupe_incl_db: bool = False
+        merge_strategy: str = "replace"
     ) -> int: ...
 
     @classmethod
