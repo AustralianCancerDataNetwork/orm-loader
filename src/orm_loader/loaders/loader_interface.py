@@ -57,12 +57,7 @@ class PandasLoader(LoaderInterface):
         dropped_internal = before - len(df)
         if dropped_internal > 0:
             logger.info(f"Dropped {dropped_internal} duplicate rows internally in staging for {ctx.tableclass.__tablename__}")        
-        if not ctx.dedupe_incl_db:
-            return df
-        else:
-            logger.info(f"Performing DB-level deduplication for {ctx.tableclass.__tablename__}")
-            # DB-level dedupe
-            return cls._dedupe_db(df, ctx)
+        return df
 
     @classmethod
     def cast_to_model(cls, data: pd.DataFrame | pa.Table, ctx: LoaderContext) -> Any:
@@ -140,13 +135,17 @@ class PandasLoader(LoaderInterface):
         
         logger.info(f"Detected encoding {encoding} for file {ctx.path.name}")
         logger.info(f"Detected delimiter '{delimiter}' for file {ctx.path.name}")       
+        logger.info(f"Loading with chunksize '{ctx.chunksize}' for file {ctx.path.name}")       
         chunks = (reader,) if isinstance(reader, pd.DataFrame) else reader
 
+        i = 0
         for chunk in chunks:
-            if ctx.normalise:
-                chunk = cls.cast_to_model(chunk, ctx)
+            logger.info(f"Processing chunk {i} with {len(chunk)} rows for {ctx.tableclass.__tablename__}")
+            i += 1
             if ctx.dedupe:
                 chunk = cls.dedupe(chunk, ctx)
+            if ctx.normalise:
+                chunk = cls.cast_to_model(chunk, ctx)
             total += cls._load_chunk(
                 staging_cls=ctx.staging_table,
                 session=ctx.session,
@@ -222,11 +221,6 @@ class ParquetLoader(LoaderInterface):
                 dropped,
                 ctx.tableclass.__tablename__,
             )
-
-        if not ctx.dedupe_incl_db:
-            return deduped
-        # todo: make DB-level dedupe for pyarrow
-        logger.info(f"DB-level deduplication for ParquetLoader not yet implemented for {ctx.tableclass.__tablename__}")
         return deduped
 
     @classmethod
@@ -234,7 +228,7 @@ class ParquetLoader(LoaderInterface):
         suffix = ctx.path.suffix.lower()
         model_columns = ctx.tableclass.model_columns()
         wanted_cols = list(model_columns.keys())
-
+        logger.info(f"Scanning batches for {ctx.tableclass.__tablename__}")
         if suffix == ".parquet":
             dataset = ds.dataset(ctx.path, format="parquet")
             yield from dataset.to_batches(batch_size=ctx.chunksize or 64_000)
@@ -257,14 +251,12 @@ class ParquetLoader(LoaderInterface):
             if ctx.dedupe:
                 data = cls.dedupe(data, ctx)
 
-            if isinstance(data, pa.RecordBatch):
-                df = data.to_pandas()
-            elif isinstance(data, pa.Table):
+            if isinstance(data, pa.RecordBatch) or isinstance(data, pa.Table):
                 df = data.to_pandas()
             else:
                 df = data 
-
             if df.empty:
+                
                 continue
 
             total += cls._load_chunk(

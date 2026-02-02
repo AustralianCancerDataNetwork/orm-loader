@@ -64,3 +64,6 @@
 
 # 0.3.12
 - db dedupe issue for checking existence of staging table
+
+# 0.3.13
+- db dedupe removed entirely in favour of staging

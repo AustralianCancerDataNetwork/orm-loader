@@ -25,7 +25,6 @@ on globals or implicit configuration.
 | `chunksize` | Optional chunk size |
 | `normalise` | Whether to cast values to ORM types |
 | `dedupe` | Whether to deduplicate incoming data |
-| `dedupe_incl_db` | Whether to dedupe against existing DB rows |
 
 ::: orm_loader.loaders.data_classes.LoaderContext
 

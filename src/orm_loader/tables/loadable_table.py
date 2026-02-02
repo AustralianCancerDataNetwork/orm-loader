@@ -283,7 +283,6 @@ class CSVLoadableTableInterface(ORMTableBase):
         normalise: bool = True,
         dedupe: bool = False,
         chunksize: int | None = None,
-        dedupe_incl_db: bool = False,
         merge_strategy: str = "replace",
     ) -> int:
         
@@ -310,8 +309,6 @@ class CSVLoadableTableInterface(ORMTableBase):
             Whether to deduplicate incoming rows.
         chunksize
             Optional chunk size for incremental loading.
-        dedupe_incl_db
-            Whether deduplication should include existing database rows.
         merge_strategy
             Merge strategy to apply (e.g. ``replace`` or ``upsert``).
 
@@ -335,8 +332,7 @@ class CSVLoadableTableInterface(ORMTableBase):
             staging_table=cls.get_staging_table(session),
             chunksize=chunksize,
             normalise=normalise,
-            dedupe=dedupe,
-            dedupe_incl_db=dedupe_incl_db,
+            dedupe=dedupe
         )
 
         if loader is None:
