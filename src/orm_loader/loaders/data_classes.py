@@ -1,5 +1,5 @@
 
-from typing import Any, Type, List, Dict, TYPE_CHECKING,  Iterable, cast
+from typing import Any, Type, List, Dict, TYPE_CHECKING
 from dataclasses import dataclass, field
 import sqlalchemy as sa
 import sqlalchemy.orm as so

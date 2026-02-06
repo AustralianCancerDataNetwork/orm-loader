@@ -2,6 +2,7 @@ import pytest
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 from sqlalchemy.orm import declarative_base
+import os
 
 Base = declarative_base()
 
@@ -14,14 +15,6 @@ def session(engine):
     Base.metadata.create_all(engine)
     with so.Session(engine) as s:
         yield s
-
-import os
-import pytest
-import sqlalchemy as sa
-import sqlalchemy.orm as so
-
-from orm_loader.tables.loadable_table import CSVLoadableTableInterface
-from sqlalchemy.orm import DeclarativeBase
 
 POSTGRES_DSN_ENV = "ORM_LOADER_TEST_PG_DSN"
 

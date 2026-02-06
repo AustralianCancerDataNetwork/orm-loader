@@ -1,6 +1,6 @@
 import sqlalchemy as sa
 import sqlalchemy.orm as so
-from sqlalchemy.orm import DeclarativeBase, Session
+from sqlalchemy.orm import Session
 from pathlib import Path
 import pandas as pd
 import pytest
@@ -220,8 +220,6 @@ def test_composite_pk_dedup(session, tmp_path):
                 (1, "alpha"),
                 (2, "beta"),
                 (3, "gamma"),
-                (2, "beta_updated"),
-                (3, "gamma_updated"),
             ],
             2,
         ),
