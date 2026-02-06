@@ -4,10 +4,12 @@ from sqlalchemy.orm import Session
 from pathlib import Path
 import pandas as pd
 import pytest
-
+from orm_loader.loaders.data_classes import _clean_nulls
 from orm_loader.tables.loadable_table import CSVLoadableTableInterface
 from orm_loader.loaders.loader_interface import PandasLoader
 from orm_loader.helpers import Base
+
+import numpy as np
 
 class SimpleTable(Base, CSVLoadableTableInterface):
     __tablename__ = "test_table"
@@ -340,3 +342,177 @@ def test_postgres_copy_fast_path(pg_session, tmp_path):
     pg_session.commit()
 
     assert inserted == 1
+
+
+
+
+def test_clean_nulls_basic():
+    assert _clean_nulls(None) is None
+    assert _clean_nulls(pd.NA) is None
+    assert _clean_nulls(float("nan")) is None
+    assert _clean_nulls(np.nan) is None
+
+def test_clean_nulls_passthrough():
+    assert _clean_nulls("") == ""
+    assert _clean_nulls("nan") == "nan"   # string 'nan' must not be converted
+    assert _clean_nulls(0) == 0
+    assert _clean_nulls("S") == "S"
+
+
+def test_nullable_column_with_nan_does_not_crash(session, tmp_path):
+    class NullableTable(Base, CSVLoadableTableInterface):
+        __tablename__ = "nullable_table"
+
+        id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
+        flag: so.Mapped[str | None] = so.mapped_column(sa.String, nullable=True)
+
+    Base.metadata.create_all(session.get_bind())
+
+    csv = tmp_path / "nullable_table.csv"
+    pd.DataFrame(
+        [
+            {"id": 1, "flag": "S"},
+            {"id": 2, "flag": None},   # becomes NaN in pandas
+        ]
+    ).to_csv(csv, index=False)
+
+    inserted = NullableTable.load_csv( # type: ignore
+        session,
+        csv,
+        loader=PandasLoader(),
+        dedupe=False,
+    )
+    session.commit()
+
+    assert inserted == 2
+
+    rows = session.execute(
+        sa.select(NullableTable).order_by(NullableTable.id)
+    ).scalars().all()
+
+    assert [(r.id, r.flag) for r in rows] == [
+        (1, "S"),
+        (2, None),
+    ]
+
+
+def test_embedded_newline_in_field_is_preserved(session, tmp_path):
+    class TextTable(Base, CSVLoadableTableInterface):
+        __tablename__ = "text_table"
+
+        id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
+        name: so.Mapped[str] = so.mapped_column(sa.String)
+
+    Base.metadata.create_all(session.get_bind())
+
+    csv = tmp_path / "text_table.csv"
+
+    # Properly quoted CSV with embedded newline
+    csv.write_text(
+        'id\tname\n'
+        '1\t"hello\nworld"\n'
+    )
+
+    inserted = TextTable.load_csv( # type: ignore
+        session,
+        csv,
+        loader=PandasLoader(),
+        dedupe=False,
+    )
+    session.commit()
+
+    rows = session.execute(sa.select(TextTable)).scalars().all()
+    assert rows[0].name == "hello\nworld"
+
+
+def test_embedded_tab_in_field(session, tmp_path):
+    class TextTable(Base, CSVLoadableTableInterface):
+        __tablename__ = "tab_table"
+
+        id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
+        name: so.Mapped[str] = so.mapped_column(sa.String)
+
+    Base.metadata.create_all(session.get_bind())
+
+    csv = tmp_path / "tab_table.csv"
+    csv.write_text(
+        'id\tname\n'
+        '1\t"foo\tbar"\n'
+    )
+
+    inserted = TextTable.load_csv( # type: ignore
+        session,
+        csv,
+        loader=PandasLoader(),
+        dedupe=False,
+    )
+    session.commit()
+
+    rows = session.execute(sa.select(TextTable)).scalars().all()
+    assert rows[0].name == "foo\tbar"
+
+@pytest.mark.postgres
+def test_copy_and_orm_path_equivalence(pg_session, tmp_path):
+    csv = tmp_path / "test_table.csv"
+
+    pd.DataFrame(
+        [
+            {"id": 1, "name": "alpha"},
+            {"id": 2, "name": None},
+        ]
+    ).to_csv(csv, index=False, sep="\t")
+
+    inserted = SimpleTable.load_csv(pg_session, csv)
+    pg_session.commit()
+
+    rows = pg_session.execute(sa.select(SimpleTable).order_by(SimpleTable.id)).scalars().all()
+    assert [(r.id, r.name) for r in rows] == [
+        (1, "alpha"),
+        (2, None),
+    ]
+
+
+# from hypothesis import given, strategies as st
+# from sqlalchemy.orm import declarative_base
+# from pathlib import Path
+
+# from orm_loader.loaders.data.converters import perform_cast
+
+# @given(
+#     s=st.text(
+#         alphabet=st.characters(
+#             blacklist_categories=["Cs"],
+#             blacklist_characters=["\x00"],
+#         )
+#     )
+# )
+# def test_random_strings_roundtrip_respects_casting_contract(s, tmp_path_factory):
+#     tmp_path = Path(tmp_path_factory.mktemp("hypothesis_csv"))
+
+#     BaseLocal = declarative_base()
+
+#     class FuzzTable(BaseLocal, CSVLoadableTableInterface):
+#         __tablename__ = "fuzz_table"
+#         id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
+#         txt: so.Mapped[str] = so.mapped_column(sa.String)
+
+#     engine = sa.create_engine("sqlite:///:memory:", future=True)
+#     BaseLocal.metadata.create_all(engine)
+
+#     with Session(engine) as session:
+#         csv = tmp_path / "fuzz_table.csv"
+#         pd.DataFrame([{"id": 1, "txt": s}]).to_csv(csv, index=False, sep="\t")
+
+#         FuzzTable.load_csv(session, csv, loader=PandasLoader(), dedupe=False)
+#         session.commit()
+
+#         rows = session.execute(sa.select(FuzzTable)).scalars().all()
+
+#         # What the loader *should* produce according to your spec
+#         expected = perform_cast(s, sa.String(), on_error=None)
+
+#         if expected is None:
+#             assert rows == []
+#         else:
+#             # stored value may be str-canonicalised version
+#             assert rows[0].txt.encode("utf-8", errors="replace") == s.encode("utf-8", errors="replace")

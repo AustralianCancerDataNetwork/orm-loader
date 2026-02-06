@@ -70,3 +70,6 @@
 
 # 0.3.14
 - skipping NaN entirely for null safety as it's not playing nice when called from higher level libraries
+
+# 0.3.15
+- bugfix
