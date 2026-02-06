@@ -7,13 +7,9 @@ import pytest
 
 from orm_loader.tables.loadable_table import CSVLoadableTableInterface
 from orm_loader.loaders.loader_interface import PandasLoader
+from orm_loader.helpers import Base
 
-
-class Base(DeclarativeBase):
-    pass
-
-
-class TestTable(Base, CSVLoadableTableInterface):
+class SimpleTable(Base, CSVLoadableTableInterface):
     __tablename__ = "test_table"
 
     id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
@@ -66,7 +62,7 @@ def test_initial_csv_load(session, tmp_csv_dir):
 
     loader = PandasLoader()
 
-    inserted = TestTable.load_csv( # type: ignore
+    inserted = SimpleTable.load_csv( # type: ignore
         session,
         csv_path,
         dedupe=False,
@@ -77,7 +73,7 @@ def test_initial_csv_load(session, tmp_csv_dir):
     assert inserted == 3
 
     rows = session.execute(
-        sa.select(TestTable).order_by(TestTable.id)
+        sa.select(SimpleTable).order_by(SimpleTable.id)
     ).scalars().all()
 
     assert [(r.id, r.name) for r in rows] == [
@@ -101,7 +97,7 @@ def test_replace_merge_strategy(session, tmp_csv_dir):
 
     loader = PandasLoader()
 
-    TestTable.load_csv( # type: ignore
+    SimpleTable.load_csv( # type: ignore
         session,
         csv_path,
         dedupe=False,
@@ -117,7 +113,7 @@ def test_replace_merge_strategy(session, tmp_csv_dir):
         ]
     ).to_csv(csv_path, index=False, sep="\t")
 
-    replaced = TestTable.load_csv( # type: ignore
+    replaced = SimpleTable.load_csv( # type: ignore
         session,
         csv_path,
         dedupe=False,
@@ -129,7 +125,7 @@ def test_replace_merge_strategy(session, tmp_csv_dir):
     assert replaced == 2
 
     rows = session.execute(
-        sa.select(TestTable).order_by(TestTable.id)
+        sa.select(SimpleTable).order_by(SimpleTable.id)
     ).scalars().all()
 
     assert [(r.id, r.name) for r in rows] == [
@@ -145,7 +141,7 @@ def test_empty_csv_is_noop(session, tmp_csv_dir):
 
     loader = PandasLoader()
 
-    inserted = TestTable.load_csv( # type: ignore
+    inserted = SimpleTable.load_csv( # type: ignore
         session, 
         csv_path,
         dedupe=False,
@@ -155,7 +151,7 @@ def test_empty_csv_is_noop(session, tmp_csv_dir):
 
     assert inserted == 0
 
-    rows = session.execute(sa.select(TestTable)).scalars().all()
+    rows = session.execute(sa.select(SimpleTable)).scalars().all()
     assert rows == []
 
 
@@ -204,3 +200,145 @@ def test_composite_pk_dedup(session, tmp_path):
     session.commit()
 
     assert inserted == 2
+
+
+@pytest.mark.parametrize(
+    "merge_strategy,expected_rows,expected_inserted",
+    [
+        (
+            "replace",
+            [
+                (1, "alpha"),
+                (2, "beta_updated"),
+                (3, "gamma_updated"),
+            ],
+            2,
+        ),
+        (
+            "upsert",
+            [
+                (1, "alpha"),
+                (2, "beta"),
+                (3, "gamma"),
+                (2, "beta_updated"),
+                (3, "gamma_updated"),
+            ],
+            2,
+        ),
+    ],
+)
+def test_merge_strategies(session, tmp_csv_dir, merge_strategy, expected_rows, expected_inserted):
+    csv_path = tmp_csv_dir / "test_table.csv"
+
+    pd.DataFrame(
+        [
+            {"id": 1, "name": "alpha"},
+            {"id": 2, "name": "beta"},
+            {"id": 3, "name": "gamma"},
+        ]
+    ).to_csv(csv_path, index=False, sep="\t")
+
+    loader = PandasLoader()
+    SimpleTable.load_csv(session, csv_path, dedupe=False, loader=loader)
+    session.commit()
+
+    pd.DataFrame(
+        [
+            {"id": 2, "name": "beta_updated"},
+            {"id": 3, "name": "gamma_updated"},
+        ]
+    ).to_csv(csv_path, index=False, sep="\t")
+
+    inserted = SimpleTable.load_csv(
+        session,
+        csv_path,
+        dedupe=False,
+        loader=loader,
+        merge_strategy=merge_strategy,
+    )
+    session.commit()
+
+    assert inserted == expected_inserted
+
+    rows = session.execute(
+        sa.select(SimpleTable).order_by(SimpleTable.id, SimpleTable.name)
+    ).scalars().all()
+
+    assert [(r.id, r.name) for r in rows] == expected_rows
+
+
+def test_staging_table_is_created_and_dropped(session, tmp_csv_dir):
+    csv_path = tmp_csv_dir / "test_table.csv"
+
+    pd.DataFrame([{"id": 1, "name": "alpha"}]).to_csv(csv_path, index=False)
+
+    SimpleTable.load_csv(
+        session,
+        csv_path,
+        loader=PandasLoader(),
+        dedupe=False,
+    )
+    session.commit()
+
+    inspector = sa.inspect(session.get_bind())
+    assert not inspector.has_table(SimpleTable.staging_tablename())
+
+
+def test_composite_pk_replace_merge(session, tmp_path):
+    csv = tmp_path / "composite_table.csv"
+
+    pd.DataFrame(
+        [
+            {"a": 1, "b": 1, "value": "x"},
+            {"a": 1, "b": 2, "value": "y"},
+        ]
+    ).to_csv(csv, index=False)
+
+    CompositeTable.load_csv(session, csv, loader=PandasLoader())
+    session.commit()
+
+    pd.DataFrame(
+        [
+            {"a": 1, "b": 1, "value": "x_updated"},
+        ]
+    ).to_csv(csv, index=False)
+
+    CompositeTable.load_csv(
+        session,
+        csv,
+        loader=PandasLoader(),
+        merge_strategy="replace",
+    )
+    session.commit()
+
+    rows = session.execute(
+        sa.select(CompositeTable).order_by(CompositeTable.a, CompositeTable.b)
+    ).scalars().all()
+
+    assert [(r.a, r.b, r.value) for r in rows] == [
+        (1, 1, "x_updated"),
+        (1, 2, "y"),
+    ]
+
+
+def test_filename_must_match_tablename(session, tmp_path):
+    csv = tmp_path / "wrong_name.csv"
+    pd.DataFrame([{"id": 1, "name": "x"}]).to_csv(csv, index=False)
+
+    with pytest.raises(ValueError, match="does not match table"):
+        SimpleTable.load_csv(
+            session,
+            csv,
+            loader=PandasLoader(),
+        )
+
+
+@pytest.mark.postgres
+def test_postgres_copy_fast_path(pg_session, tmp_path):
+    csv = tmp_path / "test_table.csv"
+    pd.DataFrame([{"id": 1, "name": "alpha"}]).to_csv(csv, index=False)
+
+    inserted = SimpleTable.load_csv(pg_session, csv)
+    pg_session.commit()
+
+    assert inserted == 1

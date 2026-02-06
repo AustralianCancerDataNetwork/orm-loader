@@ -57,7 +57,7 @@ class PandasLoader(LoaderInterface):
         dropped_internal = before - len(df)
         if dropped_internal > 0:
             logger.info(f"Dropped {dropped_internal} duplicate rows internally in staging for {ctx.tableclass.__tablename__}")        
-        return df
+        return df.copy()
 
     @classmethod
     def cast_to_model(cls, data: pd.DataFrame | pa.Table, ctx: LoaderContext) -> Any:

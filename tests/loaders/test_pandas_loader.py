@@ -8,7 +8,7 @@ from orm_loader.loaders.loader_interface import PandasLoader
 
 Base = so.declarative_base()
 
-class TestPandasLoader(CSVLoadableTableInterface, Base):
+class PandasLoaderTable(CSVLoadableTableInterface, Base):
     __tablename__ = "test_pandas_loader"
     id = sa.Column(sa.Integer, primary_key=True)
     value = sa.Column(sa.Integer, nullable=False)
@@ -16,10 +16,10 @@ class TestPandasLoader(CSVLoadableTableInterface, Base):
 def test_loader_context_fields(session):
 
     ctx = LoaderContext(
-        tableclass=TestPandasLoader,
+        tableclass=PandasLoaderTable,
         session=session,
         path=Path("file.csv"),
-        staging_table=TestPandasLoader.__table__,
+        staging_table=PandasLoaderTable.__table__,
         chunksize=100,
         normalise=False,
         dedupe=True,
@@ -37,10 +37,10 @@ def test_pandas_dedupe_internal(session, tmp_path):
     })
 
     ctx = LoaderContext(
-        tableclass=TestPandasLoader,
+        tableclass=PandasLoaderTable,
         session=session,
         path=Path("file.csv"),
-        staging_table=TestPandasLoader.__table__,
+        staging_table=PandasLoaderTable.__table__,
         chunksize=100,
         normalise=False,
         dedupe=True,

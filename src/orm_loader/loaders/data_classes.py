@@ -123,16 +123,17 @@ class LoaderInterface:
         """
         if dataframe.empty:
             return 0
-        # convert NaN to None for proper NULL insertion
-        dataframe = dataframe.where(pd.notna(dataframe), None) # type: ignore
-        records = cast(
-            Iterable[Dict[str, Any]],
-            dataframe.to_dict(orient="records"),
-        )
-        
+        # dataframe = dataframe.where(pd.notna(dataframe), None) # type: ignore
+        records = dataframe.to_dict(orient="records")
+        # cast(
+        #     Iterable[Dict[str, Any]],
+        #     dataframe.to_dict(orient="records"),
+        # )
+        # skip NaN for proper NULL insertion
+        records = [{f'{k}': v for k, v in record.items() if not pd.isna(v)} for record in records]
         session.execute( 
             staging_cls.insert(),
-            records, # type: ignore
+            records, 
         )
         session.flush()
         session.expunge_all()
