@@ -73,3 +73,6 @@
 
 # 0.3.15
 - bugfix
+
+# 0.3.16
+- normalise header col in rapid load

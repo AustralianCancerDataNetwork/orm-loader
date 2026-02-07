@@ -7,6 +7,7 @@ import logging
 import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.csv as pv
+import io
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +121,7 @@ def quick_load_pg(
     if not hasattr(raw_conn, "cursor"):
         raise RuntimeError("Expected DB-API connection for COPY")
     
-    encoding = infer_encoding(path)['encoding']
+    encoding = infer_encoding(path)['encoding'] or 'utf-8'
     delimiter = infer_delim(path)
 
     logger.info(f"Bulk loading {tablename} via COPY (encoding={encoding}, delimiter={delimiter})")
@@ -128,6 +129,22 @@ def quick_load_pg(
     cur = raw_conn.cursor()
     try:
         with open(path, "rb") as f:
+            # Read header line to normalise column names to lowercase and detect delimiter/encoding
+            header = f.readline().decode(encoding)
+            cols = header.rstrip("\n\r").split(delimiter)
+            lowered = [c.lower() for c in cols]
+
+            if len(set(lowered)) != len(lowered):
+                raise ValueError(
+                    f"Case-insensitive header collision in {path.name}: {cols}"
+                )
+
+            new_header = delimiter.join(lowered) + "\n"
+
+            # Reconstruct stream: new header + rest of file
+            rest = f.read()
+            stream = io.BytesIO(new_header.encode(encoding) + rest)
+
             cur.copy_expert(
                 sql=f'''
                 COPY "{tablename}"
@@ -139,7 +156,7 @@ def quick_load_pg(
                     ENCODING '{encoding}'
                 )
                 ''',
-                file=f,
+                file=stream,
             )
         session.flush()
         total = session.execute(sa.text(f'SELECT COUNT(*) FROM "{tablename}"')).scalar_one()

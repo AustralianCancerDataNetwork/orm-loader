@@ -34,6 +34,12 @@ from untrusted sources and accommodating updates and deletes for incremental loa
 
 """
 
+@staticmethod
+def _normalise_columns(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df.columns = [c.lower() for c in df.columns]
+    return df
+
 class PandasLoader(LoaderInterface):
 
     """
@@ -140,6 +146,7 @@ class PandasLoader(LoaderInterface):
 
         i = 0
         for chunk in chunks:
+            chunk = _normalise_columns(chunk)
             logger.info(f"Processing chunk {i} with {len(chunk)} rows for {ctx.tableclass.__tablename__}")
             i += 1
             if ctx.dedupe:

@@ -1,10 +1,10 @@
 import pytest
 import sqlalchemy as sa
 import sqlalchemy.orm as so
-from sqlalchemy.orm import declarative_base
 import os
+from orm_loader.tables import CSVLoadableTableInterface
 
-Base = declarative_base()
+from tests.models import Base
 
 @pytest.fixture
 def engine():
@@ -43,3 +43,7 @@ def pg_session(pg_engine):
     with so.Session(pg_engine) as session:
         yield session
         session.rollback()
+
+
+
+
