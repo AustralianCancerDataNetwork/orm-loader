@@ -34,6 +34,30 @@ class CastRule:
     arrow: Callable | None = None   # optional vectorised impl
 
 
+_NULL_STRINGS = {
+    "null",
+    "none",
+    "na",
+    "n/a",
+    "nan",
+}
+
+def _normalise_null(value: Any) -> Any | None:
+    if value is None:
+        return None
+
+    if isinstance(value, float) and math.isnan(value):
+        return None
+
+    if isinstance(value, str):
+        s = value.strip().lower()
+        if s == "":
+            return None
+        if s in _NULL_STRINGS:
+            return None
+
+    return value
+
 def _to_numeric_string(value: str | None) -> str | None:
     if value is None:
         return None
@@ -104,9 +128,33 @@ def _cast_string(value: Any, sa_type) -> str | None:
 
     return s
 
+def _to_float(value: Any) -> float | None:
+    if value is None:
+        return None
+
+    if isinstance(value, float):
+        if math.isnan(value):
+            return None
+        return float(value)
+
+    if isinstance(value, int):
+        return float(value)
+
+    if isinstance(value, str):
+        s = value.strip()
+        if s == "":
+            return None
+        try:
+            return float(s)
+        except ValueError:
+            return None
+
+    return None
+
+
 CAST_RULES: list[CastRule] = [
     CastRule(Integer, lambda v, _: _to_int(v) if v is not None else None),
-    CastRule(Float,   lambda v, _: _to_number(v) if v is not None else None),
+    CastRule(Float,   lambda v, _: _to_float(v) if v is not None else None),
     CastRule(Boolean, lambda v, _: _to_bool(v)),
     CastRule(Date,    lambda v, _: _parse_date(v)),
     CastRule(DateTime,lambda v, _: _parse_datetime(v)),
@@ -175,11 +223,8 @@ def _to_bool(value: Any) -> bool | None:
     return None
 
 def cast_scalar(value: Any, sa_type, *, on_error=None):
+    value = _normalise_null(value)
     if value is None:
-        return None
-    if isinstance(value, float) and math.isnan(value):
-        return None
-    if isinstance(value, str) and value.strip() == "":
         return None
 
     for rule in CAST_RULES:

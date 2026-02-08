@@ -1,5 +1,6 @@
 import sqlalchemy as sa
-from orm_loader.loaders.data.converters import perform_cast
+from orm_loader.loaders.data.converters import perform_cast, cast_scalar
+import pytest
 from datetime import date, datetime
 
 def test_perform_cast_integer():
@@ -134,3 +135,45 @@ def test_datetime_rejects_invalid():
 
 def test_datetime_rejects_garbage():
     assert perform_cast("not a date", sa.DateTime(), on_error=None) is None
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("NULL", None),
+        (" null ", None),
+        ("NaN", None),
+        ("N/A", None),
+        ("none", None),
+        ("", None),
+        (None, None),
+    ],
+)
+def test_string_null_normalisation(raw, expected):
+    assert cast_scalar(raw, sa.String()) is expected
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("NULL", None),
+        ("  NULL  ", None),
+        ("NaN", None),
+        ("", None),
+        ("123", 123),
+    ],
+)
+def test_numeric_null_normalisation(raw, expected):
+    assert cast_scalar(raw, sa.Integer()) == expected
+
+
+def test_cast_float_accepts_decimal_strings():
+    assert cast_scalar("1.80", sa.Float()) == 1.8
+    assert cast_scalar("2.50", sa.Float()) == 2.5
+    assert cast_scalar("2", sa.Float()) == 2.0
+
+
+def test_cast_int_rejects_decimal_strings():
+    assert cast_scalar("1.80", sa.Integer()) is None
+    assert cast_scalar("2.5", sa.Integer()) is None
+    assert cast_scalar("2", sa.Integer()) == 2

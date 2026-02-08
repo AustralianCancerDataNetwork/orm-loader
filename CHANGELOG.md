@@ -82,3 +82,6 @@
 
 # 0.3.18
 - normalised naming of hash/encrypted cols
+
+# 0.3.19
+- float casting & changed test CICD to not call pg tests as a running instance is required
