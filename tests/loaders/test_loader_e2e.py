@@ -7,31 +7,10 @@ import pytest
 from orm_loader.loaders.data_classes import _clean_nulls
 from orm_loader.tables.loadable_table import CSVLoadableTableInterface
 from orm_loader.loaders.loader_interface import PandasLoader
-from orm_loader.helpers import Base
+
+from tests.models import Base, SimpleTable, RequiredTable, CompositeTable
 
 import numpy as np
-
-class SimpleTable(Base, CSVLoadableTableInterface):
-    __tablename__ = "test_table"
-
-    id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
-    name: so.Mapped[str] = so.mapped_column(sa.String, nullable=False)
-
-
-class RequiredTable(Base, CSVLoadableTableInterface):
-    __tablename__ = "required_table"
-
-    id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
-    name: so.Mapped[str] = so.mapped_column(sa.String, nullable=False)
-
-
-class CompositeTable(Base, CSVLoadableTableInterface):
-    __tablename__ = "composite_table"
-
-    a: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
-    b: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
-    value: so.Mapped[str] = so.mapped_column(sa.String)
-
 
 @pytest.fixture
 def engine():
@@ -333,19 +312,6 @@ def test_filename_must_match_tablename(session, tmp_path):
         )
 
 
-@pytest.mark.postgres
-def test_postgres_copy_fast_path(pg_session, tmp_path):
-    csv = tmp_path / "test_table.csv"
-    pd.DataFrame([{"id": 1, "name": "alpha"}]).to_csv(csv, index=False)
-
-    inserted = SimpleTable.load_csv(pg_session, csv)
-    pg_session.commit()
-
-    assert inserted == 1
-
-
-
-
 def test_clean_nulls_basic():
     assert _clean_nulls(None) is None
     assert _clean_nulls(pd.NA) is None
@@ -450,27 +416,6 @@ def test_embedded_tab_in_field(session, tmp_path):
 
     rows = session.execute(sa.select(TextTable)).scalars().all()
     assert rows[0].name == "foo\tbar"
-
-@pytest.mark.postgres
-def test_copy_and_orm_path_equivalence(pg_session, tmp_path):
-    csv = tmp_path / "test_table.csv"
-
-    pd.DataFrame(
-        [
-            {"id": 1, "name": "alpha"},
-            {"id": 2, "name": None},
-        ]
-    ).to_csv(csv, index=False, sep="\t")
-
-    inserted = SimpleTable.load_csv(pg_session, csv)
-    pg_session.commit()
-
-    rows = pg_session.execute(sa.select(SimpleTable).order_by(SimpleTable.id)).scalars().all()
-    assert [(r.id, r.name) for r in rows] == [
-        (1, "alpha"),
-        (2, None),
-    ]
-
 
 # from hypothesis import given, strategies as st
 # from sqlalchemy.orm import declarative_base

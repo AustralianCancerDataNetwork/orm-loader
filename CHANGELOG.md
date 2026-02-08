@@ -76,3 +76,6 @@
 
 # 0.3.16
 - normalise header col in rapid load
+
+# 0.3.17
+- crlf on linux

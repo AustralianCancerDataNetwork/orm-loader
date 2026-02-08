@@ -3,6 +3,7 @@ import sqlalchemy as sa
 import sqlalchemy.orm as so
 import os
 from orm_loader.tables import CSVLoadableTableInterface
+import time
 
 from tests.models import Base
 
@@ -16,33 +17,42 @@ def session(engine):
     with so.Session(engine) as s:
         yield s
 
-POSTGRES_DSN_ENV = "ORM_LOADER_TEST_PG_DSN"
+
+POSTGRES_URL = "postgresql+psycopg2://test:test@localhost:55432/test_db"
 
 @pytest.fixture(scope="session")
 def pg_engine():
-    dsn = os.getenv(POSTGRES_DSN_ENV)
-    if not dsn:
-        pytest.skip(
-            f"Postgres tests skipped: {POSTGRES_DSN_ENV} not set",
-            allow_module_level=True,
-        )
+    last_err = None
+    for i in range(20):
+        try:
+            engine = sa.create_engine(POSTGRES_URL, future=True)
+            with engine.connect() as conn:
+                conn.execute(sa.text("select 1"))
+            print("Postgres connection established")
+            yield engine
+            engine.dispose()
+            return
+        except Exception as e:
+            last_err = e
+            print(f"[{i}] Postgres not ready:", repr(e))
+            time.sleep(1)
 
-    engine = sa.create_engine(dsn, future=True)
-
-    # fresh schema for test run
-    Base.metadata.drop_all(engine)
-    Base.metadata.create_all(engine)
-
-    yield engine
-
-    engine.dispose()
-
+    raise RuntimeError(f"Postgres never became available: {last_err!r}")
 
 @pytest.fixture
 def pg_session(pg_engine):
-    with so.Session(pg_engine) as session:
+    Session = so.sessionmaker(bind=pg_engine, future=True)
+    with pg_engine.begin() as conn:
+        # optional: recreate schema per test
+        Base.metadata.drop_all(conn)
+        Base.metadata.create_all(conn)
+
+    session = Session()
+    try:
         yield session
+    finally:
         session.rollback()
+        session.close()
 
 
 

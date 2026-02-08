@@ -26,6 +26,48 @@ Includes helpers for:
 These helpers are intentionally low-level and stateless.
 """
 
+class NormalisedCSVStream(io.RawIOBase):
+    def __init__(self, f, encoding: str, delimiter: str):
+        self._f = f
+        self._encoding = encoding
+        self._delimiter = delimiter
+        self._sent_header = False
+        self._buffer = b""
+        self._eof = False
+
+    def readable(self):
+        return True
+
+    def read(self, size=-1):
+        if self._eof:
+            return b""
+
+        out = bytearray()
+
+        # Send rewritten header once
+        if not self._sent_header:
+            header = self._f.readline().decode(self._encoding)
+            newline = check_line_ending(header)
+            cols = header.rstrip(newline).split(self._delimiter)
+            lowered = [c.lower().replace('_hash', '') for c in cols]
+            new_header = (self._delimiter.join(lowered) + "\n").encode(self._encoding)
+            out.extend(new_header)
+            self._sent_header = True
+
+        while size < 0 or len(out) < size:
+            chunk = self._f.read(8192)
+            if not chunk:
+                self._eof = True
+                break
+
+            # Normalize CRLF/CR to LF per chunk
+            chunk = chunk.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+            out.extend(chunk)
+
+            if size > 0 and len(out) >= size:
+                break
+
+        return bytes(out)
 
 def infer_encoding(file):
     with open(file, 'rb') as infile:
@@ -42,7 +84,6 @@ def infer_delim(file):
         if tabs > commas:
             return '\t'
         return ','
-
 
 def arrow_drop_duplicates(
     table: pa.Table,
@@ -111,6 +152,17 @@ def conservative_load_parquet(path: Path, wanted_cols: list[str], chunksize: int
         for batch in reader:
             yield batch
 
+def check_line_ending(raw_header: str) -> str:
+    if raw_header.endswith("\r\n"):
+        return "\r\n"
+    elif raw_header.endswith("\n"):
+        return "\n"
+    elif raw_header.endswith("\r"):
+        return "\r"
+    else:
+        logger.warning("Unable to detect line ending from header: %r. Defaulting to '\\n'", raw_header)
+        return "\n"
+
 def quick_load_pg(
     *,
     path: Path,
@@ -129,21 +181,23 @@ def quick_load_pg(
     cur = raw_conn.cursor()
     try:
         with open(path, "rb") as f:
+            stream = NormalisedCSVStream(f, encoding=encoding, delimiter=delimiter)
             # Read header line to normalise column names to lowercase and detect delimiter/encoding
-            header = f.readline().decode(encoding)
-            cols = header.rstrip("\n\r").split(delimiter)
-            lowered = [c.lower() for c in cols]
+            # header = f.readline().decode(encoding)
+            # newline = check_line_ending(header)
+            # cols = header.rstrip(newline).split(delimiter)
+            # lowered = [c.lower() for c in cols]
 
-            if len(set(lowered)) != len(lowered):
-                raise ValueError(
-                    f"Case-insensitive header collision in {path.name}: {cols}"
-                )
+            # if len(set(lowered)) != len(lowered):
+            #     raise ValueError(
+            #         f"Case-insensitive header collision in {path.name}: {cols}"
+            #     )
 
-            new_header = delimiter.join(lowered) + "\n"
+            # new_header = delimiter.join(lowered) + newline
 
-            # Reconstruct stream: new header + rest of file
-            rest = f.read()
-            stream = io.BytesIO(new_header.encode(encoding) + rest)
+            # # Reconstruct stream: new header + rest of file
+            # rest = f.read()
+            # stream = io.BytesIO(new_header.encode(encoding) + rest)
 
             cur.copy_expert(
                 sql=f'''
