@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 def _clean_nulls(v):
     if v is None:
         return None
-    if v is pd.NA:
+    if v is pd.NA or v is pd.NaT:
         return None
     if isinstance(v, float) and pd.isna(v):
         return None
