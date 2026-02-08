@@ -37,7 +37,7 @@ from untrusted sources and accommodating updates and deletes for incremental loa
 @staticmethod
 def _normalise_columns(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
-    df.columns = [c.lower() for c in df.columns]
+    df.columns = [c.lower().replace('_hash', '').strip() for c in df.columns]
     return df
 
 class PandasLoader(LoaderInterface):

@@ -79,3 +79,6 @@
 
 # 0.3.17
 - crlf on linux
+
+# 0.3.18
+- normalised naming of hash/encrypted cols
