@@ -85,3 +85,6 @@
 
 # 0.3.19
 - float casting & changed test CICD to not call pg tests as a running instance is required
+
+# 0.3.20
+- NaT

@@ -4,7 +4,7 @@ import math
 from dataclasses import dataclass
 import pyarrow as pa
 import pyarrow.compute as pc
-
+import pandas as pd
 import re
 from datetime import datetime, date
 from dateutil import parser 
@@ -44,6 +44,9 @@ _NULL_STRINGS = {
 
 def _normalise_null(value: Any) -> Any | None:
     if value is None:
+        return None
+    
+    if value is pd.NA or value is pd.NaT:
         return None
 
     if isinstance(value, float) and math.isnan(value):
