@@ -1,8 +1,10 @@
 import sqlalchemy as sa
 import sqlalchemy.orm as so
+from sqlalchemy.exc import StatementError
 from typing import Any, Tuple, Type, cast
 import logging
 from .allocators import IdAllocator
+from ..helpers import normalise_null
 
 logger = logging.getLogger(__name__)
 
@@ -231,3 +233,87 @@ class ORMTableBase:
             An ID allocator initialised to the current maximum ID.
         """
         return IdAllocator(cls.max_id(session))
+
+
+    @classmethod
+    def clean_kwargs(
+        cls,
+        data: dict[str, Any],
+        *,
+        drop_nulls: bool = True,
+        strict: bool = False,
+    ) -> dict[str, Any]:
+        """
+        Normalise inbound constructor kwargs:
+        - nan / NaT / 'nan' / '' -> None
+        - optionally drop nulls
+        - optionally validate required columns
+        """
+        cols = cls.model_columns()
+
+        cleaned = {}
+        for k, v in data.items():
+            if k not in cols:
+                continue  # ignore unknown keys safely
+
+            v2 = normalise_null(v)
+
+            if v2 is None and drop_nulls:
+                continue
+
+            cleaned[k] = v2
+
+        if strict:
+            missing = cls.required_columns() - cleaned.keys()
+            if missing:
+                raise ValueError(
+                    f"Missing required fields for {cls.__name__}: {sorted(missing)}"
+                )
+
+        return cleaned
+
+
+    @classmethod
+    def from_dict(
+        cls,
+        data: dict[str, Any],
+        *,
+        drop_nulls: bool = True,
+        strict: bool = False,
+        debug: bool = False,
+    ):
+        cleaned = cls.clean_kwargs(
+            data,
+            drop_nulls=drop_nulls,
+            strict=strict,
+        )
+
+        try:
+            return cls(**cleaned)
+
+        except TypeError as e:
+            # bad keyword, missing arg, etc
+            unknown_keys = set(data.keys()) - set(cls.model_columns().keys())
+            msg = (
+                f"Failed to construct {cls.__name__} from dict.\n"
+                f"Error: {e}\n"
+                f"Known columns: {sorted(cls.model_columns().keys())}\n"
+                f"Unknown keys: {sorted(unknown_keys)}\n"
+                f"Cleaned kwargs: {cleaned}"
+            )
+            raise TypeError(msg) from e
+
+        except StatementError as e:
+            # SQLAlchemy type coercion / bind errors
+            msg = (
+                f"SQLAlchemy failed to bind values for {cls.__name__}.\n"
+                f"Cleaned kwargs: {cleaned}\n"
+            )
+            raise ValueError(msg) from e
+
+        except Exception as e:
+            msg = (
+                f"Unexpected error constructing {cls.__name__}.\n"
+                f"Cleaned kwargs: {cleaned}\n"
+            )
+            raise RuntimeError(msg) from e

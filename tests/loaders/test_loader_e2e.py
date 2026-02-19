@@ -392,7 +392,7 @@ def test_embedded_newline_in_field_is_preserved(session, tmp_path):
 
 
 def test_embedded_tab_in_field(session, tmp_path):
-    class TextTable(Base, CSVLoadableTableInterface):
+    class TextTable2(Base, CSVLoadableTableInterface):
         __tablename__ = "tab_table"
 
         id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
@@ -406,7 +406,7 @@ def test_embedded_tab_in_field(session, tmp_path):
         '1\t"foo\tbar"\n'
     )
 
-    inserted = TextTable.load_csv( # type: ignore
+    inserted = TextTable2.load_csv( # type: ignore
         session,
         csv,
         loader=PandasLoader(),
@@ -414,7 +414,7 @@ def test_embedded_tab_in_field(session, tmp_path):
     )
     session.commit()
 
-    rows = session.execute(sa.select(TextTable)).scalars().all()
+    rows = session.execute(sa.select(TextTable2)).scalars().all()
     assert rows[0].name == "foo\tbar"
 
 # from hypothesis import given, strategies as st

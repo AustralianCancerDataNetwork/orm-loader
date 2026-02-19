@@ -91,3 +91,6 @@
 
 # 0.3.21
 - NaT further downstream
+
+# 0.3.22
+- made the base class from_dict constructor
