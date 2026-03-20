@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import Any
 import pandas as pd
 import logging
+from tqdm import tqdm
 import pyarrow as pa
 import pyarrow.dataset as ds
 import pyarrow.compute as pc
@@ -122,10 +123,17 @@ class PandasLoader(LoaderInterface):
         If chunksize is None, pandas returns a single DataFrame, which we
         normalise to a one-element iterator for unified processing.
         """
-        total = 0
 
         delimiter = infer_delim(ctx.path)
         encoding = infer_encoding(ctx.path)['encoding']
+
+        try:
+            with open(ctx.path, 'rb') as f:
+                total_rows = sum(1 for _ in f) - 1 # Subtract 1 for header
+                total_rows = max(0, total_rows) 
+        except Exception as e:
+            logger.warning(f"Could not pre-calculate row count for {ctx.path.name}: {e}")
+            total_rows = None
 
         try:
             reader = pd.read_csv(
@@ -144,20 +152,21 @@ class PandasLoader(LoaderInterface):
         logger.info(f"Loading with chunksize '{ctx.chunksize}' for file {ctx.path.name}")       
         chunks = (reader,) if isinstance(reader, pd.DataFrame) else reader
 
-        i = 0
-        for chunk in chunks:
-            chunk = _normalise_columns(chunk)
-            logger.info(f"Processing chunk {i} with {len(chunk)} rows for {ctx.tableclass.__tablename__}")
-            i += 1
-            if ctx.dedupe:
-                chunk = cls.dedupe(chunk, ctx)
-            if ctx.normalise:
-                chunk = cls.cast_to_model(chunk, ctx)
-            total += cls._load_chunk(
-                staging_cls=ctx.staging_table,
-                session=ctx.session,
-                dataframe=chunk
-            )
+        total = 0
+        with tqdm(total=total_rows, desc=f"Loading {ctx.tableclass.__tablename__}", unit="rows") as pbar:
+            for chunk in chunks:
+                chunk_len = len(chunk)
+                chunk = _normalise_columns(chunk)
+                if ctx.dedupe:
+                    chunk = cls.dedupe(chunk, ctx)
+                if ctx.normalise:
+                    chunk = cls.cast_to_model(chunk, ctx)
+                total += cls._load_chunk(
+                    staging_cls=ctx.staging_table,
+                    session=ctx.session,
+                    dataframe=chunk
+                )
+                pbar.update(chunk_len)
 
         return total
 

@@ -94,3 +94,6 @@
 
 # 0.3.22
 - made the base class from_dict constructor
+
+# 0.3.23
+- optimized bulk load via dynamic index/FK management & added FTS support with generated columns

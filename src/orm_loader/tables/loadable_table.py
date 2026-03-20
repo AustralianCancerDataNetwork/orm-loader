@@ -4,11 +4,15 @@ import logging
 
 from typing import Type, ClassVar, Optional
 from pathlib import Path
+from contextlib import contextmanager
+from tqdm.auto import tqdm
+from tqdm.contrib.logging import logging_redirect_tqdm
 
 from .orm_table import ORMTableBase
 from .typing import CSVTableProtocol
 from ..loaders.loader_interface import LoaderInterface, LoaderContext, PandasLoader, ParquetLoader
 from ..loaders.loading_helpers import quick_load_pg
+from ..helpers.bulk import restore_fk_check, disable_fk_check
 
 logger = logging.getLogger(__name__)
 
@@ -92,9 +96,7 @@ class CSVLoadableTableInterface(ORMTableBase):
             If the database dialect is unsupported.
         """
         table = cls.__table__
-        session.execute(sa.text(f"""
-            DROP TABLE IF EXISTS "{cls.staging_tablename()}";
-        """))
+        session.execute(sa.text(f"""DROP TABLE IF EXISTS "{cls.staging_tablename()}";"""))
 
         if session.bind is None:
             raise RuntimeError("Session is not bound to an engine")
@@ -102,10 +104,17 @@ class CSVLoadableTableInterface(ORMTableBase):
         dialect = session.bind.dialect.name 
 
         if dialect == "postgresql":
+            logger.info(f"Disabling indices on staging table for performance")
             session.execute(sa.text(f'''
                 CREATE UNLOGGED TABLE "{cls.staging_tablename()}"
-                (LIKE "{table.name}" INCLUDING ALL);
+                (LIKE "{table.name}" INCLUDING DEFAULTS INCLUDING CONSTRAINTS);
             '''))
+
+            # Need to drop the columns we are not going to load into, otherwise the COPY will fail
+            computed_cols = [c.name for c in table.columns if c.computed is not None]
+            for col in computed_cols:
+                session.execute(sa.text(f'ALTER TABLE "{cls.staging_tablename()}" DROP COLUMN "{col}";'))
+
         elif dialect == "sqlite":
 
             metadata = sa.MetaData()
@@ -145,6 +154,49 @@ class CSVLoadableTableInterface(ORMTableBase):
         # cleanly for external pipeline purposes
 
         session.commit()
+
+    @classmethod
+    @contextmanager
+    def manage_indices(cls: Type['CSVTableProtocol'], session: so.Session):
+        """
+        Temporarily drops non-primary key indices before a bulk operation
+        and recreates them afterwards to prevent write amplification.
+        """
+        indexes = list(cls.__table__.indexes)
+        
+        if indexes:
+            logger.info(f"Table `{cls.__tablename__}`: Temporarily dropping {len(indexes)} indices for bulk load...")
+            for idx in indexes:
+                session.execute(sa.schema.DropIndex(idx))
+            session.commit()
+
+        # session.commit() restores the original state of the session. We need that one after we are done
+        previous_fk_state = disable_fk_check(session)
+            
+        try:
+            yield 
+            session.commit() 
+            
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Table `{cls.__tablename__}`: Merge operation failed - {e}")
+            raise
+        finally:
+            # Put the connection back EXACTLY how we found it
+            restore_fk_check(session, previous_fk_state)
+            
+            if indexes:
+                logger.info(f"Table `{cls.__tablename__}`: Rebuilding indices (this may take a moment).")
+                try:
+                    #if session.bind.dialect.name == "postgresql":
+                    #    session.execute(sa.text("SET maintenance_work_mem = '1GB';"))
+                    
+                    for idx in indexes:
+                        session.execute(sa.schema.CreateIndex(idx))
+                    session.commit()
+                except Exception as index_e:
+                    session.rollback()
+                    logger.error(f"Table `{cls.__tablename__}`: Failed to rebuild indices: {index_e}")
 
 
     @classmethod
@@ -225,8 +277,10 @@ class CSVLoadableTableInterface(ORMTableBase):
                     )
                     return total
                 except Exception as e:
+                    loader_context.session.rollback()
                     logger.warning(f"COPY failed for {cls.staging_tablename()}: {e}")
                     logger.info('Falling back to ORM-based load functionality')
+
             total = cls.orm_staging_load(
                 loader=loader,
                 loader_context=loader_context
@@ -318,7 +372,7 @@ class CSVLoadableTableInterface(ORMTableBase):
             Number of rows loaded.
         """
 
-        logger.debug(f"Loading CSV for {cls.__tablename__} via staging table from {path}")
+        logger.debug(f"Table `{cls.__tablename__}`: Loading CSV from {path}")
 
         if path.stem.lower() != cls.__tablename__:
             raise ValueError(
@@ -337,11 +391,21 @@ class CSVLoadableTableInterface(ORMTableBase):
 
         if loader is None:
             loader = cls._select_loader(path)
-        total = cls.load_staging(loader=loader, loader_context=loader_context)
 
-        cls.merge_from_staging(session, merge_strategy=merge_strategy)
-        cls.drop_staging_table(session)
+        with logging_redirect_tqdm():
+            
+            # Load to staging (Indices are already excluded via updated create_staging_table)
+            logger.info(f"Table `{cls.__tablename__}`: Loading data into unlogged staging table")
+            total = cls.load_staging(loader=loader, loader_context=loader_context)
 
+            # Merge staging to target (Wrapped in our index dropper!)
+            logger.info(f"Table `{cls.__tablename__}`: Merging staging data into target table")
+            with cls.manage_indices(session):
+                cls.merge_from_staging(session, merge_strategy=merge_strategy)
+            
+            cls.drop_staging_table(session)
+
+        logger.info(f"Table `{cls.__tablename__}`: Successfully finished ingestion. Total rows: {total}")
         return total
         
 
@@ -402,9 +466,13 @@ class CSVLoadableTableInterface(ORMTableBase):
         """
         Insert all rows from the staging table into the target table.
         """
+        # Get all columns that are NOT computed
+        insertable_cols = [c.name for c in cls.__table__.columns if c.computed is None]
+        cols_str = ", ".join(f'"{c}"' for c in insertable_cols)
+
         session.execute(sa.text(f"""
-            INSERT INTO "{target}"
-            SELECT * FROM "{staging}";
+            INSERT INTO "{target}" ({cols_str})
+            SELECT {cols_str} FROM "{staging}";
         """))
 
 
@@ -420,18 +488,23 @@ class CSVLoadableTableInterface(ORMTableBase):
         """
         Merge staging data using an upsert strategy.
         """
+
+        # Get all columns that are NOT computed
+        insertable_cols = [c.name for c in cls.__table__.columns if c.computed is None]
+        cols_str = ", ".join(f'"{c}"' for c in insertable_cols)
+
         if dialect == "postgresql":
             # INSERT … ON CONFLICT DO NOTHING
             session.execute(sa.text(f"""
-                INSERT INTO "{target}"
-                SELECT * FROM "{staging}"
+                INSERT INTO "{target}" ({cols_str})
+                SELECT {cols_str} FROM "{staging}"
                 ON CONFLICT ({", ".join(f'"{c}"' for c in pk_cols)}) DO NOTHING;
             """))
 
         elif dialect == "sqlite":
             session.execute(sa.text(f"""
-                INSERT OR IGNORE INTO "{target}"
-                SELECT * FROM "{staging}";
+                INSERT OR IGNORE INTO "{target}" ({cols_str})
+                SELECT {cols_str} FROM "{staging}";
             """))
 
         else:
@@ -507,5 +580,6 @@ class CSVLoadableTableInterface(ORMTableBase):
         dict[str, sqlalchemy.ColumnElement]
             Mapping of input column names to SQLAlchemy columns.
         """
-        return cls.model_columns()
-    
+        cols = cls.model_columns()
+        computed_names = {c.name for c in cls.__table__.columns if c.computed is not None}  # type: ignore
+        return {k: v for k, v in cols.items() if k not in computed_names}
