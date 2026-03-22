@@ -5,8 +5,6 @@ import logging
 from typing import Type, ClassVar, Optional
 from pathlib import Path
 from contextlib import contextmanager
-from tqdm.auto import tqdm
-from tqdm.contrib.logging import logging_redirect_tqdm
 
 from .orm_table import ORMTableBase
 from .typing import CSVTableProtocol
@@ -392,18 +390,16 @@ class CSVLoadableTableInterface(ORMTableBase):
         if loader is None:
             loader = cls._select_loader(path)
 
-        with logging_redirect_tqdm():
-            
-            # Load to staging (Indices are already excluded via updated create_staging_table)
-            logger.info(f"Table `{cls.__tablename__}`: Loading data into unlogged staging table")
-            total = cls.load_staging(loader=loader, loader_context=loader_context)
+        # Load to staging (Indices are already excluded via updated create_staging_table)
+        logger.info(f"Table `{cls.__tablename__}`: Loading data into unlogged staging table")
+        total = cls.load_staging(loader=loader, loader_context=loader_context)
 
-            # Merge staging to target (Wrapped in our index dropper!)
-            logger.info(f"Table `{cls.__tablename__}`: Merging staging data into target table")
-            with cls.manage_indices(session):
-                cls.merge_from_staging(session, merge_strategy=merge_strategy)
-            
-            cls.drop_staging_table(session)
+        # Merge staging to target (Wrapped in our index dropper!)
+        logger.info(f"Table `{cls.__tablename__}`: Merging staging data into target table")
+        with cls.manage_indices(session):
+            cls.merge_from_staging(session, merge_strategy=merge_strategy)
+        
+        cls.drop_staging_table(session)
 
         logger.info(f"Table `{cls.__tablename__}`: Successfully finished ingestion. Total rows: {total}")
         return total

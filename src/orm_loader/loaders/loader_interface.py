@@ -2,7 +2,6 @@ from __future__ import annotations
 from typing import Any
 import pandas as pd
 import logging
-from tqdm import tqdm
 import pyarrow as pa
 import pyarrow.dataset as ds
 import pyarrow.compute as pc
@@ -153,21 +152,17 @@ class PandasLoader(LoaderInterface):
         chunks = (reader,) if isinstance(reader, pd.DataFrame) else reader
 
         total = 0
-        with tqdm(total=total_rows, desc=f"Loading {ctx.tableclass.__tablename__}", unit="rows") as pbar:
-            for chunk in chunks:
-                chunk_len = len(chunk)
-                chunk = _normalise_columns(chunk)
-                if ctx.dedupe:
-                    chunk = cls.dedupe(chunk, ctx)
-                if ctx.normalise:
-                    chunk = cls.cast_to_model(chunk, ctx)
-                total += cls._load_chunk(
-                    staging_cls=ctx.staging_table,
-                    session=ctx.session,
-                    dataframe=chunk
-                )
-                pbar.update(chunk_len)
-
+        for chunk in chunks:
+            chunk = _normalise_columns(chunk)
+            if ctx.dedupe:
+                chunk = cls.dedupe(chunk, ctx)
+            if ctx.normalise:
+                chunk = cls.cast_to_model(chunk, ctx)
+            total += cls._load_chunk(
+                staging_cls=ctx.staging_table,
+                session=ctx.session,
+                dataframe=chunk
+            )
         return total
 
 class ParquetLoader(LoaderInterface):
