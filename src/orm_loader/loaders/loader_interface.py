@@ -127,14 +127,6 @@ class PandasLoader(LoaderInterface):
         encoding = infer_encoding(ctx.path)['encoding']
 
         try:
-            with open(ctx.path, 'rb') as f:
-                total_rows = sum(1 for _ in f) - 1 # Subtract 1 for header
-                total_rows = max(0, total_rows) 
-        except Exception as e:
-            logger.warning(f"Could not pre-calculate row count for {ctx.path.name}: {e}")
-            total_rows = None
-
-        try:
             reader = pd.read_csv(
                 ctx.path,
                 delimiter=delimiter,
@@ -152,7 +144,8 @@ class PandasLoader(LoaderInterface):
         chunks = (reader,) if isinstance(reader, pd.DataFrame) else reader
 
         total = 0
-        for chunk in chunks:
+        for i, chunk in enumerate(chunks):
+            logger.debug(f"Processing chunk {i} with {len(chunk)} rows for {ctx.tableclass.__tablename__}")
             chunk = _normalise_columns(chunk)
             if ctx.dedupe:
                 chunk = cls.dedupe(chunk, ctx)
