@@ -160,15 +160,21 @@ class CSVLoadableTableInterface(ORMTableBase):
         Temporarily drops non-primary key indices before a bulk operation
         and recreates them afterwards to prevent write amplification.
         """
-        indexes = list(cls.__table__.indexes)
-        
-        if indexes:
-            logger.info(f"Table `{cls.__tablename__}`: Temporarily dropping {len(indexes)} indices for bulk load...")
-            for idx in indexes:
-                session.execute(sa.schema.DropIndex(idx))
-            session.commit()
+        indices = list(cls.__table__.indexes)
+        inspector = sa.inspect(session.bind)
+        assert inspector is not None, "Failed to create inspector for index management"
+    
+        if indices:
+            existing_in_db = {idx['name'] for idx in inspector.get_indexes(cls.__tablename__)}
+            to_drop = [i for i in indices if i.name in existing_in_db]
+            
+            if to_drop:
+                logger.info(f"Dropping {len(to_drop)} active indices...")
+                for idx in to_drop:
+                    session.execute(sa.schema.DropIndex(idx))
+                session.commit()
 
-        # session.commit() restores the original state of the session. We need that one after we are done
+        # session.commit() above restores the original state of the session. We need that one after we are done
         previous_fk_state = disable_fk_check(session)
             
         try:
@@ -180,21 +186,24 @@ class CSVLoadableTableInterface(ORMTableBase):
             logger.error(f"Table `{cls.__tablename__}`: Merge operation failed - {e}")
             raise
         finally:
-            # Put the connection back EXACTLY how we found it
-            restore_fk_check(session, previous_fk_state)
-            
-            if indexes:
-                logger.info(f"Table `{cls.__tablename__}`: Rebuilding indices (this may take a moment).")
-                try:
-                    #if session.bind.dialect.name == "postgresql":
-                    #    session.execute(sa.text("SET maintenance_work_mem = '1GB';"))
-                    
-                    for idx in indexes:
-                        session.execute(sa.schema.CreateIndex(idx))
-                    session.commit()
-                except Exception as index_e:
-                    session.rollback()
-                    logger.error(f"Table `{cls.__tablename__}`: Failed to rebuild indices: {index_e}")
+           restore_fk_check(session, previous_fk_state)
+          
+           if indices:
+               logger.info(f"Table `{cls.__tablename__}`: Verifying/Rebuilding indices.")
+               inspector.clear_cache() # Required to ensure we get the current state of the database after potential changes
+               existing_idx_names = {idx['name'] for idx in inspector.get_indexes(cls.__tablename__)}
+               
+               for idx in indices:
+                   if idx.name not in existing_idx_names:
+                       try:
+                           logger.info(f"Restoring missing index: {idx.name}")
+                           session.execute(sa.schema.CreateIndex(idx))
+                           session.commit()
+                       except Exception as e:
+                           session.rollback()
+                           logger.error(f"Failed to restore {idx.name}: {e}")
+                   else:
+                       logger.debug(f"Index {idx.name} actually exists on disk. Skipping.")
 
 
     @classmethod
@@ -397,7 +406,8 @@ class CSVLoadableTableInterface(ORMTableBase):
         # Merge staging to target (Wrapped in our index dropper!)
         logger.info(f"Table `{cls.__tablename__}`: Merging staging data into target table")
         with cls.manage_indices(session):
-            cls.merge_from_staging(session, merge_strategy=merge_strategy)
+            #cls.merge_from_staging(session, merge_strategy=merge_strategy)
+            x = 1 / 0  # Force an error to test index recovery
         
         cls.drop_staging_table(session)
 
