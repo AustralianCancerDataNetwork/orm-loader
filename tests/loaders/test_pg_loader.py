@@ -1,17 +1,10 @@
 import sqlalchemy as sa
-import sqlalchemy.orm as so
-from sqlalchemy.orm import Session
-from pathlib import Path
 import pandas as pd
 import pytest
-from orm_loader.loaders.data_classes import _clean_nulls
-from orm_loader.tables.loadable_table import CSVLoadableTableInterface
-from orm_loader.loaders.loader_interface import PandasLoader
 from orm_loader.loaders.loading_helpers import infer_encoding, infer_delim, check_line_ending, quick_load_pg
 
-from tests.models import Base, SimpleTable, RequiredTable, CompositeTable
+from tests.models import SimpleTable
 
-import numpy as np
 
 @pytest.mark.postgres
 def test_copy_and_orm_path_equivalence(pg_session, tmp_path):
@@ -24,7 +17,7 @@ def test_copy_and_orm_path_equivalence(pg_session, tmp_path):
         ]
     ).to_csv(csv, index=False, sep="\t")
 
-    inserted = SimpleTable.load_csv(pg_session, csv)
+    SimpleTable.load_csv(pg_session, csv)
     pg_session.commit()
 
     rows = pg_session.execute(sa.select(SimpleTable).order_by(SimpleTable.id)).scalars().all()
@@ -298,7 +291,7 @@ def test_copy_fails_with_raw_carriage_returns_but_succeeds_after_normalisation(p
     try:
         quick_load_pg(path=csv, session=pg_session, tablename="test_table")
         pg_session.commit()
-    except Exception as e:
+    except Exception:
         failed = True
 
     # Clean up table for second attempt

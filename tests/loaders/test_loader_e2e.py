@@ -379,7 +379,7 @@ def test_embedded_newline_in_field_is_preserved(session, tmp_path):
         '1\t"hello\nworld"\n'
     )
 
-    inserted = TextTable.load_csv( # type: ignore
+    TextTable.load_csv( # type: ignore
         session,
         csv,
         loader=PandasLoader(),
@@ -406,7 +406,7 @@ def test_embedded_tab_in_field(session, tmp_path):
         '1\t"foo\tbar"\n'
     )
 
-    inserted = TextTable2.load_csv( # type: ignore
+    TextTable2.load_csv( # type: ignore
         session,
         csv,
         loader=PandasLoader(),

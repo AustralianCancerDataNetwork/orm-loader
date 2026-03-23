@@ -1,6 +1,5 @@
 from pathlib import Path
 import sqlalchemy as sa
-import sqlalchemy.orm as so
 from orm_loader.loaders.data_classes import LoaderContext
 import pandas as pd
 from orm_loader.loaders.loader_interface import PandasLoader

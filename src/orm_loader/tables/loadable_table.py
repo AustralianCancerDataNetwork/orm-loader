@@ -102,7 +102,7 @@ class CSVLoadableTableInterface(ORMTableBase):
         dialect = session.bind.dialect.name 
 
         if dialect == "postgresql":
-            logger.info(f"Disabling indices on staging table for performance")
+            logger.info("Disabling indices on staging table for performance")
             session.execute(sa.text(f'''
                 CREATE UNLOGGED TABLE "{cls.staging_tablename()}"
                 (LIKE "{table.name}" INCLUDING DEFAULTS INCLUDING CONSTRAINTS);
