@@ -97,3 +97,6 @@
 
 # 0.3.23
 - optimized bulk load via dynamic index/FK management & added FTS support with generated columns
+
+# 0.3.24
+- optional quote handling in fast pg load

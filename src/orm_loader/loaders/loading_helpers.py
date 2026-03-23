@@ -168,46 +168,47 @@ def quick_load_pg(
     path: Path,
     session: so.Session,
     tablename: str,
+    quote_mode: str = "csv",
 ) -> int:
     raw_conn = session.connection().connection  
     if not hasattr(raw_conn, "cursor"):
         raise RuntimeError("Expected DB-API connection for COPY")
     
+
     encoding = infer_encoding(path)['encoding'] or 'utf-8'
     delimiter = infer_delim(path)
-
+    if quote_mode == "csv":
+        copy_options = f"""
+            FORMAT csv,
+            HEADER true,
+            DELIMITER E'{delimiter}',
+            ENCODING '{encoding}'
+        """
+    elif quote_mode == "literal":
+        copy_options = f"""
+            FORMAT csv,
+            HEADER true,
+            DELIMITER E'{delimiter}',
+            QUOTE E'\\x01',
+            ESCAPE E'\\x01',
+            ENCODING '{encoding}'
+        """
+    else:
+        raise ValueError(f"Unknown quote_mode: {quote_mode}")
+    
     logger.info(f"Bulk loading {tablename} via COPY (encoding={encoding}, delimiter={delimiter})")
     
     cur = raw_conn.cursor()
     try:
         with open(path, "rb") as f:
             stream = NormalisedCSVStream(f, encoding=encoding, delimiter=delimiter)
-            # Read header line to normalise column names to lowercase and detect delimiter/encoding
-            # header = f.readline().decode(encoding)
-            # newline = check_line_ending(header)
-            # cols = header.rstrip(newline).split(delimiter)
-            # lowered = [c.lower() for c in cols]
-
-            # if len(set(lowered)) != len(lowered):
-            #     raise ValueError(
-            #         f"Case-insensitive header collision in {path.name}: {cols}"
-            #     )
-
-            # new_header = delimiter.join(lowered) + newline
-
-            # # Reconstruct stream: new header + rest of file
-            # rest = f.read()
-            # stream = io.BytesIO(new_header.encode(encoding) + rest)
 
             cur.copy_expert(
                 sql=f'''
                 COPY "{tablename}"
                 FROM STDIN
                 WITH (
-                    FORMAT csv,
-                    HEADER true,
-                    DELIMITER E'{delimiter}',
-                    ENCODING '{encoding}'
+                    {copy_options}
                 )
                 ''',
                 file=stream,
