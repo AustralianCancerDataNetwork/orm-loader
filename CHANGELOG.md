@@ -100,3 +100,6 @@
 
 # 0.3.24
 - optional quote handling in fast pg load
+
+# 0.3.25
+- passing the quote handling option to where it needs to be exposed

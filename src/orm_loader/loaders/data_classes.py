@@ -1,4 +1,3 @@
-
 from typing import Any, Type, List, Dict, TYPE_CHECKING
 from dataclasses import dataclass, field
 import sqlalchemy as sa
@@ -71,6 +70,7 @@ class LoaderContext:
     chunksize: int | None = None
     normalise: bool = True
     dedupe: bool = True
+    quote_mode: str = "csv"
 
 class LoaderInterface:
 

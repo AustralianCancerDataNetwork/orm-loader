@@ -281,6 +281,7 @@ class CSVLoadableTableInterface(ORMTableBase):
                         path=loader_context.path,
                         session=loader_context.session,
                         tablename=cls.staging_tablename(),
+                        quote_mode=loader_context.quote_mode,
                     )
                     return total
                 except Exception as e:
@@ -345,6 +346,7 @@ class CSVLoadableTableInterface(ORMTableBase):
         dedupe: bool = False,
         chunksize: int | None = None,
         merge_strategy: str = "replace",
+        quote_mode: str = "csv",
     ) -> int:
         
         """
@@ -393,7 +395,8 @@ class CSVLoadableTableInterface(ORMTableBase):
             staging_table=cls.get_staging_table(session),
             chunksize=chunksize,
             normalise=normalise,
-            dedupe=dedupe
+            dedupe=dedupe,
+            quote_mode=quote_mode,
         )
 
         if loader is None:
