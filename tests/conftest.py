@@ -1,8 +1,6 @@
 import pytest
 import sqlalchemy as sa
 import sqlalchemy.orm as so
-import os
-from orm_loader.tables import CSVLoadableTableInterface
 import time
 
 from tests.models import Base

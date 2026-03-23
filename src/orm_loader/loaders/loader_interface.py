@@ -122,7 +122,6 @@ class PandasLoader(LoaderInterface):
         If chunksize is None, pandas returns a single DataFrame, which we
         normalise to a one-element iterator for unified processing.
         """
-        total = 0
 
         delimiter = infer_delim(ctx.path)
         encoding = infer_encoding(ctx.path)['encoding']
@@ -144,11 +143,10 @@ class PandasLoader(LoaderInterface):
         logger.info(f"Loading with chunksize '{ctx.chunksize}' for file {ctx.path.name}")       
         chunks = (reader,) if isinstance(reader, pd.DataFrame) else reader
 
-        i = 0
-        for chunk in chunks:
+        total = 0
+        for i, chunk in enumerate(chunks):
+            logger.debug(f"Processing chunk {i} with {len(chunk)} rows for {ctx.tableclass.__tablename__}")
             chunk = _normalise_columns(chunk)
-            logger.info(f"Processing chunk {i} with {len(chunk)} rows for {ctx.tableclass.__tablename__}")
-            i += 1
             if ctx.dedupe:
                 chunk = cls.dedupe(chunk, ctx)
             if ctx.normalise:
@@ -158,7 +156,6 @@ class PandasLoader(LoaderInterface):
                 session=ctx.session,
                 dataframe=chunk
             )
-
         return total
 
 class ParquetLoader(LoaderInterface):

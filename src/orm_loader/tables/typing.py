@@ -2,6 +2,7 @@ from typing import Protocol, ClassVar, runtime_checkable, TYPE_CHECKING, Optiona
 import sqlalchemy.orm as so
 import sqlalchemy as sa
 from pathlib import Path
+from contextlib import AbstractContextManager
 if TYPE_CHECKING:
     from ..loaders import LoaderContext, LoaderInterface
 
@@ -101,6 +102,10 @@ class CSVTableProtocol(ORMTableProtocol, Protocol):
 
     @classmethod
     def _merge_upsert(cls, session: so.Session, target: str, staging: str, pk_cols: list[str], dialect: str) -> None: ...
+
+    @classmethod
+    def manage_indices(cls, session: so.Session) -> AbstractContextManager[None]:
+        ...
     
 
 @runtime_checkable

@@ -1,9 +1,7 @@
-import os
 import time
 import pytest
 import sqlalchemy as sa
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy_utils import create_database, database_exists, drop_database
 
 from tests.models import Base
 
