@@ -233,7 +233,7 @@ class CSVLoadableTableInterface(ORMTableBase):
         staging_name = cls.staging_tablename()
 
         if not inspector.has_table(staging_name):
-            logger.warning(f"Staging table {staging_name} does not exist; recreating",)
+            logger.debug(f"Staging table {staging_name} does not exist; recreating",)
             cls.create_staging_table(session)
 
         return sa.Table(
