@@ -406,8 +406,7 @@ class CSVLoadableTableInterface(ORMTableBase):
         # Merge staging to target (Wrapped in our index dropper!)
         logger.info(f"Table `{cls.__tablename__}`: Merging staging data into target table")
         with cls.manage_indices(session):
-            #cls.merge_from_staging(session, merge_strategy=merge_strategy)
-            x = 1 / 0  # Force an error to test index recovery
+            cls.merge_from_staging(session, merge_strategy=merge_strategy)
         
         cls.drop_staging_table(session)
 
