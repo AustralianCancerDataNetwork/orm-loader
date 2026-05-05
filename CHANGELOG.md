@@ -103,3 +103,6 @@
 
 # 0.3.25
 - passing the quote handling option to where it needs to be exposed
+
+# 0.3.26
+- literall just removing stale sqlalchemy-utils dependency
