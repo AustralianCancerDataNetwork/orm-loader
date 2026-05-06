@@ -105,4 +105,7 @@
 - passing the quote handling option to where it needs to be exposed
 
 # 0.3.26
-- literall just removing stale sqlalchemy-utils dependency
+- literally just removing stale sqlalchemy-utils dependency
+
+# 0.3.27
+- adding minimum versions for dependabot alerts (dev deps only)

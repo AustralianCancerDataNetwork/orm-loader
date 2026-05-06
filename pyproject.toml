@@ -1,6 +1,6 @@
 [project]
 name = "orm-loader"
-version = "0.3.26"
+version = "0.3.27"
 description = "Generic base classes to handle ORM functionality for multiple downstream datamodels"
 readme = "README.md"
 authors = [
@@ -27,12 +27,14 @@ build-backend = "uv_build"
 [project.optional-dependencies]
 dev = [
     "mypy>=1.19.1",
-    "pytest>=9.0.2",
+    "pytest>=9.0.3",
     "ruff>=0.14.11",
     "mkdocs-material>=9.7.1",
     "mkdocstrings-python>=2.0.1",
+    "requests>=2.33.0",
     "mkdocs>=1.6.1",
-    "mkdocs-mermaid2-plugin"
+    "mkdocs-mermaid2-plugin",
+    "Pygments>=2.20.0"
 ]
 
 [tool.setuptools]
