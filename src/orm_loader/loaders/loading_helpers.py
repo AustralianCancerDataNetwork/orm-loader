@@ -10,6 +10,7 @@ import pyarrow.csv as pv
 import io
 
 logger = logging.getLogger(__name__)
+COPY_BLOCK_SIZE = 8192
 
 """
 Loader Helper Functions
@@ -202,17 +203,17 @@ def quick_load_pg(
     try:
         with open(path, "rb") as f:
             stream = NormalisedCSVStream(f, encoding=encoding, delimiter=delimiter)
-
-            cur.copy_expert(
-                sql=f'''
+            with cur.copy(
+                f'''
                 COPY "{tablename}"
                 FROM STDIN
                 WITH (
                     {copy_options}
                 )
-                ''',
-                file=stream,
-            )
+                '''
+            ) as copy:
+                while data := stream.read(COPY_BLOCK_SIZE):
+                    copy.write(data)
         session.flush()
         total = session.execute(sa.text(f'SELECT COUNT(*) FROM "{tablename}"')).scalar_one()
         return total

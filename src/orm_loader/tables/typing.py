@@ -1,10 +1,15 @@
-from typing import Protocol, ClassVar, runtime_checkable, TYPE_CHECKING, Optional, Type, Dict, Any
+from typing import Protocol, ClassVar, runtime_checkable, TYPE_CHECKING, Optional, Type, Dict, Any, Unpack, TypedDict
 import sqlalchemy.orm as so
 import sqlalchemy as sa
 from pathlib import Path
 from contextlib import AbstractContextManager
 if TYPE_CHECKING:
     from ..loaders import LoaderContext, LoaderInterface
+
+class ToDictKwargs(TypedDict, total=False):
+    include_nulls: bool
+    only: set[str] | None
+    exclude: set[str] | None
 
 @runtime_checkable
 class ORMTableProtocol(Protocol):
@@ -28,17 +33,16 @@ class ORMTableProtocol(Protocol):
     metadata: ClassVar[sa.MetaData]
 
     @classmethod
-    def mapper_for(cls) -> so.Mapper: ...
+    def mapper_for(cls) -> so.Mapper[Any]: ...
 
     @classmethod
     def pk_names(cls) -> list[str]: ...
 
     @classmethod
-    def pk_columns(cls) -> list[sa.ColumnElement]: ...
+    def pk_columns(cls) -> list[sa.ColumnElement[Any]]: ...
 
     @classmethod
-    def model_columns(cls) -> dict[str, sa.ColumnElement]: ...
-
+    def model_columns(cls) -> dict[str, sa.ColumnElement[Any]]: ...
 
 @runtime_checkable
 class CSVTableProtocol(ORMTableProtocol, Protocol):
@@ -81,6 +85,7 @@ class CSVTableProtocol(ORMTableProtocol, Protocol):
         chunksize: int | None = None, 
         merge_strategy: str = "replace",
         quote_mode: str = "csv",
+        index_strategy: str = "auto",
     ) -> int: ...
 
     @classmethod
@@ -99,13 +104,13 @@ class CSVTableProtocol(ORMTableProtocol, Protocol):
     def _merge_insert(cls, session: so.Session, target: str, staging: str) -> None: ...
 
     @classmethod
-    def _merge_replace(cls, session: so.Session, target: str, staging: str, pk_cols: list[str], dialect: str) -> None: ...
+    def _merge_replace(cls, session: so.Session, target: str, staging: str, pk_cols: list[str]) -> None: ...
 
     @classmethod
-    def _merge_upsert(cls, session: so.Session, target: str, staging: str, pk_cols: list[str], dialect: str) -> None: ...
+    def _merge_upsert(cls, session: so.Session, target: str, staging: str, pk_cols: list[str]) -> None: ...
 
     @classmethod
-    def manage_indices(cls, session: so.Session) -> AbstractContextManager[None]:
+    def manage_indices(cls, session: so.Session, index_strategy: str = "auto") -> AbstractContextManager[None]:
         ...
     
 
@@ -130,11 +135,10 @@ class SerializedTableProtocol(Protocol):
         exclude: set[str] | None = None,
     ) -> Dict[str, Any]: ...
 
-    def to_json(self, **kwargs) -> str: ...
+    def to_json(self, **kwargs: Unpack[ToDictKwargs]) -> str: ...
 
     def fingerprint(self) -> str: ...
 
     def __iter__(self) -> Any: ...
 
     def __json__(self) -> Any: ...
-

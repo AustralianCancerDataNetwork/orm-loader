@@ -1,8 +1,6 @@
 # Loader Helper Utilities
 
-This page documents low-level helper functions used by loaders.
-
-These utilities are stateless and intentionally conservative.
+This page covers the low-level functions that support the loader implementations.
 
 ---
 
@@ -37,17 +35,17 @@ Used by `ParquetLoader` for internal deduplication.
 
 ---
 
-## Conservative CSV parsing
+## Batch-oriented CSV parsing
 
 ### `conservative_load_parquet(...)`
 
-Reads CSV files using PyArrow with:
+Despite the name, this helper reads delimited text with PyArrow and yields batches:
 
 - strict column inclusion
 - malformed row skipping
 - chunked batch iteration
 
-This is used when loading CSVs via the Parquet pipeline.
+This is used by the PyArrow-based loader path.
 
 ---
 
@@ -55,18 +53,18 @@ This is used when loading CSVs via the Parquet pipeline.
 
 ### `quick_load_pg(...)`
 
-Loads CSV files into PostgreSQL staging tables using `COPY`.
+Loads CSV files into a PostgreSQL staging table using `COPY`.
 
 ### Characteristics
 
-- Extremely fast
-- Bypasses ORM
-- Sensitive to data quality issues
+- Fast
+- Bypasses ORM row construction
+- Works best on clean input
 
 ### Failure handling
 
 - Errors trigger rollback
-- Loader falls back to ORM-based loading
-- No partial silent loads
+- `CSVLoadableTableInterface` falls back to ORM-based loading
+- Failures are noisy on purpose
 
 This helper is only used when explicitly supported by the database.

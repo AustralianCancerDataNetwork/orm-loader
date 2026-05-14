@@ -1,0 +1,2 @@
+[] consider opt-in malformed text repair (as opposed to existing normalisation) - e.g. load_csv(..., text_repair: str | None = None)
+- consider ftfy.fix_encoding()

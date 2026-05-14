@@ -1,6 +1,6 @@
 # Materialised Views
 
-This module provides a SQLAlchemy-native pattern for defining, creating, refreshing, and orchestrating materialized views using normal `Select` constructs, with explicit dependency management and deterministic refresh order.
+This module provides a SQLAlchemy-native way to define, create, refresh, and order materialized views from ordinary `Select` constructs.
 
 
 It is designed for:
@@ -9,7 +9,7 @@ It is designed for:
 * large fact tables with repeated joins or aggregates
 * schema-level orchestration (migrations, setup, Airflow, admin tasks)
 
-The implementation is PostgreSQL-oriented (due to materialized view support), but remains cleanly isolated from ORM persistence logic.
+The implementation is PostgreSQL-oriented. The mixin resolves a backend from the supplied bind, and the built-in PostgreSQL backend is currently the only one that supports materialized views.
 
 ## Overview
 
@@ -21,7 +21,7 @@ The materialized view system consists of four main parts:
     * backing `Select`
     * optional dependencies
 3. Dependency resolution: A topological sort over declared dependencies to determine refresh order.
-4. Refresh orchestration: Helpers to refresh one or many materialized views safely and predictably.
+4. Refresh orchestration: Helpers to refresh one or many materialized views in a predictable order.
 
 
 ### Defining the Materialised View

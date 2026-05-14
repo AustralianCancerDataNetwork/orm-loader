@@ -1,6 +1,6 @@
 from __future__ import annotations
 import logging
-from typing import Optional
+from typing import Optional, Any
 import re
 
 SENSITIVE_KEYS = {
@@ -19,19 +19,15 @@ def _coerce_log_level(level: int | str) -> int:
     if isinstance(level, int):
         return level
 
-    if isinstance(level, str):
-        s = level.strip().upper()
-        if s.isdigit():
-            return int(s)
+    s = level.strip().upper()
+    if s.isdigit():
+        return int(s)
 
-        mapping = logging.getLevelNamesMapping()
-        if s in mapping:
-            return mapping[s]
+    mapping = logging.getLevelNamesMapping()
+    if s in mapping:
+        return mapping[s]
 
-        raise ValueError(f"Invalid log level: {level!r}")
-
-    raise TypeError(f"Invalid log level type: {type(level)}")
-
+    raise ValueError(f"Invalid log level: {level!r}")
 
 def get_logger(name: Optional[str] = None) -> logging.Logger:
     """
@@ -46,13 +42,13 @@ def get_logger(name: Optional[str] = None) -> logging.Logger:
 
 
 class RedactingFormatter(logging.Formatter):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any):
         super().__init__(*args, **kwargs)
         self._pattern = re.compile(
             r"(?i)\\b(" + "|".join(SENSITIVE_KEYS) + r")\\b\\s*[:=]\\s*[^\\s,;]+"
         )
 
-    def format(self, record):
+    def format(self, record: logging.LogRecord) -> str:
         msg = super().format(record)
         return self._pattern.sub(r"\\1=<REDACTED>", msg)
     

@@ -1,0 +1,139 @@
+from __future__ import annotations
+
+import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
+
+from orm_loader.backends import PostgresBackend
+
+
+class _ComputedTable:
+    __table__ = sa.Table(
+        "target_table",
+        sa.MetaData(),
+        sa.Column("id", sa.Integer, primary_key=True),
+        sa.Column("name", sa.String),
+        sa.Column("slug", sa.String, sa.Computed("lower(name)")),
+    )
+
+
+class _FakeSession:
+    def __init__(self, scalar_result="origin") -> None:
+        self.statements: list[str] = []
+        self.scalar_result = scalar_result
+        self.commits = 0
+
+    def execute(self, statement):
+        if hasattr(statement, "compile"):
+            sql = str(statement.compile(dialect=postgresql.dialect()))
+        else:
+            sql = str(statement)
+        self.statements.append(sql)
+
+        class _Result:
+            def __init__(self, value):
+                self._value = value
+
+            def scalar(self):
+                return self._value
+
+        return _Result(self.scalar_result)
+
+    def commit(self) -> None:
+        self.commits += 1
+
+
+def test_postgres_backend_identity_and_capabilities():
+    backend = PostgresBackend()
+
+    assert backend.name == "postgres"
+    assert backend.supports_dialect("postgresql") is True
+    assert backend.capabilities.supports_fast_load is True
+    assert backend.capabilities.supports_unlogged_staging is True
+    assert backend.capabilities.supports_fk_toggle is True
+    assert backend.capabilities.supports_materialized_views is True
+
+
+def test_postgres_backend_create_staging_table_drops_computed_columns():
+    backend = PostgresBackend()
+    session = _FakeSession()
+
+    backend.create_staging_table(_ComputedTable, session, "_staging_target_table")
+
+    assert any('DROP TABLE IF EXISTS "_staging_target_table"' in sql for sql in session.statements)
+    assert any('CREATE UNLOGGED TABLE "_staging_target_table"' in sql for sql in session.statements)
+    assert any('ALTER TABLE "_staging_target_table" DROP COLUMN "slug"' in sql for sql in session.statements)
+    assert session.commits == 1
+
+
+def test_postgres_backend_drop_staging_table():
+    backend = PostgresBackend()
+    session = _FakeSession()
+
+    backend.drop_staging_table(session, "_staging_target_table")
+
+    assert session.statements == ['DROP TABLE IF EXISTS "_staging_target_table"']
+
+
+def test_postgres_backend_fk_methods_emit_expected_sql():
+    backend = PostgresBackend()
+    session = _FakeSession()
+
+    previous = backend.disable_fk_check(session)
+    enabled = backend.enable_fk_check(session)
+    backend.restore_fk_check(session, previous)
+
+    assert previous == "origin"
+    assert enabled == "origin"
+    assert session.statements == [
+        "SHOW session_replication_role",
+        "SET session_replication_role = 'replica'",
+        "SHOW session_replication_role",
+        "SET session_replication_role = 'origin'",
+        "SET session_replication_role = 'origin'",
+    ]
+
+
+def test_postgres_backend_merge_replace_uses_using_delete():
+    backend = PostgresBackend()
+    session = _FakeSession()
+
+    backend.merge_replace(_ComputedTable, session, "target_table", "_staging_target_table", ["id", "name"])
+
+    sql = session.statements[0]
+    assert 'DELETE FROM "target_table" t' in sql
+    assert 'USING "_staging_target_table" s' in sql
+    assert 't."id" = s."id" AND t."name" = s."name"' in sql
+
+
+def test_postgres_backend_merge_insert_excludes_computed_columns():
+    backend = PostgresBackend()
+    session = _FakeSession()
+
+    backend.merge_insert(_ComputedTable, session, "target_table", "_staging_target_table")
+
+    sql = session.statements[0]
+    assert 'INSERT INTO "target_table" ("id", "name")' in sql
+    assert 'SELECT "id", "name" FROM "_staging_target_table"' in sql
+
+
+def test_postgres_backend_merge_upsert_excludes_computed_columns():
+    backend = PostgresBackend()
+    session = _FakeSession()
+
+    backend.merge_upsert(_ComputedTable, session, "target_table", "_staging_target_table", ["id"])
+
+    sql = session.statements[0]
+    assert 'INSERT INTO "target_table" ("id", "name")' in sql
+    assert 'ON CONFLICT ("id") DO NOTHING' in sql
+
+
+def test_postgres_backend_materialized_view_methods_emit_expected_sql():
+    backend = PostgresBackend()
+    session = _FakeSession()
+    selectable = sa.select(sa.literal(1).label("n"))
+
+    backend.create_materialized_view(session, "mv_test", selectable)
+    backend.refresh_materialized_view(session, "mv_test")
+
+    assert any("CREATE MATERIALIZED VIEW IF NOT EXISTS mv_test as SELECT" in sql for sql in session.statements)
+    assert any("REFRESH MATERIALIZED VIEW mv_test;" == sql for sql in session.statements)

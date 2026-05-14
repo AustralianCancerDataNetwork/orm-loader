@@ -16,7 +16,7 @@ def session(engine):
         yield s
 
 
-POSTGRES_URL = "postgresql+psycopg2://test:test@localhost:55432/test_db"
+POSTGRES_URL = "postgresql+psycopg://test:test@localhost:55432/test_db"
 
 @pytest.fixture(scope="session")
 def pg_engine():
@@ -51,7 +51,6 @@ def pg_session(pg_engine):
     finally:
         session.rollback()
         session.close()
-
 
 
 

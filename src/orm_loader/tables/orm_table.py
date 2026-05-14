@@ -1,7 +1,7 @@
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 from sqlalchemy.exc import StatementError
-from typing import Any, Tuple, Type, cast
+from typing import Any
 import logging
 from .allocators import IdAllocator
 from ..helpers import normalise_null
@@ -46,7 +46,7 @@ class ORMTableBase:
     __abstract__ = True
 
     @classmethod
-    def mapper_for(cls: Type) -> so.Mapper:
+    def mapper_for(cls: type[Any]) -> so.Mapper[Any]:
         """
         Return the SQLAlchemy mapper associated with this ORM class.
 
@@ -63,13 +63,13 @@ class ORMTableBase:
         TypeError
             If the class is not a mapped SQLAlchemy ORM class.
         """
-        mapper = sa.inspect(cls)
+        mapper: so.Mapper[Any] = sa.inspect(cls)
         if not mapper:
             raise TypeError(f"{cls.__name__} is not a mapped ORM class")
-        return cast(so.Mapper, mapper)
+        return mapper
 
     @classmethod
-    def pk_columns(cls) -> list[sa.ColumnElement]:
+    def pk_columns(cls) -> list[sa.ColumnElement[Any]]:
         """
         Return the primary key columns for the mapped table.
 
@@ -120,7 +120,7 @@ class ORMTableBase:
         return {c.key: getattr(obj, c.key) for c in cls.pk_columns() if c.key is not None}
     
     @classmethod
-    def pk_tuple(cls, obj: Any) -> Tuple[Any, ...]:
+    def pk_tuple(cls, obj: Any) -> tuple[Any, ...]:
         """
         Extract primary key values from an ORM instance as a tuple.
 
@@ -143,7 +143,7 @@ class ORMTableBase:
         )
 
     @classmethod
-    def model_columns(cls) -> dict[str, sa.ColumnElement]:
+    def model_columns(cls) -> dict[str, sa.ColumnElement[Any]]:
         """
         Return all mapped columns for the table.
 
@@ -153,7 +153,7 @@ class ORMTableBase:
             A mapping of column name to column object.
         """
         mapper = cls.mapper_for()
-        return {c.key: c for c in mapper.columns if c.key is not None}
+        return {c.key: c for c in mapper.columns}
     
     @classmethod
     def required_columns(cls) -> set[str]:
@@ -177,11 +177,11 @@ class ORMTableBase:
         return {
             c.key
             for c in mapper.columns
-            if not c.nullable and not c.default and not c.server_default and c.key is not None
+            if not c.nullable and not c.default and not c.server_default
         }
 
     @classmethod
-    def max_id(cls, session) -> int:
+    def max_id(cls, session: so.Session) -> int:
         """
         Return the maximum value of the primary key column.
 
@@ -211,7 +211,7 @@ class ORMTableBase:
         return session.query(sa.func.max(pk)).scalar() or 0
 
     @classmethod
-    def allocator(cls, session) -> IdAllocator:
+    def allocator(cls, session: so.Session) -> IdAllocator:
         """
         Create an ID allocator initialised from the current table state.
 
@@ -251,7 +251,7 @@ class ORMTableBase:
         """
         cols = cls.model_columns()
 
-        cleaned = {}
+        cleaned: dict[str, Any] = {}
         for k, v in data.items():
             if k not in cols:
                 continue  # ignore unknown keys safely

@@ -1,7 +1,9 @@
 from sqlalchemy.ext import compiler
 from sqlalchemy.schema import DDLElement
 import sqlalchemy as sa
+from typing import Any
 from collections import defaultdict, deque
+from ..backends.resolve import resolve_backend
 
 class CreateMaterializedView(DDLElement):
     """
@@ -23,12 +25,16 @@ class CreateMaterializedView(DDLElement):
         materialized view.
     """
 
-    def __init__(self, name, selectable):
+    def __init__(self, name: str, selectable: sa.sql.Select[Any]):
         self.name = name
         self.selectable = selectable
 
 @compiler.compiles(CreateMaterializedView)
-def _create_view(element, compiler, **kw):
+def _create_view( # type: ignore
+    element: CreateMaterializedView, 
+    compiler: sa.sql.compiler.SQLCompiler, 
+    **kwargs: Any
+) -> str:
 
     """
     `_create_view`
@@ -150,11 +156,11 @@ class MaterializedViewMixin:
 
     """
     __mv_name__: str
-    __mv_select__: sa.sql.Select
+    __mv_select__: sa.sql.Select[Any]
     __mv_dependencies__: set[str] = set()
 
     @classmethod
-    def create_mv(cls, bind):
+    def create_mv(cls, bind: "sa.engine.Connection | sa.engine.Engine") -> None:
         """
         Create the materialized view if it does not already exist.
 
@@ -166,8 +172,8 @@ class MaterializedViewMixin:
         Notes
         -----
         The underlying SQL is emitted via a custom DDL element and executed
-        directly against the database. This operation is not transactional
-        on all backends.
+        through the resolved backend. With the built-in backends, this means
+        PostgreSQL. Unsupported backends raise ``NotImplementedError``.
 
 
         Examples
@@ -193,11 +199,11 @@ class MaterializedViewMixin:
         WHERE observation.observation_date >= CURRENT_DATE - INTERVAL '30 days';
         ```
         """
-        ddl = CreateMaterializedView(cls.__mv_name__, cls.__mv_select__)
-        bind.execute(ddl)
+        backend = resolve_backend(bind)
+        backend.create_materialized_view(bind, cls.__mv_name__, cls.__mv_select__)
 
     @classmethod
-    def refresh_mv(cls, bind):
+    def refresh_mv(cls, bind: "sa.engine.Connection | sa.engine.Engine") -> None:
         """
         Refresh the contents of the materialized view.
 
@@ -208,9 +214,9 @@ class MaterializedViewMixin:
 
         Notes
         -----
-        This method issues a REFRESH MATERIALIZED VIEW statement and assumes
-        backend support (e.g. PostgreSQL). Concurrent refresh semantics are
-        not handled here.
+        This method issues a backend-specific refresh statement. With the
+        built-in backends, materialized views are PostgreSQL-only.
+        Concurrent refresh semantics are not handled here.
 
         Examples
         --------
@@ -219,7 +225,8 @@ class MaterializedViewMixin:
             RecentObservationMV.refresh_mv(conn)
         ```
         """
-        bind.execute(sa.text(f"REFRESH MATERIALIZED VIEW {cls.__mv_name__};"))
+        backend = resolve_backend(bind)
+        backend.refresh_materialized_view(bind, cls.__mv_name__)
         
 
 def resolve_mv_refresh_order(mv_classes: list[type[MaterializedViewMixin]]) -> list[type]:
@@ -271,7 +278,7 @@ def resolve_mv_refresh_order(mv_classes: list[type[MaterializedViewMixin]]) -> l
     return [name_to_mv[name] for name in ordered]
 
 
-def refresh_all_mvs(bind, mv_classes):
+def refresh_all_mvs(bind: "sa.engine.Connection | sa.engine.Engine", mv_classes: list[type[MaterializedViewMixin]]) -> None:
 
     """
     `refresh_all_mvs`
@@ -289,7 +296,7 @@ def refresh_all_mvs(bind, mv_classes):
         refresh_all_mvs(engine, ALL_MVS)
     ```
     """
-    ordered = resolve_mv_refresh_order(mv_classes)
+    ordered: list[type[MaterializedViewMixin]] = resolve_mv_refresh_order(mv_classes)
 
     for mv in ordered:
         mv.refresh_mv(bind)

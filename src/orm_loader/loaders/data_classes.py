@@ -170,33 +170,6 @@ class LoaderInterface:
         """
         raise NotImplementedError
     
-    # @classmethod
-    # def _dedupe_db(cls, df: pd.DataFrame, ctx: LoaderContext) -> pd.DataFrame:
-    #     """
-    #     Perform database-level deduplication against existing rows.
-
-    #     Parameters
-    #     ----------
-    #     df
-    #         Incoming DataFrame.
-    #     ctx
-    #         Loader context.
-
-    #     Returns
-    #     -------
-    #     pandas.DataFrame
-    #         DataFrame with rows already present in the database removed.
-    #     """
-    #     pk_names = ctx.tableclass.pk_names()
-    #     pk_tuples = list(df[pk_names].itertuples(index=False, name=None))
-    #     if not pk_tuples:
-    #         return df
-    #     tableclass = (
-    #         ctx.staging_table
-    #         if ctx.staging_table is not None
-    #         else ctx.tableclass.__table__
-    #     )        
-    #     pk_cols = [getattr(tableclass.c, pk) for pk in pk_names]
 
     #     vars_per_row = len(pk_cols)
     #     chunk_size = max(1, 10_000 // vars_per_row)
@@ -286,4 +259,3 @@ class TableCastingStats:
             for col, stats in self.columns.items()
         }
     
-

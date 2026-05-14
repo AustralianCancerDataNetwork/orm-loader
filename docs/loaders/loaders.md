@@ -3,8 +3,7 @@
 This page documents the concrete loader implementations provided by
 `orm_loader`.
 
-All loaders implement the same interface and differ only in
-how data is read and processed.
+All loaders implement the same interface. The difference is in how they read data and how much work they do before rows reach the staging table.
 
 ---
 
@@ -24,7 +23,7 @@ All loaders:
 - load into staging tables only
 - respect `LoaderContext` flags
 - return row counts
-- avoid implicit commits
+- leave final merge behaviour to the table layer
 
 ---
 
@@ -34,7 +33,7 @@ All loaders:
 
 ### Characteristics
 
-- Supports CSV and TSV inputs
+- Works well with CSV and TSV inputs
 - Easy to debug and inspect
 - Supports chunked loading
 - Flexible transformation pipeline
@@ -67,7 +66,6 @@ All loaders:
 
 - More complex pipeline
 - Less flexible row-wise transformations
-- DB-level deduplication not yet implemented
 
 ### Best suited for
 
@@ -79,16 +77,7 @@ All loaders:
 
 ## Deduplication behaviour
 
-Deduplication occurs in two phases:
-
-1. **Internal deduplication**  
-   Removes duplicate primary key rows within the incoming data.
-
-2. **Database-level deduplication (optional)**  
-   Removes rows that already exist in the database.
-
-Database-level deduplication is currently implemented for pandas-based
-loads.
+Deduplication here means deduplicating within the incoming data before it is inserted into staging. The merge step is what decides what happens when incoming rows overlap with existing target rows.
 
 ---
 
@@ -100,4 +89,4 @@ When enabled, loaders:
 - drop rows violating required constraints
 - log casting failures with examples
 
-No schema changes are performed.
+No schema changes are performed at the loader layer.
