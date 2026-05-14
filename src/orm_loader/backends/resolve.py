@@ -17,7 +17,7 @@ _BACKEND_TYPES: tuple[type[DatabaseBackend], ...] = (
 )
 
 
-def _dialect_name(bindable: so.Session | "Engine" | "Connection") -> str:
+def _dialect_name(bindable: "so.Session | Engine | Connection",) -> str:
     if isinstance(bindable, so.Session):
         bind = bindable.get_bind()
         return bind.dialect.name
@@ -28,7 +28,7 @@ def _dialect_name(bindable: so.Session | "Engine" | "Connection") -> str:
     raise TypeError(f"Unsupported bindable type: {type(bindable)!r}")
 
 
-def resolve_backend(bindable: so.Session | "Engine" | "Connection") -> DatabaseBackend:
+def resolve_backend(bindable: "so.Session | Engine | Connection") -> DatabaseBackend:
     """
     Resolve a concrete backend from a SQLAlchemy session, engine, or connection.
     """
