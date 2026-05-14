@@ -19,6 +19,9 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+VALID_SQLITE_JOURNAL_MODES = frozenset(
+    {"DELETE", "TRUNCATE", "PERSIST", "MEMORY", "WAL", "OFF"}
+)
 
 
 class SQLiteBackend(DatabaseBackend):
@@ -30,8 +33,18 @@ class SQLiteBackend(DatabaseBackend):
         defer_foreign_keys: bool = True,
     ) -> None:
         self.busy_timeout_ms = busy_timeout_ms
-        self.journal_mode = journal_mode
+        self.journal_mode = self._validate_journal_mode(journal_mode)
         self.defer_foreign_keys = defer_foreign_keys
+
+    @staticmethod
+    def _validate_journal_mode(journal_mode: str) -> str:
+        normalised = journal_mode.strip().upper()
+        if normalised not in VALID_SQLITE_JOURNAL_MODES:
+            raise ValueError(
+                "Unsupported SQLite journal_mode "
+                f"{journal_mode!r}. Expected one of: {sorted(VALID_SQLITE_JOURNAL_MODES)}"
+            )
+        return normalised
 
     @property
     def name(self) -> str:
@@ -198,6 +211,7 @@ class SQLiteBackend(DatabaseBackend):
             cursor = dbapi_connection.cursor()
             cursor.execute(f"PRAGMA busy_timeout = {self.busy_timeout_ms}")
             cursor.execute(f"PRAGMA journal_mode = {self.journal_mode}")
+            cursor.execute("PRAGMA foreign_keys = ON;")
             if self.defer_foreign_keys:
                 cursor.execute("PRAGMA defer_foreign_keys = ON;")
             cursor.close()

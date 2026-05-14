@@ -15,7 +15,8 @@ def enable_sqlite_foreign_keys(
 
     This helper is kept for compatibility with older event-hook setups.
     It delegates to ``SQLiteBackend.configure_dbapi_connection()``,
-    which may apply more than just foreign-key settings.
+    which enables foreign-key enforcement and may apply more than just
+    foreign-key settings.
     """
     del connection_record
     SQLiteBackend().configure_dbapi_connection(dbapi_connection)
@@ -31,8 +32,9 @@ def attach_sqlite_bulk_load_pragmas(
     """
     Install SQLite connect hooks aimed at heavy local write workloads.
 
-    The hook currently sets ``busy_timeout`` and journal mode, and can
-    also enable deferred foreign-key checking for the connection.
+    The hook currently sets ``busy_timeout``, journal mode, and foreign-key
+    enforcement, and can also enable deferred foreign-key checking for the
+    connection.
     """
     SQLiteBackend(
         busy_timeout_ms=busy_timeout_ms,

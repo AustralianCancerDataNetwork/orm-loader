@@ -43,7 +43,6 @@ postgres = [
 dev = [
     "pytest>=9.0.3",
     "mypy>=1.19.1",
-    "pytest>=9.0.3",
     "ruff>=0.14.11",
     "mkdocs-material>=9.7.1",
     "mkdocstrings-python>=2.0.1",

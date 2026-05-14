@@ -190,18 +190,20 @@ class PostgresBackend(DatabaseBackend):
 
     @contextmanager
     def engine_with_replica_role(self, engine: "Engine"):
-        @sa.event.listens_for(engine, "connect")  # type: ignore[arg-type]
         def _set_replica_role(
             dbapi_conn: sa.engine.interfaces.DBAPIConnection,
             _,
         ) -> None:
             cur = dbapi_conn.cursor()
-            cur.execute("SET session_replication_role = replica")
+            cur.execute("SET session_replication_role = 'replica'")
             cur.close()
+
+        sa.event.listen(engine, "connect", _set_replica_role)
 
         try:
             yield engine
         finally:
+            sa.event.remove(engine, "connect", _set_replica_role)
             with engine.connect() as conn:
                 conn = conn.execution_options(isolation_level="AUTOCOMMIT")
                 conn.execute(sa.text("SET session_replication_role = DEFAULT"))

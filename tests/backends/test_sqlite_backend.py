@@ -48,6 +48,7 @@ def test_sqlite_backend_identity_and_capabilities():
     assert backend.capabilities.supports_fk_toggle is True
     assert backend.capabilities.supports_materialized_views is False
     assert backend.resolve_index_strategy("auto") == "keep"
+    assert backend.journal_mode == "WAL"
 
 
 def test_sqlite_backend_create_staging_table():
@@ -167,9 +168,11 @@ def test_sqlite_backend_configures_bulk_load_pragmas(tmp_path: Path):
     with engine.connect() as conn:
         busy_timeout = conn.execute(sa.text("PRAGMA busy_timeout")).scalar_one()
         journal_mode = conn.execute(sa.text("PRAGMA journal_mode")).scalar_one()
+        foreign_keys = conn.execute(sa.text("PRAGMA foreign_keys")).scalar_one()
 
     assert busy_timeout == 60000
     assert str(journal_mode).lower() == "wal"
+    assert foreign_keys == 1
 
 
 def test_sqlite_backend_restore_journal_mode(tmp_path: Path):
@@ -200,6 +203,17 @@ def test_attach_sqlite_bulk_load_pragmas_installs_backend_hook(tmp_path: Path):
     with engine.connect() as conn:
         busy_timeout = conn.execute(sa.text("PRAGMA busy_timeout")).scalar_one()
         journal_mode = conn.execute(sa.text("PRAGMA journal_mode")).scalar_one()
+        foreign_keys = conn.execute(sa.text("PRAGMA foreign_keys")).scalar_one()
 
     assert busy_timeout == 45000
     assert str(journal_mode).lower() == "wal"
+    assert foreign_keys == 1
+
+
+def test_sqlite_backend_rejects_invalid_journal_mode():
+    try:
+        SQLiteBackend(journal_mode="wal; drop table x;")
+    except ValueError as exc:
+        assert "Unsupported SQLite journal_mode" in str(exc)
+    else:
+        raise AssertionError("Expected invalid journal_mode to raise ValueError")

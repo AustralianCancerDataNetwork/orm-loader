@@ -137,3 +137,57 @@ def test_postgres_backend_materialized_view_methods_emit_expected_sql():
 
     assert any("CREATE MATERIALIZED VIEW IF NOT EXISTS mv_test as SELECT" in sql for sql in session.statements)
     assert any("REFRESH MATERIALIZED VIEW mv_test;" == sql for sql in session.statements)
+
+
+def test_postgres_backend_engine_with_replica_role_unregisters_listener(monkeypatch):
+    backend = PostgresBackend()
+    events: list[tuple[str, object, str]] = []
+    statements: list[str] = []
+
+    class _Result:
+        def scalar(self):
+            return "origin"
+
+    class _Conn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def execution_options(self, **kwargs):
+            return self
+
+        def execute(self, statement):
+            sql = str(statement.compile(dialect=postgresql.dialect()))
+            statements.append(sql)
+            return _Result()
+
+    class _Engine:
+        def connect(self):
+            events.append(("connect", self, "connect"))
+            return _Conn()
+
+    engine = _Engine()
+
+    def _listen(target, name, fn) -> None:
+        events.append(("listen", target, name))
+
+    def _remove(target, name, fn) -> None:
+        events.append(("remove", target, name))
+
+    monkeypatch.setattr(sa.event, "listen", _listen)
+    monkeypatch.setattr(sa.event, "remove", _remove)
+
+    with backend.engine_with_replica_role(engine):
+        pass
+
+    assert events == [
+        ("listen", engine, "connect"),
+        ("remove", engine, "connect"),
+        ("connect", engine, "connect"),
+    ]
+    assert statements == [
+        "SET session_replication_role = DEFAULT",
+        "SHOW session_replication_role",
+    ]
