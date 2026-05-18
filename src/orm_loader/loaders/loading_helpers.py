@@ -1,6 +1,7 @@
 from __future__ import annotations
 from pathlib import Path
 import chardet
+import csv as _csv
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 import logging
@@ -86,6 +87,66 @@ def infer_delim(file):
             return '\t'
         return ','
 
+
+def infer_quote_mode(
+    path: Path,
+    delimiter: str,
+    encoding: str = "utf-8",
+    sample_rows: int = 200,
+) -> str:
+    """Return 'csv' or 'literal' by comparing column-count consistency under both
+    quoting interpretations across a sample of rows.
+
+    - 'csv'     → standard RFC-4180 quoting; surrounding double-quotes are stripped
+                  and embedded delimiters/newlines inside quotes are preserved.
+    - 'literal' → double-quote has no special meaning; every byte is stored as-is.
+
+    Defaults to 'csv' when both modes produce identical output (no quoting in play)
+    or when the evidence is tied.  Callers can always override by passing an
+    explicit value instead of relying on auto-detection.
+    """
+    with open(path, encoding=encoding, errors="replace", newline="") as f:
+        lines = [f.readline() for _ in range(sample_rows + 1)]
+
+    raw = "".join(ln for ln in lines if ln)
+    if not raw:
+        return "csv"
+
+    try:
+        rows_csv = list(_csv.reader(io.StringIO(raw), delimiter=delimiter))
+    except _csv.Error:
+        return "literal"
+
+    try:
+        rows_lit = list(
+            _csv.reader(io.StringIO(raw), delimiter=delimiter, quoting=_csv.QUOTE_NONE)
+        )
+    except _csv.Error:
+        return "csv"
+
+    if not rows_csv:
+        return "csv"
+
+    ncols = len(rows_csv[0])
+    if ncols <= 1:
+        return "csv"
+
+    # No difference between modes → no quoting is active, csv is the safe default
+    if rows_csv == rows_lit:
+        return "csv"
+
+    data_csv = rows_csv[1:]
+    data_lit = rows_lit[1:] if len(rows_lit) > 1 else []
+
+    if not data_csv:
+        return "csv"
+
+    csv_ok = sum(1 for r in data_csv if len(r) == ncols)
+    lit_ok = sum(1 for r in data_lit if len(r) == ncols)
+
+    # Prefer csv on a tie; only choose literal when it is strictly more consistent
+    return "literal" if lit_ok > csv_ok else "csv"
+
 def arrow_drop_duplicates(
     table: pa.Table,
     pk_names: list[str],
@@ -169,15 +230,18 @@ def quick_load_pg(
     path: Path,
     session: so.Session,
     tablename: str,
-    quote_mode: str = "csv",
+    quote_mode: str = "auto",
 ) -> int:
-    raw_conn = session.connection().connection  
+    raw_conn = session.connection().connection
     if not hasattr(raw_conn, "cursor"):
         raise RuntimeError("Expected DB-API connection for COPY")
-    
+
 
     encoding = infer_encoding(path)['encoding'] or 'utf-8'
     delimiter = infer_delim(path)
+    if quote_mode == "auto":
+        quote_mode = infer_quote_mode(path, delimiter=delimiter, encoding=encoding)
+        logger.info(f"Auto-detected quote_mode={quote_mode!r} for {path.name}")
     if quote_mode == "csv":
         copy_options = f"""
             FORMAT csv,
