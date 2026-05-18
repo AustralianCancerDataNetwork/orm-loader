@@ -49,7 +49,9 @@ dev = [
     "requests>=2.33.0",
     "mkdocs>=1.6.1",
     "mkdocs-mermaid2-plugin",
-    "Pygments>=2.20.0"
+    "Pygments>=2.20.0",
+    "dotenv",
+    "ruff"
 ]
 
 [tool.setuptools]

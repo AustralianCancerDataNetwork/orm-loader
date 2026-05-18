@@ -1,17 +1,17 @@
+from typing import Type, cast
+
+import numpy as np
+import pandas as pd
+import pytest
 import sqlalchemy as sa
 import sqlalchemy.event as sae
 import sqlalchemy.orm as so
-from pathlib import Path
-from typing import cast, Type
-import pandas as pd
-import pytest
-import numpy as np
+
 from orm_loader.loaders.data_classes import _clean_nulls
+from orm_loader.loaders.loader_interface import PandasLoader
 from orm_loader.tables.loadable_table import CSVLoadableTableInterface
 from orm_loader.tables.typing import CSVTableProtocol
-from orm_loader.loaders.loader_interface import PandasLoader
-
-from tests.models import Base, SimpleTable, RequiredTable, CompositeTable
+from tests.models import Base, CompositeTable, RequiredTable, SimpleTable
 
 # Typed aliases: Pylance cannot verify SQLAlchemy metaclass-generated attrs
 # satisfy CSVTableProtocol structurally, so we cast once per class here.
@@ -43,9 +43,7 @@ def test_initial_csv_load(session, tmp_path):
 
     assert inserted == 3
 
-    rows = session.execute(
-        sa.select(SimpleTable).order_by(SimpleTable.id)
-    ).scalars().all()
+    rows = session.execute(sa.select(SimpleTable).order_by(SimpleTable.id)).scalars().all()
 
     assert [(r.id, r.name) for r in rows] == [
         (1, "alpha"),
@@ -95,9 +93,7 @@ def test_replace_merge_strategy(session, tmp_path):
 
     assert replaced == 2
 
-    rows = session.execute(
-        sa.select(SimpleTable).order_by(SimpleTable.id)
-    ).scalars().all()
+    rows = session.execute(sa.select(SimpleTable).order_by(SimpleTable.id)).scalars().all()
 
     assert [(r.id, r.name) for r in rows] == [
         (1, "alpha"),
@@ -126,7 +122,6 @@ def test_empty_csv_is_noop(session, tmp_path):
     assert rows == []
 
 
-
 def test_required_column_violation_drops_rows(session, tmp_path):
     csv = tmp_path / "required_table.csv"
     pd.DataFrame(
@@ -145,7 +140,6 @@ def test_required_column_violation_drops_rows(session, tmp_path):
     session.commit()
 
     assert inserted == 1
-
 
 
 def test_composite_pk_dedup(session, tmp_path):
@@ -225,9 +219,11 @@ def test_merge_strategies(session, tmp_path, merge_strategy, expected_rows, expe
 
     assert inserted == expected_inserted
 
-    rows = session.execute(
-        sa.select(SimpleTable).order_by(SimpleTable.id, SimpleTable.name)
-    ).scalars().all()
+    rows = (
+        session.execute(sa.select(SimpleTable).order_by(SimpleTable.id, SimpleTable.name))
+        .scalars()
+        .all()
+    )
 
     assert [(r.id, r.name) for r in rows] == expected_rows
 
@@ -276,9 +272,11 @@ def test_composite_pk_replace_merge(session, tmp_path):
     )
     session.commit()
 
-    rows = session.execute(
-        sa.select(CompositeTable).order_by(CompositeTable.a, CompositeTable.b)
-    ).scalars().all()
+    rows = (
+        session.execute(sa.select(CompositeTable).order_by(CompositeTable.a, CompositeTable.b))
+        .scalars()
+        .all()
+    )
 
     assert [(r.a, r.b, r.value) for r in rows] == [
         (1, 1, "x_updated"),
@@ -304,9 +302,10 @@ def test_clean_nulls_basic():
     assert _clean_nulls(float("nan")) is None
     assert _clean_nulls(np.nan) is None
 
+
 def test_clean_nulls_passthrough():
     assert _clean_nulls("") == ""
-    assert _clean_nulls("nan") == "nan"   # string 'nan' must not be converted
+    assert _clean_nulls("nan") == "nan"  # string 'nan' must not be converted
     assert _clean_nulls(0) == 0
     assert _clean_nulls("S") == "S"
 
@@ -325,7 +324,7 @@ def test_nullable_column_with_nan_does_not_crash(session, engine, tmp_path):
     pd.DataFrame(
         [
             {"id": 1, "flag": "S"},
-            {"id": 2, "flag": None},   # becomes NaN in pandas
+            {"id": 2, "flag": None},  # becomes NaN in pandas
         ]
     ).to_csv(csv, index=False)
 
@@ -339,9 +338,7 @@ def test_nullable_column_with_nan_does_not_crash(session, engine, tmp_path):
 
     assert inserted == 2
 
-    rows = session.execute(
-        sa.select(NullableTable).order_by(NullableTable.id)
-    ).scalars().all()
+    rows = session.execute(sa.select(NullableTable).order_by(NullableTable.id)).scalars().all()
 
     assert [(r.id, r.flag) for r in rows] == [
         (1, "S"),
@@ -362,10 +359,7 @@ def test_embedded_newline_in_field_is_preserved(session, engine, tmp_path):
     csv = tmp_path / "text_table.csv"
 
     # Properly quoted CSV with embedded newline
-    csv.write_text(
-        'id\tname\n'
-        '1\t"hello\nworld"\n'
-    )
+    csv.write_text('id\tname\n1\t"hello\nworld"\n')
 
     _TextTable.load_csv(
         session,
@@ -390,10 +384,7 @@ def test_embedded_tab_in_field(session, engine, tmp_path):
     _TextTable2 = cast(Type[CSVTableProtocol], TextTable2)
 
     csv = tmp_path / "tab_table.csv"
-    csv.write_text(
-        'id\tname\n'
-        '1\t"foo\tbar"\n'
-    )
+    csv.write_text('id\tname\n1\t"foo\tbar"\n')
 
     _TextTable2.load_csv(
         session,
@@ -408,6 +399,7 @@ def test_embedded_tab_in_field(session, engine, tmp_path):
 
 
 # --- index_strategy tests ---
+
 
 def _make_ddl_tracker(engine):
     """Return a list that is populated with DROP/CREATE INDEX statements as they execute."""
