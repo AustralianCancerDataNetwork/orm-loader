@@ -76,13 +76,14 @@ class CSVTableProtocol(ORMTableProtocol, Protocol):
 
     @classmethod
     def load_csv(
-        cls, 
-        session: so.Session, 
-        path: Path, 
-        *, 
-        normalise: bool = True, 
-        dedupe: bool = False, 
-        chunksize: int | None = None, 
+        cls,
+        session: so.Session,
+        path: Path,
+        *,
+        loader: Optional["LoaderInterface"] = None,
+        normalise: bool = True,
+        dedupe: bool = False,
+        chunksize: int | None = None,
         merge_strategy: str = "replace",
         quote_mode: str = "csv",
         index_strategy: str = "auto",

@@ -49,8 +49,8 @@ def test_postgres_copy_fast_path_is_used(pg_session, tmp_path, monkeypatch):
         called["copy"] = True
         return 1
 
-    import orm_loader.tables.loadable_table as loadable_table
-    monkeypatch.setattr(loadable_table, "quick_load_pg", fake_quick_load_pg)
+    import orm_loader.backends.postgres as pg_backend
+    monkeypatch.setattr(pg_backend, "quick_load_pg", fake_quick_load_pg)
 
     inserted = SimpleTable.load_csv(pg_session, csv)
     pg_session.commit()
@@ -63,12 +63,12 @@ def test_copy_failure_falls_back_to_orm(pg_session, tmp_path, monkeypatch):
     csv = tmp_path / "test_table.csv"
     pd.DataFrame([{"id": 1, "name": "alpha"}]).to_csv(csv, index=False)
 
-    from orm_loader.loaders import loading_helpers
+    import orm_loader.backends.postgres as pg_backend
 
     def broken_copy(*args, **kwargs):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(loading_helpers, "quick_load_pg", broken_copy)
+    monkeypatch.setattr(pg_backend, "quick_load_pg", broken_copy)
 
     inserted = SimpleTable.load_csv(pg_session, csv)
     pg_session.commit()
@@ -145,7 +145,9 @@ def test_infer_encoding_utf8(tmp_path):
     p.write_text("id,name\n1,α\n", encoding="utf-8")
 
     enc = infer_encoding(p)
-    assert enc["encoding"].lower().startswith("utf")
+    enc_str = enc["encoding"]
+    assert enc_str is not None
+    assert enc_str.lower().startswith("utf")
 
 def test_infer_delim_tab(tmp_path):
     p = tmp_path / "tab.csv"

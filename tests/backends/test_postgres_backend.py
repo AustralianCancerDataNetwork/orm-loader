@@ -1,9 +1,17 @@
 from __future__ import annotations
 
+import sqlalchemy.event as sae
+from typing import TYPE_CHECKING, Type, cast
+
 import sqlalchemy as sa
+import sqlalchemy.orm as so
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.engine import Connection, Engine
 
 from orm_loader.backends import PostgresBackend
+
+if TYPE_CHECKING:
+    from orm_loader.tables.typing import CSVTableProtocol
 
 
 class _ComputedTable:
@@ -42,6 +50,17 @@ class _FakeSession:
         self.commits += 1
 
 
+_ComputedTableCls = cast("Type[CSVTableProtocol]", _ComputedTable)
+
+
+def _sess(s: _FakeSession) -> so.Session:
+    return cast(so.Session, s)
+
+
+def _as_engine(s: _FakeSession) -> Engine | Connection:
+    return cast(Engine, s)
+
+
 def test_postgres_backend_identity_and_capabilities():
     backend = PostgresBackend()
 
@@ -57,7 +76,7 @@ def test_postgres_backend_create_staging_table_drops_computed_columns():
     backend = PostgresBackend()
     session = _FakeSession()
 
-    backend.create_staging_table(_ComputedTable, session, "_staging_target_table")
+    backend.create_staging_table(_ComputedTableCls, _sess(session), "_staging_target_table")
 
     assert any('DROP TABLE IF EXISTS "_staging_target_table"' in sql for sql in session.statements)
     assert any('CREATE UNLOGGED TABLE "_staging_target_table"' in sql for sql in session.statements)
@@ -69,7 +88,7 @@ def test_postgres_backend_drop_staging_table():
     backend = PostgresBackend()
     session = _FakeSession()
 
-    backend.drop_staging_table(session, "_staging_target_table")
+    backend.drop_staging_table(_sess(session), "_staging_target_table")
 
     assert session.statements == ['DROP TABLE IF EXISTS "_staging_target_table"']
 
@@ -78,9 +97,9 @@ def test_postgres_backend_fk_methods_emit_expected_sql():
     backend = PostgresBackend()
     session = _FakeSession()
 
-    previous = backend.disable_fk_check(session)
-    enabled = backend.enable_fk_check(session)
-    backend.restore_fk_check(session, previous)
+    previous = backend.disable_fk_check(_sess(session))
+    enabled = backend.enable_fk_check(_sess(session))
+    backend.restore_fk_check(_sess(session), previous)
 
     assert previous == "origin"
     assert enabled == "origin"
@@ -97,7 +116,7 @@ def test_postgres_backend_merge_replace_uses_using_delete():
     backend = PostgresBackend()
     session = _FakeSession()
 
-    backend.merge_replace(_ComputedTable, session, "target_table", "_staging_target_table", ["id", "name"])
+    backend.merge_replace(_ComputedTableCls, _sess(session), "target_table", "_staging_target_table", ["id", "name"])
 
     sql = session.statements[0]
     assert 'DELETE FROM "target_table" t' in sql
@@ -109,7 +128,7 @@ def test_postgres_backend_merge_insert_excludes_computed_columns():
     backend = PostgresBackend()
     session = _FakeSession()
 
-    backend.merge_insert(_ComputedTable, session, "target_table", "_staging_target_table")
+    backend.merge_insert(_ComputedTableCls, _sess(session), "target_table", "_staging_target_table")
 
     sql = session.statements[0]
     assert 'INSERT INTO "target_table" ("id", "name")' in sql
@@ -120,7 +139,7 @@ def test_postgres_backend_merge_upsert_excludes_computed_columns():
     backend = PostgresBackend()
     session = _FakeSession()
 
-    backend.merge_upsert(_ComputedTable, session, "target_table", "_staging_target_table", ["id"])
+    backend.merge_upsert(_ComputedTableCls, _sess(session), "target_table", "_staging_target_table", ["id"])
 
     sql = session.statements[0]
     assert 'INSERT INTO "target_table" ("id", "name")' in sql
@@ -132,8 +151,8 @@ def test_postgres_backend_materialized_view_methods_emit_expected_sql():
     session = _FakeSession()
     selectable = sa.select(sa.literal(1).label("n"))
 
-    backend.create_materialized_view(session, "mv_test", selectable)
-    backend.refresh_materialized_view(session, "mv_test")
+    backend.create_materialized_view(_as_engine(session), "mv_test", selectable)
+    backend.refresh_materialized_view(_as_engine(session), "mv_test")
 
     assert any("CREATE MATERIALIZED VIEW IF NOT EXISTS mv_test as SELECT" in sql for sql in session.statements)
     assert any("REFRESH MATERIALIZED VIEW mv_test;" == sql for sql in session.statements)
@@ -152,10 +171,10 @@ def test_postgres_backend_engine_with_replica_role_unregisters_listener(monkeypa
         def __enter__(self):
             return self
 
-        def __exit__(self, exc_type, exc, tb) -> None:
+        def __exit__(self, *_) -> None:
             return None
 
-        def execution_options(self, **kwargs):
+        def execution_options(self, **_):
             return self
 
         def execute(self, statement):
@@ -170,16 +189,16 @@ def test_postgres_backend_engine_with_replica_role_unregisters_listener(monkeypa
 
     engine = _Engine()
 
-    def _listen(target, name, fn) -> None:
+    def _listen(target, name, *_) -> None:
         events.append(("listen", target, name))
 
-    def _remove(target, name, fn) -> None:
+    def _remove(target, name, *_) -> None:
         events.append(("remove", target, name))
 
-    monkeypatch.setattr(sa.event, "listen", _listen)
-    monkeypatch.setattr(sa.event, "remove", _remove)
+    monkeypatch.setattr(sae, "listen", _listen)
+    monkeypatch.setattr(sae, "remove", _remove)
 
-    with backend.engine_with_replica_role(engine):
+    with backend.engine_with_replica_role(cast(Engine, engine)):
         pass
 
     assert events == [

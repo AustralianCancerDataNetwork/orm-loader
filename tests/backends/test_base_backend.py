@@ -3,16 +3,29 @@ from __future__ import annotations
 import importlib
 import importlib.abc
 import sys
+from importlib.machinery import ModuleSpec
+from types import ModuleType
+from typing import TYPE_CHECKING, Sequence, Type, cast, Any
 
 import pytest
 import sqlalchemy as sa
 import sqlalchemy.orm as so
+from sqlalchemy.engine import Connection, Engine
 
 from orm_loader.backends import BackendCapabilities, DatabaseBackend, resolve_backend
 
+if TYPE_CHECKING:
+    from orm_loader.loaders.data_classes import LoaderContext
+    from orm_loader.tables.typing import CSVTableProtocol
+
 
 class _BlockPsycopg(importlib.abc.MetaPathFinder):
-    def find_spec(self, fullname, path=None, target=None):
+    def find_spec(
+        self,
+        fullname: str,
+        path: Sequence[str] | None = None,
+        target: ModuleType | None = None,
+    ) -> ModuleSpec | None:
         if fullname == "psycopg" or fullname.startswith("psycopg."):
             raise ModuleNotFoundError("No module named 'psycopg'")
         return None
@@ -37,36 +50,60 @@ class FakeBackend(DatabaseBackend):
             supports_fk_toggle=True,
         )
 
-    def create_staging_table(self, table_cls, session, staging_name) -> None:
+    def create_staging_table(
+        self, table_cls: Type[CSVTableProtocol], session: so.Session, staging_name: str
+    ) -> None:
         return None
 
-    def drop_staging_table(self, session, staging_name) -> None:
+    def drop_staging_table(self, session: so.Session, staging_name: str) -> None:
         return None
 
-    def merge_replace(self, table_cls, session, target_name, staging_name, pk_cols) -> None:
+    def merge_replace(
+        self,
+        table_cls: Type[CSVTableProtocol],
+        session: so.Session,
+        target_name: str,
+        staging_name: str,
+        pk_cols: list[str],
+    ) -> None:
         return None
 
-    def merge_upsert(self, table_cls, session, target_name, staging_name, pk_cols) -> None:
+    def merge_upsert(
+        self,
+        table_cls: Type[CSVTableProtocol],
+        session: so.Session,
+        target_name: str,
+        staging_name: str,
+        pk_cols: list[str],
+    ) -> None:
         return None
 
-    def merge_insert(self, table_cls, session, target_name, staging_name) -> None:
+    def merge_insert(
+        self,
+        table_cls: Type[CSVTableProtocol],
+        session: so.Session,
+        target_name: str,
+        staging_name: str,
+    ) -> None:
         return None
 
-    def disable_fk_check(self, session) -> str | int:
+    def disable_fk_check(self, session: so.Session) -> str | int:
         self.calls.append(("disable_fk_check", session))
         return "enabled"
 
-    def enable_fk_check(self, session) -> str | int:
+    def enable_fk_check(self, session: so.Session) -> str | int:
         self.calls.append(("enable_fk_check", session))
         return "disabled"
 
-    def restore_fk_check(self, session, previous_state: str | int) -> None:
+    def restore_fk_check(self, session: so.Session, previous_state: str | int) -> None:
         self.calls.append(("restore_fk_check", previous_state))
 
-    def create_materialized_view(self, bind, name: str, selectable: sa.sql.Select) -> None:
+    def create_materialized_view(
+        self, bind: Engine | Connection, name: str, selectable: sa.sql.Select[Any]
+    ) -> None:
         return None
 
-    def refresh_materialized_view(self, bind, name: str) -> None:
+    def refresh_materialized_view(self, bind: Engine | Connection, name: str) -> None:
         return None
 
 
@@ -80,6 +117,9 @@ class _ComputedTable:
     )
 
 
+_ComputedTableCls = cast("Type[CSVTableProtocol]", _ComputedTable)
+
+
 def test_backend_capabilities_defaults():
     caps = BackendCapabilities()
 
@@ -91,7 +131,7 @@ def test_backend_capabilities_defaults():
 
 def test_database_backend_is_abstract():
     with pytest.raises(TypeError):
-        DatabaseBackend()
+        DatabaseBackend() # type: ignore
 
 
 def test_fake_backend_can_implement_contract():
@@ -105,9 +145,9 @@ def test_fake_backend_can_implement_contract():
     assert backend.supports_dialect("sqlite") is False
     assert backend.resolve_index_strategy("auto") == "drop_rebuild"
     assert backend.resolve_index_strategy("keep") == "keep"
-    assert backend.load_staging_fast(None, "staging") is None
+    assert backend.load_staging_fast(cast("LoaderContext", None), "staging") is None
 
-    with backend.merge_context(None, None):
+    with backend.merge_context(cast("Type[CSVTableProtocol]", None), cast(so.Session, None)):
         pass
 
 
@@ -141,7 +181,7 @@ def test_resolve_index_strategy_raises_for_invalid_value():
 def test_insertable_column_names_exclude_computed_columns():
     backend = FakeBackend()
 
-    assert backend._insertable_column_names(_ComputedTable) == ["id", "name"]
+    assert backend._insertable_column_names(_ComputedTableCls) == ["id", "name"]
 
 
 def test_bulk_load_context_toggles_fk_and_restores(session):
@@ -219,7 +259,7 @@ def test_resolve_backend_raises_for_unknown_dialect():
             name = "unknown"
 
     with pytest.raises(NotImplementedError, match="No backend registered"):
-        resolve_backend(_Unknown())
+        resolve_backend(cast(Engine, _Unknown()))
 
 
 def test_backends_import_does_not_require_psycopg():

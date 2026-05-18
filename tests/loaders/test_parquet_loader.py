@@ -4,8 +4,10 @@ import pandas as pd
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 from sqlalchemy.orm import DeclarativeBase
+from typing import cast, Type
 
 from orm_loader.tables.loadable_table import CSVLoadableTableInterface
+from orm_loader.tables.typing import CSVTableProtocol
 from orm_loader.loaders.loader_interface import ParquetLoader
 
 
@@ -20,8 +22,11 @@ class ParquetTable(Base, CSVLoadableTableInterface):
     value: so.Mapped[int] = so.mapped_column(sa.Integer, nullable=False)
 
 
-def test_parquet_loader(session, tmp_path):
-    Base.metadata.create_all(session.get_bind())
+_ParquetTable = cast(Type[CSVTableProtocol], ParquetTable)
+
+
+def test_parquet_loader(session, engine, tmp_path):
+    Base.metadata.create_all(engine)
 
     df = pd.DataFrame(
         [
@@ -33,7 +38,7 @@ def test_parquet_loader(session, tmp_path):
     path = tmp_path / "parquet_table.parquet"
     pq.write_table(table, path)
 
-    inserted = ParquetTable.load_csv( # type: ignore
+    inserted = _ParquetTable.load_csv(
         session,
         path,
         loader=ParquetLoader(),

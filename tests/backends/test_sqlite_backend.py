@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+from typing import TYPE_CHECKING, Type, cast
 
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 
 from orm_loader.backends import SQLiteBackend
 from orm_loader.helpers.sqlite import attach_sqlite_bulk_load_pragmas
+
+if TYPE_CHECKING:
+    from orm_loader.tables.typing import CSVTableProtocol
 
 
 class _ComputedTable:
@@ -38,6 +42,13 @@ class _FakeSession:
         return _Result(self.scalar_result)
 
 
+_ComputedTableCls = cast("Type[CSVTableProtocol]", _ComputedTable)
+
+
+def _sess(s: _FakeSession) -> so.Session:
+    return cast(so.Session, s)
+
+
 def test_sqlite_backend_identity_and_capabilities():
     backend = SQLiteBackend()
 
@@ -51,27 +62,22 @@ def test_sqlite_backend_identity_and_capabilities():
     assert backend.journal_mode == "WAL"
 
 
-def test_sqlite_backend_create_staging_table():
+def test_sqlite_backend_create_staging_table(session, engine):
     backend = SQLiteBackend()
-    engine = sa.create_engine("sqlite:///:memory:", future=True)
-    session = so.Session(engine)
 
-    try:
-        backend.create_staging_table(_ComputedTable, session, "_staging_target_table")
-        inspector = sa.inspect(engine)
-        assert inspector.has_table("_staging_target_table") is True
-        cols = inspector.get_columns("_staging_target_table")
-        assert [c["name"] for c in cols] == ["id", "name", "slug"]
-        assert all(c["nullable"] is True for c in cols)
-    finally:
-        session.close()
+    backend.create_staging_table(_ComputedTableCls, session, "_staging_target_table")
+    inspector = sa.inspect(engine)
+    assert inspector.has_table("_staging_target_table") is True
+    cols = inspector.get_columns("_staging_target_table")
+    assert [c["name"] for c in cols] == ["id", "name", "slug"]
+    assert all(c["nullable"] is True for c in cols)
 
 
 def test_sqlite_backend_drop_staging_table():
     backend = SQLiteBackend()
     session = _FakeSession()
 
-    backend.drop_staging_table(session, "_staging_target_table")
+    backend.drop_staging_table(_sess(session), "_staging_target_table")
 
     assert session.statements == ['DROP TABLE IF EXISTS "_staging_target_table"']
 
@@ -80,9 +86,9 @@ def test_sqlite_backend_fk_methods_emit_expected_sql():
     backend = SQLiteBackend()
     session = _FakeSession()
 
-    previous = backend.disable_fk_check(session)
-    enabled = backend.enable_fk_check(session)
-    backend.restore_fk_check(session, previous)
+    previous = backend.disable_fk_check(_sess(session))
+    enabled = backend.enable_fk_check(_sess(session))
+    backend.restore_fk_check(_sess(session), previous)
 
     assert previous == 1
     assert enabled == 1
@@ -99,7 +105,7 @@ def test_sqlite_backend_merge_replace_single_pk():
     backend = SQLiteBackend()
     session = _FakeSession()
 
-    backend.merge_replace(_ComputedTable, session, "target_table", "_staging_target_table", ["id"])
+    backend.merge_replace(_ComputedTableCls, _sess(session), "target_table", "_staging_target_table", ["id"])
 
     sql = session.statements[0]
     assert 'DELETE FROM "target_table"' in sql
@@ -110,7 +116,7 @@ def test_sqlite_backend_merge_replace_composite_pk():
     backend = SQLiteBackend()
     session = _FakeSession()
 
-    backend.merge_replace(_ComputedTable, session, "target_table", "_staging_target_table", ["id", "name"])
+    backend.merge_replace(_ComputedTableCls, _sess(session), "target_table", "_staging_target_table", ["id", "name"])
 
     sql = session.statements[0]
     assert 'WHERE EXISTS (' in sql
@@ -122,7 +128,7 @@ def test_sqlite_backend_merge_insert_excludes_computed_columns():
     backend = SQLiteBackend()
     session = _FakeSession()
 
-    backend.merge_insert(_ComputedTable, session, "target_table", "_staging_target_table")
+    backend.merge_insert(_ComputedTableCls, _sess(session), "target_table", "_staging_target_table")
 
     sql = session.statements[0]
     assert 'INSERT INTO "target_table" ("id", "name")' in sql
@@ -133,26 +139,25 @@ def test_sqlite_backend_merge_upsert_excludes_computed_columns():
     backend = SQLiteBackend()
     session = _FakeSession()
 
-    backend.merge_upsert(_ComputedTable, session, "target_table", "_staging_target_table", ["id"])
+    backend.merge_upsert(_ComputedTableCls, _sess(session), "target_table", "_staging_target_table", ["id"])
 
     sql = session.statements[0]
     assert 'INSERT OR IGNORE INTO "target_table" ("id", "name")' in sql
 
 
-def test_sqlite_backend_materialized_view_methods_raise():
+def test_sqlite_backend_materialized_view_methods_raise(engine):
     backend = SQLiteBackend()
-    session = _FakeSession()
     selectable = sa.select(sa.literal(1).label("n"))
 
     try:
-        backend.create_materialized_view(session, "mv_test", selectable)
+        backend.create_materialized_view(engine, "mv_test", selectable)
     except NotImplementedError as exc:
         assert "does not support materialized views" in str(exc)
     else:
         raise AssertionError("Expected create_materialized_view() to raise NotImplementedError")
 
     try:
-        backend.refresh_materialized_view(session, "mv_test")
+        backend.refresh_materialized_view(engine, "mv_test")
     except NotImplementedError as exc:
         assert "does not support materialized views" in str(exc)
     else:

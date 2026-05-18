@@ -1,10 +1,12 @@
 import pyarrow as pa
+from typing import cast, Type
 from orm_loader.loaders.loading_helpers import arrow_drop_duplicates
 import pandas as pd
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 from sqlalchemy.orm import DeclarativeBase
 from orm_loader.tables.loadable_table import CSVLoadableTableInterface
+from orm_loader.tables.typing import CSVTableProtocol
 from orm_loader.loaders.loader_interface import PandasLoader
 
 
@@ -19,6 +21,9 @@ class DedupTable(Base, CSVLoadableTableInterface):
     value: so.Mapped[str] = so.mapped_column(sa.String, nullable=False)
 
 
+_DedupTable = cast(Type[CSVTableProtocol], DedupTable)
+
+
 def test_arrow_drop_duplicates_simple():
     table = pa.table({
         "id": [1, 1, 2],
@@ -31,8 +36,8 @@ def test_arrow_drop_duplicates_simple():
 
 
 
-def test_internal_deduplication(session, tmp_path):
-    Base.metadata.create_all(session.get_bind())
+def test_internal_deduplication(session, engine, tmp_path):
+    Base.metadata.create_all(engine)
 
     csv = tmp_path / "dedup_table.csv"
     pd.DataFrame(
@@ -43,7 +48,7 @@ def test_internal_deduplication(session, tmp_path):
         ]
     ).to_csv(csv, index=False)
 
-    inserted = DedupTable.load_csv( # type: ignore
+    inserted = _DedupTable.load_csv(
         session,
         csv,
         loader=PandasLoader(),
