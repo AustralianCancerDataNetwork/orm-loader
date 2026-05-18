@@ -1,4 +1,5 @@
 import sqlalchemy as sa
+import sqlalchemy.event as sae
 import sqlalchemy.orm as so
 from sqlalchemy.orm import Session
 from pathlib import Path
@@ -416,6 +417,82 @@ def test_embedded_tab_in_field(session, tmp_path):
 
     rows = session.execute(sa.select(TextTable2)).scalars().all()
     assert rows[0].name == "foo\tbar"
+
+
+# --- index_strategy tests ---
+
+def _make_ddl_tracker(engine):
+    """Return a list that is populated with DROP/CREATE INDEX statements as they execute."""
+    ddl_log: list[str] = []
+
+    @sae.listens_for(engine, "before_cursor_execute")
+    def _capture(conn, cursor, statement, parameters, context, executemany):
+        upper = statement.strip().upper()
+        if upper.startswith("DROP INDEX") or upper.startswith("CREATE INDEX"):
+            ddl_log.append(statement.strip())
+
+    return ddl_log
+
+
+def test_auto_strategy_keeps_indices_on_sqlite(session, engine, tmp_csv_dir):
+    """On SQLite, 'auto' resolves to 'keep' — no index DDL should be emitted."""
+    ddl_log = _make_ddl_tracker(engine)
+    csv_path = tmp_csv_dir / "test_table.csv"
+    pd.DataFrame([{"id": 1, "name": "alpha"}, {"id": 2, "name": "beta"}]).to_csv(
+        csv_path, index=False, sep="\t"
+    )
+
+    SimpleTable.load_csv(session, csv_path, loader=PandasLoader(), index_strategy="auto")  # type: ignore
+    session.commit()
+
+    assert not any("DROP INDEX" in s.upper() for s in ddl_log)
+    assert not any("CREATE INDEX" in s.upper() for s in ddl_log)
+    inspector = sa.inspect(engine)
+    inspector.clear_cache()
+    assert "ix_test_table_name" in {idx["name"] for idx in inspector.get_indexes("test_table")}
+
+
+def test_explicit_keep_preserves_indices(session, engine, tmp_csv_dir):
+    """Explicit 'keep' emits no index DDL regardless of dialect."""
+    ddl_log = _make_ddl_tracker(engine)
+    csv_path = tmp_csv_dir / "test_table.csv"
+    pd.DataFrame([{"id": 1, "name": "alpha"}]).to_csv(csv_path, index=False, sep="\t")
+
+    SimpleTable.load_csv(session, csv_path, loader=PandasLoader(), index_strategy="keep")  # type: ignore
+    session.commit()
+
+    assert not any("DROP INDEX" in s.upper() for s in ddl_log)
+    inspector = sa.inspect(engine)
+    inspector.clear_cache()
+    assert "ix_test_table_name" in {idx["name"] for idx in inspector.get_indexes("test_table")}
+
+
+def test_explicit_drop_rebuild_on_sqlite_restores_index(session, engine, tmp_csv_dir):
+    """Explicit 'drop_rebuild' drops then restores the index even on SQLite."""
+    ddl_log = _make_ddl_tracker(engine)
+    csv_path = tmp_csv_dir / "test_table.csv"
+    pd.DataFrame([{"id": 1, "name": "alpha"}, {"id": 2, "name": "beta"}]).to_csv(
+        csv_path, index=False, sep="\t"
+    )
+
+    SimpleTable.load_csv(session, csv_path, loader=PandasLoader(), index_strategy="drop_rebuild")  # type: ignore
+    session.commit()
+
+    assert any("DROP INDEX" in s.upper() for s in ddl_log)
+    assert any("CREATE INDEX" in s.upper() for s in ddl_log)
+    inspector = sa.inspect(engine)
+    inspector.clear_cache()
+    assert "ix_test_table_name" in {idx["name"] for idx in inspector.get_indexes("test_table")}
+
+
+def test_invalid_index_strategy_raises(session, tmp_csv_dir):
+    """An unrecognised strategy value raises ValueError before any DB work."""
+    csv_path = tmp_csv_dir / "test_table.csv"
+    pd.DataFrame([{"id": 1, "name": "alpha"}]).to_csv(csv_path, index=False, sep="\t")
+
+    with pytest.raises(ValueError, match="Unknown index_strategy"):
+        SimpleTable.load_csv(session, csv_path, loader=PandasLoader(), index_strategy="not-valid")  # type: ignore
+
 
 # from hypothesis import given, strategies as st
 # from sqlalchemy.orm import declarative_base

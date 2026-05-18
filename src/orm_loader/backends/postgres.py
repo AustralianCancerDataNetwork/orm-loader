@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 import sqlalchemy as sa
 import sqlalchemy.orm as so
+import sqlalchemy.event as sae
 
 from .base import BackendCapabilities, DatabaseBackend
 from ..loaders.loading_helpers import quick_load_pg
@@ -198,12 +199,12 @@ class PostgresBackend(DatabaseBackend):
             cur.execute("SET session_replication_role = 'replica'")
             cur.close()
 
-        sa.event.listen(engine, "connect", _set_replica_role)
+        sae.listen(engine, "connect", _set_replica_role)
 
         try:
             yield engine
         finally:
-            sa.event.remove(engine, "connect", _set_replica_role)
+            sae.remove(engine, "connect", _set_replica_role)
             with engine.connect() as conn:
                 conn = conn.execution_options(isolation_level="AUTOCOMMIT")
                 conn.execute(sa.text("SET session_replication_role = DEFAULT"))
