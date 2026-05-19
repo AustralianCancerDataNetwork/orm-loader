@@ -6,7 +6,7 @@ import sqlalchemy as sa
 import sqlalchemy.orm as so
 import sqlalchemy.event as sae
 
-from .base import BackendCapabilities, DatabaseBackend
+from .base import BackendCapabilities, DatabaseBackend, Dialect
 from ..loaders.loading_helpers import quick_load_pg
 
 if TYPE_CHECKING:
@@ -24,8 +24,8 @@ class PostgresBackend(DatabaseBackend):
         return "postgres"
 
     @property
-    def dialect_names(self) -> tuple[str, ...]:
-        return ("postgresql",)
+    def dialect(self) -> Dialect:
+        return Dialect.POSTGRESQL
 
     @property
     def capabilities(self) -> BackendCapabilities:

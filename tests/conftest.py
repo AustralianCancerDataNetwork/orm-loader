@@ -32,7 +32,7 @@ def session(engine):
 
 POSTGRES_URL = os.getenv(
     "TEST_POSTGRES_URL",
-    "postgresql+psycopg://test:test@localhost:55432/test_db",
+    "postgresql+psycopg://test:test@localhost:55432/test",
 )
 
 # Shown whenever Postgres is unreachable — centralised so every skip carries

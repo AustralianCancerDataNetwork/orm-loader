@@ -3,6 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass
+from enum import Enum
 from typing import TYPE_CHECKING, Type, Any, Iterator
 
 import sqlalchemy as sa
@@ -29,6 +30,13 @@ class BackendCapabilities:
     supports_materialized_views: bool = False
 
 
+class Dialect(str, Enum):
+    """Supported SQLAlchemy dialect names."""
+
+    SQLITE = "sqlite"
+    POSTGRESQL = "postgresql"
+
+
 class DatabaseBackend(ABC):
     """
     Abstract base class for database-specific loader behavior.
@@ -44,17 +52,17 @@ class DatabaseBackend(ABC):
 
     @property
     @abstractmethod
-    def dialect_names(self) -> tuple[str, ...]:
-        """SQLAlchemy dialect names handled by this backend."""
+    def dialect(self) -> Dialect:
+        """SQLAlchemy dialect handled by this backend."""
 
     @property
     @abstractmethod
     def capabilities(self) -> BackendCapabilities:
         """Capability flags supported by this backend."""
 
-    def supports_dialect(self, dialect_name: str) -> bool:
-        """Return ``True`` when the backend handles the given dialect name."""
-        return dialect_name in self.dialect_names
+    def supports_dialect(self, dialect: Dialect) -> bool:
+        """Return ``True`` when the backend handles the given dialect."""
+        return self.dialect == dialect
 
     @property
     def default_index_strategy(self) -> str:

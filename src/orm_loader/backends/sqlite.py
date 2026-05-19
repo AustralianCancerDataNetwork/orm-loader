@@ -10,7 +10,7 @@ import sqlalchemy.orm as so
 from sqlalchemy import event, text
 from sqlalchemy.exc import IntegrityError
 
-from .base import BackendCapabilities, DatabaseBackend
+from .base import BackendCapabilities, DatabaseBackend, Dialect
 
 if TYPE_CHECKING:
     from sqlalchemy.engine import Connection, Engine
@@ -69,8 +69,8 @@ class SQLiteBackend(DatabaseBackend):
         return "sqlite"
 
     @property
-    def dialect_names(self) -> tuple[str, ...]:
-        return ("sqlite",)
+    def dialect(self) -> Dialect:
+        return Dialect.SQLITE
 
     @property
     def capabilities(self) -> BackendCapabilities:

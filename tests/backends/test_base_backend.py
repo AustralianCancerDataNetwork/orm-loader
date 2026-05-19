@@ -12,7 +12,12 @@ import sqlalchemy as sa
 import sqlalchemy.orm as so
 from sqlalchemy.engine import Connection, Engine
 
-from orm_loader.backends import BackendCapabilities, DatabaseBackend, resolve_backend
+from orm_loader.backends import (
+    BackendCapabilities,
+    DatabaseBackend,
+    Dialect,
+    resolve_backend,
+)
 
 if TYPE_CHECKING:
     from orm_loader.loaders.data_classes import LoaderContext
@@ -40,8 +45,8 @@ class FakeBackend(DatabaseBackend):
         return "fake"
 
     @property
-    def dialect_names(self) -> tuple[str, ...]:
-        return ("fake",)
+    def dialect(self) -> Dialect:
+        return Dialect.SQLITE
 
     @property
     def capabilities(self) -> BackendCapabilities:
@@ -142,11 +147,11 @@ def test_fake_backend_can_implement_contract():
     backend = FakeBackend()
 
     assert backend.name == "fake"
-    assert backend.dialect_names == ("fake",)
+    assert backend.dialect == Dialect.SQLITE
     assert backend.capabilities.supports_fast_load is True
     assert backend.capabilities.supports_fk_toggle is True
-    assert backend.supports_dialect("fake") is True
-    assert backend.supports_dialect("sqlite") is False
+    assert backend.supports_dialect(Dialect.SQLITE) is True
+    assert backend.supports_dialect(Dialect.POSTGRESQL) is False
     assert backend.resolve_index_strategy("auto") == "drop_rebuild"
     assert backend.resolve_index_strategy("keep") == "keep"
     assert backend.load_staging_fast(cast("LoaderContext", None), "staging") is None
@@ -240,6 +245,7 @@ def test_backends_package_exports():
 
     assert backends.DatabaseBackend is DatabaseBackend
     assert backends.BackendCapabilities is BackendCapabilities
+    assert backends.Dialect is Dialect
     assert backends.resolve_backend is resolve_backend
 
 
@@ -262,7 +268,7 @@ def test_resolve_backend_raises_for_unknown_dialect():
         class dialect:
             name = "unknown"
 
-    with pytest.raises(NotImplementedError, match="No backend registered"):
+    with pytest.raises(NotImplementedError, match="Unsupported SQLAlchemy dialect"):
         resolve_backend(cast(Engine, _Unknown()))
 
 

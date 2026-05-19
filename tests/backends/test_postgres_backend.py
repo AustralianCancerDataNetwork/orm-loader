@@ -8,7 +8,7 @@ import sqlalchemy.orm as so
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import Connection, Engine
 
-from orm_loader.backends import PostgresBackend
+from orm_loader.backends import Dialect, PostgresBackend
 
 if TYPE_CHECKING:
     from orm_loader.tables.typing import CSVTableProtocol
@@ -65,7 +65,8 @@ def test_postgres_backend_identity_and_capabilities():
     backend = PostgresBackend()
 
     assert backend.name == "postgres"
-    assert backend.supports_dialect("postgresql") is True
+    assert backend.dialect == Dialect.POSTGRESQL
+    assert backend.supports_dialect(Dialect.POSTGRESQL) is True
     assert backend.capabilities.supports_fast_load is True
     assert backend.capabilities.supports_unlogged_staging is True
     assert backend.capabilities.supports_fk_toggle is True

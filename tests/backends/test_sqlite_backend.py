@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Type, cast
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 
-from orm_loader.backends import SQLiteBackend
+from orm_loader.backends import Dialect, SQLiteBackend
 from orm_loader.helpers.sqlite import attach_sqlite_bulk_load_pragmas
 
 if TYPE_CHECKING:
@@ -53,7 +53,8 @@ def test_sqlite_backend_identity_and_capabilities():
     backend = SQLiteBackend()
 
     assert backend.name == "sqlite"
-    assert backend.supports_dialect("sqlite") is True
+    assert backend.dialect == Dialect.SQLITE
+    assert backend.supports_dialect(Dialect.SQLITE) is True
     assert backend.capabilities.supports_fast_load is False
     assert backend.capabilities.supports_unlogged_staging is False
     assert backend.capabilities.supports_fk_toggle is True
