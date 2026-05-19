@@ -4,7 +4,7 @@ import sqlalchemy.orm as so
 import logging
 from sqlalchemy.exc import InvalidRequestError, UnboundExecutionError
 
-from typing import Type, ClassVar, Optional, Any
+from typing import Type, ClassVar, Optional, Any, Iterator
 from pathlib import Path
 from contextlib import contextmanager
 
@@ -112,7 +112,7 @@ class CSVLoadableTableInterface(ORMTableBase):
         cls: Type['CSVTableProtocol'],
         session: so.Session,
         index_strategy: str = "auto",
-    ):
+    ) -> Iterator[None]:
         """
         Manage non-primary-key indexes around a staged merge.
 

@@ -4,6 +4,7 @@ import logging
 import sqlite3
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from contextlib import AbstractContextManager
 
 import sqlalchemy as sa
 import sqlalchemy.orm as so
@@ -207,7 +208,7 @@ class SQLiteBackend(DatabaseBackend):
         self,
         table_cls: type["CSVTableProtocol"],
         session: so.Session,
-    ):
+    ) -> AbstractContextManager[None]:
         return self.bulk_load_context(session, disable_fk=True, no_autoflush=False)
 
     def create_materialized_view(

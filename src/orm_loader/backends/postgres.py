@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, AbstractContextManager
 from typing import TYPE_CHECKING, Any
 import sqlalchemy as sa
 import sqlalchemy.orm as so
@@ -179,7 +179,7 @@ class PostgresBackend(DatabaseBackend):
         self,
         table_cls: type["CSVTableProtocol"],
         session: so.Session,
-    ):
+    ) -> AbstractContextManager[None]:
         return self.bulk_load_context(session, disable_fk=True, no_autoflush=False)
 
 
