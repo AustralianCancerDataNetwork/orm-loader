@@ -1,6 +1,7 @@
 from contextlib import contextmanager
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session
+from typing import Iterator
 from ..backends.resolve import resolve_backend
 from .logging import get_logger
 
@@ -10,14 +11,18 @@ def disable_fk_check(session: Session) -> str | int:
     """Disable foreign-key checks for the current session and return the previous state."""
     previous_state = resolve_backend(session).disable_fk_check(session)
     logger.info("Disabled foreign key checks for bulk load.")
-    assert isinstance(previous_state, (str, int)), "Expected previous FK state to be str or int"
+    if not isinstance(previous_state, (str, int)):
+        logger.error(f"Unexpected FK state type: {type(previous_state)}. Expected str or int.")
+        raise TypeError(f"Expected previous FK state to be str or int, got {type(previous_state)}")
     return previous_state
 
 def enable_fk_check(session: Session) -> str | int:
     """Enable foreign-key checks for the current session and return the previous state."""
     previous_state = resolve_backend(session).enable_fk_check(session)
     logger.info("Explicitly re-enabled foreign key checks.")
-    assert isinstance(previous_state, (str, int)), "Expected previous FK state to be str or int"
+    if not isinstance(previous_state, (str, int)):
+        logger.error(f"Unexpected FK state type: {type(previous_state)}. Expected str or int.")
+        raise TypeError(f"Expected previous FK state to be str or int, got {type(previous_state)}")
     return previous_state
 
 def restore_fk_check(session: Session, previous_state: str | int):
@@ -31,7 +36,7 @@ def bulk_load_context(
     *,
     disable_fk: bool = True,
     no_autoflush: bool = True,
-):
+) -> Iterator[None]:
     """
     Wrap a trusted bulk operation in backend-aware session settings.
 
@@ -48,7 +53,7 @@ def bulk_load_context(
 
 
 @contextmanager
-def engine_with_replica_role(engine: Engine):
+def engine_with_replica_role(engine: Engine) -> Iterator[Engine]:
     """
     Force ``session_replication_role=replica`` on PostgreSQL engine connections.
 

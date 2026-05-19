@@ -19,6 +19,9 @@ def attach_sqlite_bulk_load_pragmas(
     The hook currently sets ``busy_timeout``, journal mode, and foreign-key
     enforcement, and can also enable deferred foreign-key checking for the
     connection.
+
+    Note that this is the replacement for old ``enable_sqlite_foreign_keys()`` 
+    workaround - this should be no longer needed.
     """
     SQLiteBackend(
         busy_timeout_ms=busy_timeout_ms,
