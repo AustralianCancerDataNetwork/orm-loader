@@ -220,7 +220,8 @@ class DatabaseBackend(ABC):
         try:
             if disable_fk:
                 self._require_capability("supports_fk_toggle", "foreign key toggling")
-                previous_fk_state = self.disable_fk_check(session)
+                raw_state = self.disable_fk_check(session)
+                previous_fk_state = self._normalize_fk_check_state(raw_state)
 
             if no_autoflush:
                 with session.no_autoflush:
