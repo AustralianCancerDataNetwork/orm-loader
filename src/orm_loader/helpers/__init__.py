@@ -3,7 +3,6 @@ from .logging import get_logger, configure_logging
 from .bootstrap import bootstrap, create_db
 from .sqlite import (
     attach_sqlite_bulk_load_pragmas,
-    enable_sqlite_foreign_keys,
     explain_sqlite_fk_error,
     restore_sqlite_journal_mode,
 )
@@ -20,7 +19,6 @@ __all__ = [
     "bootstrap",
     "create_db",
     "attach_sqlite_bulk_load_pragmas",
-    "enable_sqlite_foreign_keys",
     "explain_sqlite_fk_error",
     "restore_sqlite_journal_mode",
     "bulk_load_context",

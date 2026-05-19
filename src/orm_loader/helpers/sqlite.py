@@ -6,21 +6,6 @@ from sqlalchemy.exc import IntegrityError
 
 from ..backends.sqlite import SQLiteBackend
 
-def enable_sqlite_foreign_keys(
-    dbapi_connection: Any,
-    connection_record: Any,
-) -> None:
-    """
-    Apply the default SQLite connection settings used by orm-loader.
-
-    This helper is kept for compatibility with older event-hook setups.
-    It delegates to ``SQLiteBackend.configure_dbapi_connection()``,
-    which enables foreign-key enforcement and may apply more than just
-    foreign-key settings.
-    """
-    del connection_record
-    SQLiteBackend().configure_dbapi_connection(dbapi_connection)
-
 
 def attach_sqlite_bulk_load_pragmas(
     engine: Engine,
