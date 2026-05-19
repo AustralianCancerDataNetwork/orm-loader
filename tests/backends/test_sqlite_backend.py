@@ -25,7 +25,7 @@ class _ComputedTable:
 
 
 class _FakeSession:
-    def __init__(self, scalar_result=1) -> None:
+    def __init__(self, scalar_result: int | str = 1) -> None:
         self.statements: list[str] = []
         self.scalar_result = scalar_result
 
@@ -276,3 +276,53 @@ def test_sqlite_backend_rejects_invalid_journal_mode():
         assert "Unsupported SQLite journal_mode" in str(exc)
     else:
         raise AssertionError("Expected invalid journal_mode to raise ValueError")
+
+
+def test_sqlite_backend_disable_fk_raises_when_pragma_returns_non_int():
+    backend = SQLiteBackend()
+    session = _FakeSession(scalar_result="not_an_int")
+
+    try:
+        backend.disable_fk_check(_sess(session))
+    except RuntimeError as exc:
+        assert "Expected SQLite FK state to be an int" in str(exc)
+    else:
+        raise AssertionError("Expected RuntimeError when PRAGMA returns a non-int")
+
+
+def test_sqlite_backend_enable_fk_raises_when_pragma_returns_non_int():
+    backend = SQLiteBackend()
+    session = _FakeSession(scalar_result="not_an_int")
+
+    try:
+        backend.enable_fk_check(_sess(session))
+    except RuntimeError as exc:
+        assert "Expected SQLite FK state to be an int" in str(exc)
+    else:
+        raise AssertionError("Expected RuntimeError when PRAGMA returns a non-int")
+
+
+def test_sqlite_backend_restore_fk_accepts_string_values():
+    backend = SQLiteBackend()
+    session = _FakeSession()
+
+    backend.restore_fk_check(_sess(session), "ON")
+    backend.restore_fk_check(_sess(session), "OFF")
+
+    assert session.statements == [
+        "PRAGMA foreign_keys = ON",
+        "PRAGMA foreign_keys = OFF",
+    ]
+
+
+def test_sqlite_backend_fk_toggle_round_trip(session):
+    backend = SQLiteBackend()
+
+    session.execute(sa.text("PRAGMA foreign_keys = ON"))
+    assert session.execute(sa.text("PRAGMA foreign_keys")).scalar() == 1
+
+    previous = backend.disable_fk_check(session)
+    assert session.execute(sa.text("PRAGMA foreign_keys")).scalar() == 0
+
+    backend.restore_fk_check(session, previous)
+    assert session.execute(sa.text("PRAGMA foreign_keys")).scalar() == 1

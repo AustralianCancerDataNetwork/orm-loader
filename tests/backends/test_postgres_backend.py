@@ -25,7 +25,7 @@ class _ComputedTable:
 
 
 class _FakeSession:
-    def __init__(self, scalar_result="origin") -> None:
+    def __init__(self, scalar_result: str | int = "origin") -> None:
         self.statements: list[str] = []
         self.scalar_result = scalar_result
         self.commits = 0
@@ -157,6 +157,53 @@ def test_postgres_backend_materialized_view_methods_emit_expected_sql():
 
     assert any("CREATE MATERIALIZED VIEW IF NOT EXISTS mv_test as SELECT" in sql for sql in session.statements)
     assert any("REFRESH MATERIALIZED VIEW mv_test;" == sql for sql in session.statements)
+
+
+def test_postgres_backend_normalize_fk_check_state():
+    normalize = PostgresBackend._normalize_fk_check_state
+
+    assert normalize("origin") == "origin"
+    assert normalize("local") == "local"
+    assert normalize("replica") == "replica"
+    assert normalize(" ORIGIN ") == "origin"
+
+    try:
+        normalize("invalid_role")
+    except ValueError as exc:
+        assert "Invalid PostgreSQL session_replication_role" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for unrecognised role")
+
+    try:
+        normalize(1)
+    except ValueError as exc:
+        assert "Postgres uses string roles" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for integer input")
+
+
+def test_postgres_backend_disable_fk_raises_when_show_returns_non_string():
+    backend = PostgresBackend()
+    session = _FakeSession(scalar_result=42)
+
+    try:
+        backend.disable_fk_check(_sess(session))
+    except RuntimeError as exc:
+        assert "Expected PostgreSQL FK state to be a string" in str(exc)
+    else:
+        raise AssertionError("Expected RuntimeError when SHOW returns a non-string")
+
+
+def test_postgres_backend_enable_fk_raises_when_show_returns_non_string():
+    backend = PostgresBackend()
+    session = _FakeSession(scalar_result=42)
+
+    try:
+        backend.enable_fk_check(_sess(session))
+    except RuntimeError as exc:
+        assert "Expected PostgreSQL FK state to be a string" in str(exc)
+    else:
+        raise AssertionError("Expected RuntimeError when SHOW returns a non-string")
 
 
 def test_postgres_backend_engine_with_replica_role_unregisters_listener(monkeypatch):
