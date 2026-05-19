@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import Any
 
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
