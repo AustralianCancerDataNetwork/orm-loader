@@ -300,7 +300,7 @@ class CSVLoadableTableInterface(ORMTableBase):
         dedupe: bool = False,
         chunksize: int | None = None,
         merge_strategy: str = "replace",
-        quote_mode: str = "csv",
+        quote_mode: str = "auto",
         index_strategy: str = "auto",
     ) -> int:
         

@@ -70,7 +70,7 @@ class LoaderContext:
     chunksize: int | None = None
     normalise: bool = True
     dedupe: bool = True
-    quote_mode: str = "csv"
+    quote_mode: str = "auto"
 
 class LoaderInterface:
 
@@ -170,34 +170,6 @@ class LoaderInterface:
         """
         raise NotImplementedError
     
-
-    #     vars_per_row = len(pk_cols)
-    #     chunk_size = max(1, 10_000 // vars_per_row)
-    #     existing_rows: list[tuple] = []
-
-    #     for i in range(0, len(pk_tuples), chunk_size):
-    #         chunk = pk_tuples[i : i + chunk_size]
-
-    #         rows = (
-    #             ctx.session.query(*pk_cols)
-    #             .filter(sa.tuple_(*pk_cols).in_(chunk))
-    #             .all()
-    #         )
-    #         existing_rows.extend(rows)
-
-    #     if not existing_rows:
-    #         return df
-
-    #     existing = pd.DataFrame(existing_rows, columns=pk_names)
-
-    #     logger.warning(f"Dropping {len(existing)} rows from {ctx.tableclass.__tablename__} that already exist in the database")
-    #     df = (
-    #         df.merge(existing, on=pk_names, how="left", indicator=True)
-    #         .loc[lambda x: x["_merge"] == "left_only"]
-    #         .drop(columns="_merge")
-    #     )
-    #     return df
-
 
 @dataclass
 class ColumnCastingStats:

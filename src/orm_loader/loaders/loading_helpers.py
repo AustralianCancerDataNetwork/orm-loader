@@ -2,6 +2,7 @@ from __future__ import annotations
 from pathlib import Path
 import chardet
 import csv as _csv
+import re
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 import logging
@@ -9,6 +10,8 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.csv as pv
 import io
+
+_SAFE_ENCODING = re.compile(r'^[A-Za-z][A-Za-z0-9_-]*$')
 
 logger = logging.getLogger(__name__)
 COPY_BLOCK_SIZE = 8192
@@ -238,6 +241,8 @@ def quick_load_pg(
 
 
     encoding = infer_encoding(path)['encoding'] or 'utf-8'
+    if not _SAFE_ENCODING.match(encoding):
+        raise ValueError(f"Unsafe encoding value from chardet: {encoding!r}")
     delimiter = infer_delim(path)
     if quote_mode == "auto":
         quote_mode = infer_quote_mode(path, delimiter=delimiter, encoding=encoding)

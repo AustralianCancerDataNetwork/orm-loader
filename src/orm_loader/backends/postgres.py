@@ -98,13 +98,15 @@ class PostgresBackend(DatabaseBackend):
     def disable_fk_check(self, session: so.Session) -> str | int:
         previous_state = session.execute(sa.text("SHOW session_replication_role")).scalar()
         session.execute(sa.text("SET session_replication_role = 'replica'"))
-        assert isinstance(previous_state, str), "Expected PostgreSQL FK state to be a string"
+        if not isinstance(previous_state, str):
+            raise RuntimeError("Expected PostgreSQL FK state to be a string")
         return previous_state
 
     def enable_fk_check(self, session: so.Session) -> str | int:
         previous_state = session.execute(sa.text("SHOW session_replication_role")).scalar()
         session.execute(sa.text("SET session_replication_role = 'origin'"))
-        assert isinstance(previous_state, str), "Expected PostgreSQL FK state to be a string"
+        if not isinstance(previous_state, str):
+            raise RuntimeError("Expected PostgreSQL FK state to be a string")
         return previous_state
 
     def restore_fk_check(
