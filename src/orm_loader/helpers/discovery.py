@@ -8,7 +8,12 @@ def get_model_by_tablename(
     base: type[ModelT] = Base,
 ) -> type[ModelT] | None:
     tablename = tablename.lower().strip()
-    for cls in base.__subclasses__():
+    for mapper in base.registry.mappers:
+        cls = mapper.class_
+        if not isinstance(cls, type):
+            continue
+        if not issubclass(cls, base):
+            continue
         if getattr(cls, "__tablename__", None) == tablename:
             return cls
     return None
