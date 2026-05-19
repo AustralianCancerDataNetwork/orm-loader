@@ -7,6 +7,7 @@ from sqlalchemy.exc import InvalidRequestError, UnboundExecutionError
 from typing import Type, ClassVar, Optional, Any, Iterator
 from pathlib import Path
 from contextlib import contextmanager
+from time import perf_counter
 
 from .orm_table import ORMTableBase
 from .typing import CSVTableProtocol
@@ -14,6 +15,11 @@ from ..backends.resolve import resolve_backend
 from ..loaders.loader_interface import LoaderInterface, LoaderContext, PandasLoader, ParquetLoader
 
 logger = logging.getLogger(__name__)
+
+
+def _format_elapsed(seconds: float) -> str:
+    """Return a compact, human-readable duration for phase logging."""
+    return f"{seconds:.2f}s"
 
 
 def _require_bind(session: so.Session) -> sa.Engine | sa.Connection:
@@ -123,6 +129,7 @@ class CSVLoadableTableInterface(ORMTableBase):
         """
         backend = resolve_backend(session)
         resolved_index_strategy = backend.resolve_index_strategy(index_strategy)
+        table_name = cls.__tablename__
 
         indices = list(cls.__table__.indexes) if resolved_index_strategy == "drop_rebuild" else []
         inspector = sa.inspect(_require_bind(session))
@@ -133,37 +140,92 @@ class CSVLoadableTableInterface(ORMTableBase):
             to_drop = [i for i in indices if i.name in existing_in_db]
             
             if to_drop:
-                logger.info(f"Dropping {len(to_drop)} active indices...")
+                logger.info(f"Table `{table_name}`: Dropping {len(to_drop)} active indices.")
+                drop_started = perf_counter()
                 for idx in to_drop:
                     session.execute(sa.schema.DropIndex(idx))
+                logger.info(
+                    f"Table `{table_name}`: Finished dropping {len(to_drop)} active indices "
+                    f"in {_format_elapsed(perf_counter() - drop_started)}."
+                )
+                logger.info(f"Table `{table_name}`: Committing after index drop.")
+                commit_started = perf_counter()
                 session.commit()
+                logger.info(
+                    f"Table `{table_name}`: Commit after index drop completed in "
+                    f"{_format_elapsed(perf_counter() - commit_started)}."
+                )
 
+        fk_restore_started: float | None = None
         try:
+            logger.info(f"Table `{table_name}`: Disabling foreign key checks before merge.")
+            fk_disable_started = perf_counter()
             with backend.merge_context(cls, session):
-                yield 
-                session.commit() 
+                logger.info(
+                    f"Table `{table_name}`: Foreign key checks disabled in "
+                    f"{_format_elapsed(perf_counter() - fk_disable_started)}."
+                )
+                try:
+                    logger.info(f"Table `{table_name}`: Starting merge operation.")
+                    merge_started = perf_counter()
+                    yield
+                    logger.info(
+                        f"Table `{table_name}`: Merge operation SQL completed in "
+                        f"{_format_elapsed(perf_counter() - merge_started)}."
+                    )
+                    logger.info(f"Table `{table_name}`: Committing merged rows.")
+                    commit_started = perf_counter()
+                    session.commit()
+                    logger.info(
+                        f"Table `{table_name}`: Merge commit completed in "
+                        f"{_format_elapsed(perf_counter() - commit_started)}."
+                    )
+                finally:
+                    logger.info(f"Table `{table_name}`: Restoring foreign key checks.")
+                    fk_restore_started = perf_counter()
             
         except Exception as e:
             session.rollback()
-            logger.error(f"Table `{cls.__tablename__}`: Merge operation failed - {e}")
+            logger.error(f"Table `{table_name}`: Merge operation failed - {e}")
             raise
         finally:
+           if fk_restore_started is not None:
+               logger.info(
+                   f"Table `{table_name}`: Foreign key checks restored in "
+                   f"{_format_elapsed(perf_counter() - fk_restore_started)}."
+               )
            if indices:
-               logger.info(f"Table `{cls.__tablename__}`: Verifying/Rebuilding indices.")
+               logger.info(f"Table `{table_name}`: Verifying/Rebuilding indices.")
+               rebuild_started = perf_counter()
                inspector.clear_cache() # Required to ensure we get the current state of the database after potential changes
-               existing_idx_names = {idx['name'] for idx in inspector.get_indexes(cls.__tablename__)}
+               existing_idx_names = {idx['name'] for idx in inspector.get_indexes(table_name)}
                
                for idx in indices:
                    if idx.name not in existing_idx_names:
                        try:
-                           logger.info(f"Restoring missing index: {idx.name}")
+                           logger.info(f"Table `{table_name}`: Restoring missing index: {idx.name}")
+                           create_started = perf_counter()
                            session.execute(sa.schema.CreateIndex(idx))
+                           logger.info(
+                               f"Table `{table_name}`: Restored missing index `{idx.name}` in "
+                               f"{_format_elapsed(perf_counter() - create_started)}."
+                           )
+                           logger.info(f"Table `{table_name}`: Committing restored index `{idx.name}`.")
+                           commit_started = perf_counter()
                            session.commit()
+                           logger.info(
+                               f"Table `{table_name}`: Commit after restoring index `{idx.name}` "
+                               f"completed in {_format_elapsed(perf_counter() - commit_started)}."
+                           )
                        except Exception as e:
                            session.rollback()
-                           logger.error(f"Failed to restore {idx.name}: {e}")
+                           logger.error(f"Table `{table_name}`: Failed to restore {idx.name}: {e}")
                    else:
-                       logger.debug(f"Index {idx.name} actually exists on disk. Skipping.")
+                       logger.debug(f"Table `{table_name}`: Index {idx.name} already exists on disk. Skipping.")
+               logger.info(
+                   f"Table `{table_name}`: Index verification/rebuild completed in "
+                   f"{_format_elapsed(perf_counter() - rebuild_started)}."
+               )
 
 
     @classmethod
@@ -328,7 +390,8 @@ class CSVLoadableTableInterface(ORMTableBase):
         chunksize
             Optional chunk size for incremental loading.
         merge_strategy
-            Merge strategy to apply (e.g. ``replace`` or ``upsert``).
+            Merge strategy to apply (e.g. ``replace``, ``upsert``, or
+            ``insert_if_empty``).
         quote_mode
             Quoting mode used by the PostgreSQL fast-path loader.
         index_strategy
@@ -407,6 +470,20 @@ class CSVLoadableTableInterface(ORMTableBase):
         backend = resolve_backend(session)
         backend.merge_insert(cls, session, target, staging)
 
+    @classmethod
+    def _target_has_rows(
+        cls: Type[CSVTableProtocol],
+        session: so.Session,
+        target: str,
+    ) -> bool:
+        """
+        Return whether the target table currently contains any rows.
+        """
+        row = session.execute(
+            sa.text(f'SELECT 1 FROM "{target}" LIMIT 1')
+        ).first()
+        return row is not None
+
 
     @classmethod
     def _merge_upsert(
@@ -436,31 +513,99 @@ class CSVLoadableTableInterface(ORMTableBase):
         session
             An active SQLAlchemy session.
         merge_strategy
-            Merge strategy to apply.
+            Merge strategy to apply (for example ``replace``,
+            ``upsert``, or ``insert_if_empty``).
         """
         target = cls.__tablename__
         staging = cls.staging_tablename()
         pk_cols = cls.pk_names()
 
         _require_bind(session)
+        if merge_strategy in {"replace", "upsert"}:
+            logger.info(
+                f"Table `{target}`: Checking whether target table is empty for merge optimisation."
+            )
+            check_started = perf_counter()
+            has_rows = cls._target_has_rows(
+                session=session,
+                target=target,
+            )
+            logger.info(
+                f"Table `{target}`: Empty-table optimisation check completed in "
+                f"{_format_elapsed(perf_counter() - check_started)}."
+            )
+            if not has_rows:
+                logger.info(
+                    f"Table `{target}`: Target table is empty; routing merge strategy "
+                    f"`{merge_strategy}` to insert-if-empty fast path."
+                )
+                merge_strategy = "insert_if_empty"
+
         if merge_strategy == "replace":
+            logger.info(f"Table `{target}`: Merge replace delete phase starting.")
+            delete_started = perf_counter()
             cls._merge_replace(
                 session=session,
                 target=target,
                 staging=staging,
                 pk_cols=pk_cols,
             )
+            logger.info(
+                f"Table `{target}`: Merge replace delete phase completed in "
+                f"{_format_elapsed(perf_counter() - delete_started)}."
+            )
+            logger.info(f"Table `{target}`: Merge insert phase starting.")
+            insert_started = perf_counter()
             cls._merge_insert(
                 session=session,
                 target=target,
                 staging=staging,
             )
+            logger.info(
+                f"Table `{target}`: Merge insert phase completed in "
+                f"{_format_elapsed(perf_counter() - insert_started)}."
+            )
         elif merge_strategy == "upsert":
+            logger.info(f"Table `{target}`: Merge upsert phase starting.")
+            upsert_started = perf_counter()
             cls._merge_upsert(
                 session=session,
                 target=target,
                 staging=staging,
                 pk_cols=pk_cols,
+            )
+            logger.info(
+                f"Table `{target}`: Merge upsert phase completed in "
+                f"{_format_elapsed(perf_counter() - upsert_started)}."
+            )
+        elif merge_strategy == "insert_if_empty":
+            logger.info(f"Table `{target}`: Checking whether target table is empty.")
+            check_started = perf_counter()
+            has_rows = cls._target_has_rows(
+                session=session,
+                target=target,
+            )
+            logger.info(
+                f"Table `{target}`: Empty-table check completed in "
+                f"{_format_elapsed(perf_counter() - check_started)}."
+            )
+
+            if has_rows:
+                raise ValueError(
+                    f"Table `{target}` is not empty; cannot use merge strategy "
+                    f"'insert_if_empty'"
+                )
+
+            logger.info(f"Table `{target}`: Merge insert-if-empty phase starting.")
+            insert_started = perf_counter()
+            cls._merge_insert(
+                session=session,
+                target=target,
+                staging=staging,
+            )
+            logger.info(
+                f"Table `{target}`: Merge insert-if-empty phase completed in "
+                f"{_format_elapsed(perf_counter() - insert_started)}."
             )
         else:
             raise ValueError(f"Unknown merge strategy '{merge_strategy}'")

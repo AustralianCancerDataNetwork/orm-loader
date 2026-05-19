@@ -105,6 +105,9 @@ class CSVTableProtocol(ORMTableProtocol, Protocol):
     def _merge_insert(cls, session: so.Session, target: str, staging: str) -> None: ...
 
     @classmethod
+    def _target_has_rows(cls, session: so.Session, target: str) -> bool: ...
+
+    @classmethod
     def _merge_replace(cls, session: so.Session, target: str, staging: str, pk_cols: list[str]) -> None: ...
 
     @classmethod

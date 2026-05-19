@@ -96,6 +96,51 @@ def test_postgres_upsert_does_not_update(pg_session, tmp_path):
 
 
 @pytest.mark.postgres
+def test_postgres_insert_if_empty(pg_session, tmp_path):
+    csv = tmp_path / "test_table.csv"
+
+    pd.DataFrame(
+        [
+            {"id": 1, "name": "alpha"},
+            {"id": 2, "name": "beta"},
+        ]
+    ).to_csv(csv, index=False)
+
+    inserted = SimpleTable.load_csv(
+        pg_session,
+        csv,
+        merge_strategy="insert_if_empty",
+    )
+    pg_session.commit()
+
+    assert inserted == 2
+
+    rows = pg_session.execute(sa.select(SimpleTable).order_by(SimpleTable.id)).scalars().all()
+    assert [(r.id, r.name) for r in rows] == [
+        (1, "alpha"),
+        (2, "beta"),
+    ]
+
+
+@pytest.mark.postgres
+def test_postgres_insert_if_empty_raises_on_non_empty_target(pg_session, tmp_path):
+    csv = tmp_path / "test_table.csv"
+
+    pd.DataFrame([{"id": 1, "name": "alpha"}]).to_csv(csv, index=False)
+    SimpleTable.load_csv(pg_session, csv)
+    pg_session.commit()
+
+    pd.DataFrame([{"id": 2, "name": "beta"}]).to_csv(csv, index=False)
+
+    with pytest.raises(ValueError, match="is not empty; cannot use merge strategy 'insert_if_empty'"):
+        SimpleTable.load_csv(
+            pg_session,
+            csv,
+            merge_strategy="insert_if_empty",
+        )
+
+
+@pytest.mark.postgres
 def test_postgres_copy_large_batch(pg_session, tmp_path):
     csv = tmp_path / "test_table.csv"
 
