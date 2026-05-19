@@ -14,6 +14,9 @@ class PandasLoaderTable(CSVLoadableTableInterface, Base):
 
 class SimpleTable(Base, CSVLoadableTableInterface):
     __tablename__ = "test_table"
+    __table_args__ = (
+        sa.Index("ix_test_table_name", "name"),
+    )
 
     id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     name: so.Mapped[str] = so.mapped_column(sa.String, nullable=False)
@@ -32,4 +35,3 @@ class CompositeTable(Base, CSVLoadableTableInterface):
     a: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     b: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     value: so.Mapped[str] = so.mapped_column(sa.String)
-

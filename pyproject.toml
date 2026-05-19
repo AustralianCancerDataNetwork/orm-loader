@@ -1,6 +1,6 @@
 [project]
 name = "orm-loader"
-version = "0.3.27"
+version = "0.4.0"
 description = "Generic base classes to handle ORM functionality for multiple downstream datamodels"
 readme = "README.md"
 authors = [
@@ -14,6 +14,18 @@ dependencies = [
     "sqlalchemy>=2.0.45",
 ]
 
+
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Science/Research",
+  "Intended Audience :: Developers",
+  "Topic :: Scientific/Engineering :: Medical Science Apps.",
+  "Topic :: Database :: Database Engines/Servers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+]
+
 [project.urls]
 Homepage = "https://AustralianCancerDataNetwork.github.io/orm-loader"
 Documentation = "https://AustralianCancerDataNetwork.github.io/orm-loader"
@@ -25,16 +37,20 @@ requires = ["uv_build>=0.9.2,<0.10.0"]
 build-backend = "uv_build"
 
 [project.optional-dependencies]
+postgres = [
+  "psycopg[binary]>=3.2",
+]
 dev = [
-    "mypy>=1.19.1",
     "pytest>=9.0.3",
+    "mypy>=1.19.1",
     "ruff>=0.14.11",
     "mkdocs-material>=9.7.1",
     "mkdocstrings-python>=2.0.1",
     "requests>=2.33.0",
     "mkdocs>=1.6.1",
     "mkdocs-mermaid2-plugin",
-    "Pygments>=2.20.0"
+    "Pygments>=2.20.0",
+    "python-dotenv"
 ]
 
 [tool.setuptools]
@@ -54,3 +70,9 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-ra"
+markers = [
+    "postgres: requires a running Postgres instance (set TEST_POSTGRES_URL)",
+]
+
+[tool.pyright]
+reportMissingTypeStubs = false

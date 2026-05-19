@@ -25,6 +25,7 @@ on globals or implicit configuration.
 | `chunksize` | Optional chunk size |
 | `normalise` | Whether to cast values to ORM types |
 | `dedupe` | Whether to deduplicate incoming data |
+| `quote_mode` | CSV quoting mode for PostgreSQL fast-path loading |
 
 ::: orm_loader.loaders.data_classes.LoaderContext
 

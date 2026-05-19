@@ -1,32 +1,45 @@
-from sqlalchemy import event, text
+from pathlib import Path
+
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
-import logging
 
-logger = logging.getLogger(__name__)
+from ..backends.sqlite import SQLiteBackend
 
-@event.listens_for(Engine, "connect")
-def enable_sqlite_foreign_keys(dbapi_connection, connection_record):
-    if dbapi_connection.__class__.__module__.startswith("sqlite3"):
-        logger.debug("Enabling SQLite foreign key enforcement")
-        cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA defer_foreign_keys = ON;")
-        cursor.close()
+
+def attach_sqlite_bulk_load_pragmas(
+    engine: Engine,
+    *,
+    busy_timeout_ms: int = 60000,
+    journal_mode: str = "WAL",
+    defer_foreign_keys: bool = True,
+) -> None:
+    """
+    Install SQLite connect hooks aimed at heavy local write workloads.
+
+    The hook currently sets ``busy_timeout``, journal mode, and foreign-key
+    enforcement, and can also enable deferred foreign-key checking for the
+    connection.
+
+    Note that this is the replacement for old ``enable_sqlite_foreign_keys()`` 
+    workaround - this should be no longer needed.
+    """
+    SQLiteBackend(
+        busy_timeout_ms=busy_timeout_ms,
+        journal_mode=journal_mode,
+        defer_foreign_keys=defer_foreign_keys,
+    ).install_engine_hooks(engine)
+
 
 def explain_sqlite_fk_error(session, exc: IntegrityError, raise_error: bool = True):
-    engine = session.get_bind()
-    if engine.dialect.name != "sqlite":
-        raise exc
+    """Log SQLite foreign-key check details before re-raising an error."""
+    SQLiteBackend().explain_fk_error(session, exc, raise_error=raise_error)
 
-    with engine.connect() as conn:
-        rows = conn.execute(text("PRAGMA foreign_key_check")).fetchall()
 
-    if rows:
-        for r in rows:
-            logger.error(
-                "FK violation: table=%s rowid=%s references=%s fk_index=%s",
-                r[0], r[1], r[2], r[3]
-            )
+def restore_sqlite_journal_mode(db_path: Path) -> None:
+    """
+    Checkpoint WAL contents and switch the database back to ``DELETE`` mode.
 
-    if raise_error:
-        raise exc
+    Call this after disposing active SQLite connections. Reconnecting
+    through an engine that still installs WAL hooks will enable WAL again.
+    """
+    SQLiteBackend().restore_journal_mode(db_path)

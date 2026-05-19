@@ -3,10 +3,11 @@
 Infrastructure for staged, file-based ingestion into ORM tables.
 
 Supports:
-- CSV-based ingestion
-- optional fast-path database COPY
-- dialect-aware merge strategies
-- Parquet loading hooks
+- staged file loading into backend-specific staging tables
+- PostgreSQL fast-path `COPY` with ORM fallback
+- backend-aware merge strategies
+- pandas and PyArrow-based loader paths
+- index handling during merge
 
 ---
 

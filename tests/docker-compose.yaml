@@ -4,11 +4,15 @@ services:
     environment:
       POSTGRES_USER: test
       POSTGRES_PASSWORD: test
-      POSTGRES_DB: test_db
+      POSTGRES_DB: test
     ports:
       - "55432:5432"
+    volumes:
+      - postgres_orm_test_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U test"]
+      test: ["CMD-SHELL", "pg_isready -U test -d test"]
       interval: 2s
       timeout: 2s
       retries: 10
+volumes:
+  postgres_orm_test_data:

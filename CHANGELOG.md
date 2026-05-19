@@ -109,3 +109,9 @@
 
 # 0.3.27
 - adding minimum versions for dependabot alerts (dev deps only)
+
+# 0.4.0
+- update to handle psycopg (as opposed to psycopg2) cleanly
+- overall api cleanup with the goal of being more explicit about selection of specific db backends
+- general typing cleanup
+- removed example notebooks until they can be cleaned up with working use-cases according to updated api

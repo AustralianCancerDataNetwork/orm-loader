@@ -211,3 +211,5 @@ OMOP_CDM*.csv
 *.db
 .vscode/
 .DS_Store
+_temp/
+notebooks/

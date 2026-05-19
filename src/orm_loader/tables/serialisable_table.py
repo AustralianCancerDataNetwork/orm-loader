@@ -1,10 +1,14 @@
-from .orm_table import ORMTableBase
-from typing import Any
+from typing import Any, Unpack
+from collections.abc import Iterator
 import json
 import hashlib
 import datetime
 
-def json_default(obj) -> str:
+from .orm_table import ORMTableBase
+from .typing import ToDictKwargs
+
+
+def json_default(obj: Any) -> str:
     """
     Default JSON serialisation handler for unsupported types.
 
@@ -79,7 +83,7 @@ class SerialisableTableInterface(ORMTableBase):
         dict[str, Any]
             A dictionary representation of the ORM row.
         """
-        data = {}
+        data: dict[str, Any] = {}
         for key, _ in self.model_columns().items():
             if only and key not in only:
                 continue
@@ -91,7 +95,7 @@ class SerialisableTableInterface(ORMTableBase):
             data[key] = value
         return data
 
-    def to_json(self, **kwargs) -> str:
+    def to_json(self, **kwargs: Unpack[ToDictKwargs]) -> str:
         """
         Serialise the ORM instance to a JSON string.
 
@@ -133,7 +137,7 @@ class SerialisableTableInterface(ORMTableBase):
         payload = self.to_json(include_nulls=True)
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
     
-    def __iter__(self):
+    def __iter__(self) -> Iterator[tuple[str, Any]]:
         """
         Iterate over the ORM instance as ``(key, value)`` pairs.
 
@@ -147,7 +151,7 @@ class SerialisableTableInterface(ORMTableBase):
         """
         yield from self.to_dict().items()
 
-    def __json__(self):
+    def __json__(self) -> dict[str, Any]:
         """
         Return a JSON-serialisable representation of the ORM instance.
 

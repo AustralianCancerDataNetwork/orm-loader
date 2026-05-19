@@ -70,7 +70,7 @@ class LoaderContext:
     chunksize: int | None = None
     normalise: bool = True
     dedupe: bool = True
-    quote_mode: str = "csv"
+    quote_mode: str = "auto"
 
 class LoaderInterface:
 
@@ -170,61 +170,6 @@ class LoaderInterface:
         """
         raise NotImplementedError
     
-    # @classmethod
-    # def _dedupe_db(cls, df: pd.DataFrame, ctx: LoaderContext) -> pd.DataFrame:
-    #     """
-    #     Perform database-level deduplication against existing rows.
-
-    #     Parameters
-    #     ----------
-    #     df
-    #         Incoming DataFrame.
-    #     ctx
-    #         Loader context.
-
-    #     Returns
-    #     -------
-    #     pandas.DataFrame
-    #         DataFrame with rows already present in the database removed.
-    #     """
-    #     pk_names = ctx.tableclass.pk_names()
-    #     pk_tuples = list(df[pk_names].itertuples(index=False, name=None))
-    #     if not pk_tuples:
-    #         return df
-    #     tableclass = (
-    #         ctx.staging_table
-    #         if ctx.staging_table is not None
-    #         else ctx.tableclass.__table__
-    #     )        
-    #     pk_cols = [getattr(tableclass.c, pk) for pk in pk_names]
-
-    #     vars_per_row = len(pk_cols)
-    #     chunk_size = max(1, 10_000 // vars_per_row)
-    #     existing_rows: list[tuple] = []
-
-    #     for i in range(0, len(pk_tuples), chunk_size):
-    #         chunk = pk_tuples[i : i + chunk_size]
-
-    #         rows = (
-    #             ctx.session.query(*pk_cols)
-    #             .filter(sa.tuple_(*pk_cols).in_(chunk))
-    #             .all()
-    #         )
-    #         existing_rows.extend(rows)
-
-    #     if not existing_rows:
-    #         return df
-
-    #     existing = pd.DataFrame(existing_rows, columns=pk_names)
-
-    #     logger.warning(f"Dropping {len(existing)} rows from {ctx.tableclass.__tablename__} that already exist in the database")
-    #     df = (
-    #         df.merge(existing, on=pk_names, how="left", indicator=True)
-    #         .loc[lambda x: x["_merge"] == "left_only"]
-    #         .drop(columns="_merge")
-    #     )
-    #     return df
-
 
 @dataclass
 class ColumnCastingStats:
@@ -286,4 +231,3 @@ class TableCastingStats:
             for col, stats in self.columns.items()
         }
     
-

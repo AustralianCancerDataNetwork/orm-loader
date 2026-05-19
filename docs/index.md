@@ -3,7 +3,7 @@
 A lightweight, reusable foundation for building and validating
 SQLAlchemy-based data models.
 
-`orm-loader` provides **infrastructure, not semantics**.
+`orm-loader` provides infrastructure for SQLAlchemy-based data models. It is the shared plumbing layer, not the place where model-specific rules live.
 
 It focuses on:
 
@@ -11,17 +11,16 @@ It focuses on:
 - safe bulk ingestion patterns
 - file-based loading via staging tables
 - model-agnostic validation scaffolding
-- database-portable operational helpers
+- operational helpers for supported backends
 
-No domain logic is included.
-No schema assumptions are enforced.
+It currently ships with backend implementations for SQLite and PostgreSQL.
 
 ---
 
 ## Core Concepts
 
 - **Tables are structural** — semantics live downstream
-- **Mixins define capabilities**, not behaviour contracts
+- **Mixins define capabilities**
 - **Protocols decouple infrastructure from implementations**
 - **Ingestion is explicit and staged**
 
@@ -37,13 +36,7 @@ No schema assumptions are enforced.
 
 # Design Philosophy
 
-`orm-loader` is intentionally conservative.
-
-It provides:
-
-- *mechanisms*, not policies
-- *capabilities*, not workflows
-- *structure*, not semantics
+`orm-loader` is intentionally conservative. It gives downstream libraries the machinery to load, inspect, and validate data without deciding what the data means.
 
 The library is designed to sit **below**:
 
@@ -65,6 +58,7 @@ and **above**:
 - No schema enforcement
 - No migrations
 - No concurrency guarantees
+- No support yet for arbitrary database dialects
 
 ---
 
@@ -81,4 +75,3 @@ This allows downstream libraries to:
 - replace base classes
 - mock implementations
 - incrementally adopt features
-

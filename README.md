@@ -4,28 +4,27 @@
 https://github.com/AustralianCancerDataNetwork/orm-loader/actions/workflows/tests.yml
 )
 
-A lightweight, reusable foundation for building and validating SQLAlchemy-based clinical (and non-clinical) data models.
+A lightweight foundation for building and validating SQLAlchemy-based data models.
 
-This library provides general-purpose ORM infrastructure that sits below any specific data model (OMOP, PCORnet, custom CDMs, etc.), focusing on:
+`orm-loader` sits below any particular schema or CDM. It gives you a small set of reusable pieces for defining tables, loading files through staging tables, and checking models against external specifications. It stays out of domain logic on purpose.
 
-* declarative base configuration
-* bulk ingestion patterns
-* file-based validation & loading
-* table introspection
-* model-agnostic validation scaffolding
-* safe, database-portable operational helpers
+The library focuses on:
 
-It intentionally contains no domain logic and no assumptions about a specific schema.
+* ORM table mixins and introspection
+* staged file loading
+* loader and validation infrastructure
+* operational helpers that work across supported backends
+
+At the moment, the built-in backends are SQLite and PostgreSQL.
 
 
-### What this library provides:
+### What this library provides
 
-This library provides a small set of composable building blocks for defining, loading, inspecting, and validating SQLAlchemy-based data models.
-All components are model-agnostic and can be selectively combined in downstream libraries.
+The package is deliberately small. Most downstream projects only need a couple of these pieces.
 
-1. A minimal, opinionated ORM table base
+1. A minimal ORM table base
 
-ORMTableBase provides structural introspection utilities for SQLAlchemy-mapped tables, without imposing any domain semantics.
+`ORMTableBase` provides structural utilities for mapped tables without pulling domain rules into the base layer.
 
 It supports:
 * mapper access and inspection
@@ -41,17 +40,19 @@ class MyTable(ORMTableBase, Base):
     __tablename__ = "my_table"
 
 ```
-This base is intended to be inherited by all ORM tables, either directly or via higher-level mixins.
+You can inherit from it directly or pick it up through one of the higher-level mixins.
 
 2. CSV-based ingestion mixins
 
-CSVLoadableTableInterface adds opt-in CSV loading support for ORM tables using pandas, with a focus on correctness and scalability.
+`CSVLoadableTableInterface` adds staged file loading to ORM tables. It can use pandas or PyArrow loaders, and on PostgreSQL it can use a fast `COPY` path when the input is clean enough.
 
 Features include:
+* staging table creation and cleanup
 * chunked loading for large files
-* optional per-table normalisation logic
-* optional deduplication against existing database rows
-* safe bulk inserts using SQLAlchemy sessions
+* optional casting and deduplication before insert
+* backend-specific merge behaviour
+* PostgreSQL fast-path loading with ORM fallback
+* backend-aware index handling during merge
 
 ```python
 class MyTable(CSVLoadableTableInterface, ORMTableBase, Base):
@@ -59,15 +60,11 @@ class MyTable(CSVLoadableTableInterface, ORMTableBase, Base):
 
 ```
 
-Downstream models may override:
-* normalise_dataframe(...)
-* dedupe_dataframe(...)
-* csv_columns()
-to implement table-specific ingestion policies.
+The main extension points here are loader choice, column mapping, and the normal SQLAlchemy model definitions themselves. Most downstream projects do not need to override much beyond `csv_columns()` and the model schema.
 
 3. Structured serialisation and hashing
 
-SerialisableTableInterface adds lightweight, explicit serialisation helpers for ORM rows.
+`SerialisableTableInterface` adds lightweight serialisation helpers for ORM rows.
 
 It supports:
 * conversion to dictionaries
@@ -92,7 +89,7 @@ This is useful for:
 
 4. Model registry and validation scaffolding
 
-The library includes model-agnostic validation infrastructure, designed to compare ORM models against external specifications.
+The library includes validation infrastructure for comparing ORM models against external specifications.
 
 This includes:
 * a model registry
@@ -118,7 +115,8 @@ Validation output is available as:
 * exit codes suitable for pipelines
 
 5. Database bootstrap helpers
-The library provides lightweight helpers for schema creation and bootstrapping, without imposing a migration strategy.
+
+The library provides lightweight helpers for schema creation and bootstrapping. It does not try to replace migrations.
 
 ```python
 from orm_loader.metadata import Base
@@ -127,24 +125,20 @@ from orm_loader.bootstrap import bootstrap
 bootstrap(engine, create=True)
 ```
 
-6. Safe bulk-loading utilities
+6. Bulk-loading helpers
 
-A reusable context manager simplifies trusted bulk ingestion workflows:
-* temporarily disables foreign key checks where supported
-* suppresses autoflush for performance
-* ensures reliable rollback on failure
+There are a few lower-level helpers for trusted bulk workflows, including backend-aware foreign key management and SQLite connection setup for heavy local loads.
 
 ## Summary
 
-This library intentionally focuses on infrastructure, not semantics.
+This library is meant to be the boring layer underneath downstream models:
 
-It provides:
 * reusable ORM mixins
-* safe ingestion patterns
+* staged ingestion patterns
 * validation scaffolding
-* database-portable utilities
+* operational helpers
 
-while leaving domain rules, business logic, and schema semantics to downstream libraries.
+Domain rules, business logic, and schema semantics stay in the downstream project.
 
 This makes it suitable as a shared foundation for:
 * clinical data models

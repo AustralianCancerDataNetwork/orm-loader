@@ -1,14 +1,13 @@
 # Loaders
 
-The `orm_loader.loaders` module provides **conservative, schema-aware file
-ingestion infrastructure** for loading external data into ORM-backed
-staging tables.
+The `orm_loader.loaders` module provides conservative, schema-aware file
+loading into ORM-backed staging tables.
 
 This subsystem is designed to handle:
 
 - untrusted or messy source files
 - large datasets requiring chunked processing
-- incremental and repeatable loads
+- repeatable staged loads
 - dialect-specific optimisations (e.g. PostgreSQL COPY)
 - explicit, inspectable failure modes
 
@@ -23,7 +22,7 @@ they do not embed domain rules or business semantics.
 
 [`LoaderContext`](context.md)
 
-A `LoaderContext` object carries all state required to load a single file:
+A `LoaderContext` object carries the state required to load one file:
 
 - target ORM table
 - database session
@@ -44,8 +43,7 @@ All loaders implement a common interface:
 - `orm_file_load(ctx)` — orchestrates file ingestion
 - `dedupe(data, ctx)` — defines deduplication semantics
 
-Concrete implementations differ only in **how data is read and processed**,
-not in how it is staged.
+Concrete implementations mainly differ in how they read and transform incoming data.
 
 ---
 
@@ -54,11 +52,10 @@ not in how it is staged.
 Loaders always write to **staging tables**, never directly to production
 tables.
 
-This allows:
+This gives you:
 
 - safe rollback
 - repeatable merges
-- database-level deduplication
 - bulk loading optimisations
 
 Final merge semantics are handled by the table mixins, not by loaders.
@@ -69,8 +66,8 @@ Final merge semantics are handled by the table mixins, not by loaders.
 
 | Loader | Use case |
 |------|----------|
-| `PandasLoader` | Flexible, debuggable CSV ingestion |
-| `ParquetLoader` | High-volume, columnar ingestion |
+| `PandasLoader` | Flexible CSV and TSV ingestion |
+| `ParquetLoader` | Columnar or batch-oriented ingestion |
 
 Both loaders share the same lifecycle and guarantees.
 
@@ -81,11 +78,11 @@ Both loaders share the same lifecycle and guarantees.
 1. Detect file format and encoding  
 2. Read data in chunks or batches  
 3. Optionally normalise to ORM column types  
-4. Optionally deduplicate (internal and/or database-level)  
+4. Optionally deduplicate within the incoming data  
 5. Insert into staging table  
 6. Return row count  
 
-No implicit commits or merges occur at this layer.
+Final merge behaviour belongs to the table mixins and backend layer, not to the loader itself.
 
 ---
 

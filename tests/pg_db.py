@@ -5,7 +5,7 @@ from sqlalchemy.orm import sessionmaker
 
 from tests.models import Base
 
-POSTGRES_URL = "postgresql+psycopg://test:test@localhost:55432/test_db"
+POSTGRES_URL = "postgresql+psycopg://test:test@localhost:55432/test"
 
 @pytest.fixture(scope="session")
 def pg_engine():

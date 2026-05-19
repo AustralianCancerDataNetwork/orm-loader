@@ -1,10 +1,11 @@
-from sqlalchemy.exc import NoInspectionAvailable
-import sqlalchemy.orm as so
-import sqlalchemy as sa
-from orm_loader.tables.orm_table import ORMTableBase
 import pytest
+import sqlalchemy as sa
+import sqlalchemy.orm as so
+
+from orm_loader.tables.orm_table import ORMTableBase
 
 Base = so.declarative_base()
+
 
 def test_pk_introspection():
     class T(ORMTableBase, Base):
@@ -13,8 +14,10 @@ def test_pk_introspection():
 
     assert T.pk_names() == ["id"]
 
+
 def test_pk_missing_raises():
     class T(ORMTableBase):
         __tablename__ = "t"
-    with pytest.raises(NoInspectionAvailable):
+
+    with pytest.raises(TypeError, match="not a mapped ORM class"):
         T.pk_columns()
