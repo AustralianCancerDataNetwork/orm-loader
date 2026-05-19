@@ -1,5 +1,6 @@
 from typing import Type, cast
 
+import logging
 import numpy as np
 import pandas as pd
 import pytest
@@ -226,6 +227,104 @@ def test_merge_strategies(session, tmp_path, merge_strategy, expected_rows, expe
     )
 
     assert [(r.id, r.name) for r in rows] == expected_rows
+
+
+def test_insert_if_empty_merge_strategy(session, tmp_path):
+    csv_path = tmp_path / "test_table.csv"
+
+    pd.DataFrame(
+        [
+            {"id": 1, "name": "alpha"},
+            {"id": 2, "name": "beta"},
+        ]
+    ).to_csv(csv_path, index=False, sep="\t")
+
+    loader = PandasLoader()
+    inserted = _SimpleTable.load_csv(
+        session,
+        csv_path,
+        dedupe=False,
+        loader=loader,
+        merge_strategy="insert_if_empty",
+    )
+    session.commit()
+
+    assert inserted == 2
+
+    rows = session.execute(sa.select(SimpleTable).order_by(SimpleTable.id)).scalars().all()
+
+    assert [(r.id, r.name) for r in rows] == [
+        (1, "alpha"),
+        (2, "beta"),
+    ]
+
+
+def test_insert_if_empty_raises_on_non_empty_target(session, engine, tmp_path):
+    csv_path = tmp_path / "test_table.csv"
+
+    pd.DataFrame([{"id": 1, "name": "alpha"}]).to_csv(csv_path, index=False, sep="\t")
+
+    loader = PandasLoader()
+    _SimpleTable.load_csv(session, csv_path, dedupe=False, loader=loader)
+    session.commit()
+
+    pd.DataFrame([{"id": 2, "name": "beta"}]).to_csv(csv_path, index=False, sep="\t")
+
+    with pytest.raises(ValueError, match="is not empty; cannot use merge strategy 'insert_if_empty'"):
+        _SimpleTable.load_csv(
+            session,
+            csv_path,
+            dedupe=False,
+            loader=loader,
+            merge_strategy="insert_if_empty",
+        )
+
+    inspector = sa.inspect(engine)
+    assert not inspector.has_table(SimpleTable.staging_tablename())
+
+
+@pytest.mark.parametrize("merge_strategy", ["replace", "upsert"])
+def test_empty_target_routes_merge_to_insert_if_empty(session, tmp_path, caplog, merge_strategy):
+    csv_path = tmp_path / "test_table.csv"
+
+    pd.DataFrame(
+        [
+            {"id": 1, "name": "alpha"},
+            {"id": 2, "name": "beta"},
+        ]
+    ).to_csv(csv_path, index=False, sep="\t")
+
+    caplog.set_level(logging.INFO, logger="orm_loader.tables.loadable_table")
+
+    inserted = _SimpleTable.load_csv(
+        session,
+        csv_path,
+        dedupe=False,
+        loader=PandasLoader(),
+        merge_strategy=merge_strategy,
+    )
+    session.commit()
+
+    assert inserted == 2
+
+    rows = session.execute(sa.select(SimpleTable).order_by(SimpleTable.id)).scalars().all()
+    assert [(r.id, r.name) for r in rows] == [
+        (1, "alpha"),
+        (2, "beta"),
+    ]
+
+    messages = [record.getMessage() for record in caplog.records]
+
+    assert any("Checking whether target table is empty for merge optimisation." in message for message in messages)
+    assert any(
+        f"Target table is empty; routing merge strategy `{merge_strategy}` to insert-if-empty fast path."
+        in message
+        for message in messages
+    )
+    assert any("Merge insert-if-empty phase starting." in message for message in messages)
+    assert not any("Checking whether target table is empty." in message for message in messages)
+    assert not any("Merge replace delete phase starting." in message for message in messages)
+    assert not any("Merge upsert phase starting." in message for message in messages)
 
 
 def test_staging_table_is_created_and_dropped(session, engine, tmp_path):
@@ -464,6 +563,68 @@ def test_explicit_drop_rebuild_on_sqlite_restores_index(session, engine, tmp_pat
     inspector = sa.inspect(engine)
     inspector.clear_cache()
     assert "ix_test_table_name" in {idx["name"] for idx in inspector.get_indexes("test_table")}
+
+
+def test_drop_rebuild_logging_shows_merge_phases(session, tmp_path, caplog):
+    csv_path = tmp_path / "test_table.csv"
+
+    pd.DataFrame(
+        [
+            {"id": 1, "name": "alpha"},
+            {"id": 2, "name": "beta"},
+        ]
+    ).to_csv(csv_path, index=False, sep="\t")
+
+    loader = PandasLoader()
+    _SimpleTable.load_csv(session, csv_path, dedupe=False, loader=loader)
+    session.commit()
+
+    pd.DataFrame(
+        [
+            {"id": 2, "name": "beta_updated"},
+            {"id": 3, "name": "gamma"},
+        ]
+    ).to_csv(csv_path, index=False, sep="\t")
+
+    caplog.set_level(logging.INFO, logger="orm_loader.tables.loadable_table")
+
+    _SimpleTable.load_csv(
+        session,
+        csv_path,
+        dedupe=False,
+        loader=loader,
+        merge_strategy="replace",
+        index_strategy="drop_rebuild",
+    )
+    session.commit()
+
+    messages = [record.getMessage() for record in caplog.records]
+
+    assert any("Dropping 1 active indices." in message for message in messages)
+    assert any("Finished dropping 1 active indices in " in message for message in messages)
+    assert any("Committing after index drop." in message for message in messages)
+    assert any("Commit after index drop completed in " in message for message in messages)
+    assert any("Disabling foreign key checks before merge." in message for message in messages)
+    assert any("Foreign key checks disabled in " in message for message in messages)
+    assert any("Merging staging data into target table" in message for message in messages)
+    assert any("Merge replace delete phase starting." in message for message in messages)
+    assert any("Merge replace delete phase completed in " in message for message in messages)
+    assert any("Merge insert phase starting." in message for message in messages)
+    assert any("Merge insert phase completed in " in message for message in messages)
+    assert any("Merging staging data into target table" in message for message in messages)
+    assert any("Committing merged rows." in message for message in messages)
+    assert any("Merge commit completed in " in message for message in messages)
+    assert any("Restoring foreign key checks." in message for message in messages)
+    assert any("Foreign key checks restored in " in message for message in messages)
+    assert any("Verifying/Rebuilding indices." in message for message in messages)
+    assert any("Restoring missing index: ix_test_table_name" in message for message in messages)
+    assert any("Restored missing index `ix_test_table_name` in " in message for message in messages)
+    assert any("Committing restored index `ix_test_table_name`." in message for message in messages)
+    assert any(
+        "Commit after restoring index `ix_test_table_name` completed in " in message
+        for message in messages
+    )
+    assert any("Index verification/rebuild completed in " in message for message in messages)
 
 
 def test_invalid_index_strategy_raises(session, tmp_path):

@@ -115,3 +115,7 @@
 - overall api cleanup with the goal of being more explicit about selection of specific db backends
 - general typing cleanup
 - removed example notebooks until they can be cleaned up with working use-cases according to updated api
+
+# 0.4.1
+- improved loader logging
+- skip merge step if table empty
