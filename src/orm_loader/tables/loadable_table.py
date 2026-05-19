@@ -189,43 +189,43 @@ class CSVLoadableTableInterface(ORMTableBase):
             logger.error(f"Table `{table_name}`: Merge operation failed - {e}")
             raise
         finally:
-           if fk_restore_started is not None:
-               logger.info(
+            if fk_restore_started is not None:
+                logger.info(
                    f"Table `{table_name}`: Foreign key checks restored in "
                    f"{_format_elapsed(perf_counter() - fk_restore_started)}."
-               )
-           if indices:
-               logger.info(f"Table `{table_name}`: Verifying/Rebuilding indices.")
-               rebuild_started = perf_counter()
-               inspector.clear_cache() # Required to ensure we get the current state of the database after potential changes
-               existing_idx_names = {idx['name'] for idx in inspector.get_indexes(table_name)}
+                )
+            if indices:
+                logger.info(f"Table `{table_name}`: Verifying/Rebuilding indices.")
+                rebuild_started = perf_counter()
+                inspector.clear_cache() # Required to ensure we get the current state of the database after potential changes
+                existing_idx_names = {idx['name'] for idx in inspector.get_indexes(table_name)}
                
-               for idx in indices:
-                   if idx.name not in existing_idx_names:
-                       try:
-                           logger.info(f"Table `{table_name}`: Restoring missing index: {idx.name}")
-                           create_started = perf_counter()
-                           session.execute(sa.schema.CreateIndex(idx))
-                           logger.info(
-                               f"Table `{table_name}`: Restored missing index `{idx.name}` in "
-                               f"{_format_elapsed(perf_counter() - create_started)}."
+                for idx in indices:
+                    if idx.name not in existing_idx_names:
+                        try:
+                            logger.info(f"Table `{table_name}`: Restoring missing index: {idx.name}")
+                            create_started = perf_counter()
+                            session.execute(sa.schema.CreateIndex(idx))
+                            logger.info(
+                                f"Table `{table_name}`: Restored missing index `{idx.name}` in "
+                                f"{_format_elapsed(perf_counter() - create_started)}."
+                            )
+                            logger.info(f"Table `{table_name}`: Committing restored index `{idx.name}`.")
+                            commit_started = perf_counter()
+                            session.commit()
+                            logger.info(
+                                f"Table `{table_name}`: Commit after restoring index `{idx.name}` "
+                                f"completed in {_format_elapsed(perf_counter() - commit_started)}."
                            )
-                           logger.info(f"Table `{table_name}`: Committing restored index `{idx.name}`.")
-                           commit_started = perf_counter()
-                           session.commit()
-                           logger.info(
-                               f"Table `{table_name}`: Commit after restoring index `{idx.name}` "
-                               f"completed in {_format_elapsed(perf_counter() - commit_started)}."
-                           )
-                       except Exception as e:
-                           session.rollback()
-                           logger.error(f"Table `{table_name}`: Failed to restore {idx.name}: {e}")
-                   else:
-                       logger.debug(f"Table `{table_name}`: Index {idx.name} already exists on disk. Skipping.")
-               logger.info(
-                   f"Table `{table_name}`: Index verification/rebuild completed in "
-                   f"{_format_elapsed(perf_counter() - rebuild_started)}."
-               )
+                        except Exception as e:
+                            session.rollback()
+                            logger.error(f"Table `{table_name}`: Failed to restore {idx.name}: {e}")
+                    else:
+                        logger.debug(f"Table `{table_name}`: Index {idx.name} already exists on disk. Skipping.")
+                logger.info(
+                    f"Table `{table_name}`: Index verification/rebuild completed in "
+                    f"{_format_elapsed(perf_counter() - rebuild_started)}."
+                )
 
 
     @classmethod
@@ -479,8 +479,15 @@ class CSVLoadableTableInterface(ORMTableBase):
         """
         Return whether the target table currently contains any rows.
         """
+        table = cls.__table__
+        if target not in {table.name, table.fullname}:
+            table = sa.Table(
+                target,
+                sa.MetaData(),
+                autoload_with=session.get_bind(),
+            )
         row = session.execute(
-            sa.text(f'SELECT 1 FROM "{target}" LIMIT 1')
+             sa.select(sa.literal(1)).select_from(table).limit(1)
         ).first()
         return row is not None
 
