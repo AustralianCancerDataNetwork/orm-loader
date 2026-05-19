@@ -259,7 +259,7 @@ def test_insert_if_empty_merge_strategy(session, tmp_path):
     ]
 
 
-def test_insert_if_empty_raises_on_non_empty_target(session, tmp_path):
+def test_insert_if_empty_raises_on_non_empty_target(session, engine, tmp_path):
     csv_path = tmp_path / "test_table.csv"
 
     pd.DataFrame([{"id": 1, "name": "alpha"}]).to_csv(csv_path, index=False, sep="\t")
@@ -278,6 +278,9 @@ def test_insert_if_empty_raises_on_non_empty_target(session, tmp_path):
             loader=loader,
             merge_strategy="insert_if_empty",
         )
+
+    inspector = sa.inspect(engine)
+    assert not inspector.has_table(SimpleTable.staging_tablename())
 
 
 @pytest.mark.parametrize("merge_strategy", ["replace", "upsert"])
@@ -319,6 +322,7 @@ def test_empty_target_routes_merge_to_insert_if_empty(session, tmp_path, caplog,
         for message in messages
     )
     assert any("Merge insert-if-empty phase starting." in message for message in messages)
+    assert not any("Checking whether target table is empty." in message for message in messages)
     assert not any("Merge replace delete phase starting." in message for message in messages)
     assert not any("Merge upsert phase starting." in message for message in messages)
 

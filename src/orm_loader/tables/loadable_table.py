@@ -166,13 +166,7 @@ class CSVLoadableTableInterface(ORMTableBase):
                     f"{_format_elapsed(perf_counter() - fk_disable_started)}."
                 )
                 try:
-                    logger.info(f"Table `{table_name}`: Starting merge operation.")
-                    merge_started = perf_counter()
                     yield
-                    logger.info(
-                        f"Table `{table_name}`: Merge operation SQL completed in "
-                        f"{_format_elapsed(perf_counter() - merge_started)}."
-                    )
                     logger.info(f"Table `{table_name}`: Committing merged rows.")
                     commit_started = perf_counter()
                     session.commit()
@@ -191,8 +185,8 @@ class CSVLoadableTableInterface(ORMTableBase):
         finally:
             if fk_restore_started is not None:
                 logger.info(
-                   f"Table `{table_name}`: Foreign key checks restored in "
-                   f"{_format_elapsed(perf_counter() - fk_restore_started)}."
+                    f"Table `{table_name}`: Foreign key checks restored in "
+                    f"{_format_elapsed(perf_counter() - fk_restore_started)}."
                 )
             if indices:
                 logger.info(f"Table `{table_name}`: Verifying/Rebuilding indices.")
@@ -410,7 +404,27 @@ class CSVLoadableTableInterface(ORMTableBase):
             raise ValueError(
                 f"CSV filename '{path.name}' does not match table '{cls.__tablename__}'"
             )
-        
+
+        if merge_strategy == "insert_if_empty":
+            logger.info(
+                f"Table `{cls.__tablename__}`: Checking whether target table is empty before staging load."
+            )
+            check_started = perf_counter()
+            has_rows = cls._target_has_rows(
+                session=session,
+                target=cls.__tablename__,
+            )
+            logger.info(
+                f"Table `{cls.__tablename__}`: Pre-load empty-table check completed in "
+                f"{_format_elapsed(perf_counter() - check_started)}."
+            )
+
+            if has_rows:
+                raise ValueError(
+                    f"Table `{cls.__tablename__}` is not empty; cannot use merge strategy "
+                    f"'insert_if_empty'"
+                )
+
         loader_context = LoaderContext(
             tableclass=cls,
             session=session,
@@ -528,6 +542,7 @@ class CSVLoadableTableInterface(ORMTableBase):
         pk_cols = cls.pk_names()
 
         _require_bind(session)
+        target_empty_confirmed = False
         if merge_strategy in {"replace", "upsert"}:
             logger.info(
                 f"Table `{target}`: Checking whether target table is empty for merge optimisation."
@@ -546,6 +561,7 @@ class CSVLoadableTableInterface(ORMTableBase):
                     f"Table `{target}`: Target table is empty; routing merge strategy "
                     f"`{merge_strategy}` to insert-if-empty fast path."
                 )
+                target_empty_confirmed = True
                 merge_strategy = "insert_if_empty"
 
         if merge_strategy == "replace":
@@ -586,22 +602,23 @@ class CSVLoadableTableInterface(ORMTableBase):
                 f"{_format_elapsed(perf_counter() - upsert_started)}."
             )
         elif merge_strategy == "insert_if_empty":
-            logger.info(f"Table `{target}`: Checking whether target table is empty.")
-            check_started = perf_counter()
-            has_rows = cls._target_has_rows(
-                session=session,
-                target=target,
-            )
-            logger.info(
-                f"Table `{target}`: Empty-table check completed in "
-                f"{_format_elapsed(perf_counter() - check_started)}."
-            )
-
-            if has_rows:
-                raise ValueError(
-                    f"Table `{target}` is not empty; cannot use merge strategy "
-                    f"'insert_if_empty'"
+            if not target_empty_confirmed:
+                logger.info(f"Table `{target}`: Checking whether target table is empty.")
+                check_started = perf_counter()
+                has_rows = cls._target_has_rows(
+                    session=session,
+                    target=target,
                 )
+                logger.info(
+                    f"Table `{target}`: Empty-table check completed in "
+                    f"{_format_elapsed(perf_counter() - check_started)}."
+                )
+
+                if has_rows:
+                    raise ValueError(
+                        f"Table `{target}` is not empty; cannot use merge strategy "
+                        f"'insert_if_empty'"
+                    )
 
             logger.info(f"Table `{target}`: Merge insert-if-empty phase starting.")
             insert_started = perf_counter()
