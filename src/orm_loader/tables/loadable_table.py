@@ -2,6 +2,7 @@
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 import logging
+from sqlalchemy.exc import InvalidRequestError, UnboundExecutionError
 
 from typing import Type, ClassVar, Optional, Any
 from pathlib import Path
@@ -13,6 +14,14 @@ from ..backends.resolve import resolve_backend
 from ..loaders.loader_interface import LoaderInterface, LoaderContext, PandasLoader, ParquetLoader
 
 logger = logging.getLogger(__name__)
+
+
+def _require_bind(session: so.Session) -> sa.Engine | sa.Connection:
+    """Return a bound connectable or raise a stable runtime error."""
+    try:
+        return session.get_bind()
+    except (InvalidRequestError, UnboundExecutionError) as exc:
+        raise RuntimeError("Session is not bound to an engine") from exc
 
 
 """
@@ -93,8 +102,7 @@ class CSVLoadableTableInterface(ORMTableBase):
         NotImplementedError
             If the database dialect is unsupported.
         """
-        if session.bind is None:
-            raise RuntimeError("Session is not bound to an engine")
+        _require_bind(session)
         backend = resolve_backend(session)
         backend.create_staging_table(cls, session, cls.staging_tablename())
 
@@ -117,7 +125,7 @@ class CSVLoadableTableInterface(ORMTableBase):
         resolved_index_strategy = backend.resolve_index_strategy(index_strategy)
 
         indices = list(cls.__table__.indexes) if resolved_index_strategy == "drop_rebuild" else []
-        inspector = sa.inspect(session.bind)
+        inspector = sa.inspect(_require_bind(session))
         assert inspector is not None, "Failed to create inspector for index management"
     
         if indices:
@@ -177,10 +185,7 @@ class CSVLoadableTableInterface(ORMTableBase):
         sqlalchemy.Table
             The reflected staging table.
         """
-        if session.bind is None:
-            raise RuntimeError("Session is not bound to an engine")
-
-        engine = session.get_bind()
+        engine = _require_bind(session)
         inspector = sa.inspect(engine)
         staging_name = cls.staging_tablename()
 
@@ -218,8 +223,7 @@ class CSVLoadableTableInterface(ORMTableBase):
         int
             Number of rows loaded into the staging table.
         """
-        if loader_context.session.bind is None:
-            raise RuntimeError("Session is not bound to an engine")
+        _require_bind(loader_context.session)
 
         backend = resolve_backend(loader_context.session)
         total = 0
@@ -438,8 +442,7 @@ class CSVLoadableTableInterface(ORMTableBase):
         staging = cls.staging_tablename()
         pk_cols = cls.pk_names()
 
-        if not session.bind:
-            raise RuntimeError("Session is not bound to an engine")
+        _require_bind(session)
         if merge_strategy == "replace":
             cls._merge_replace(
                 session=session,
