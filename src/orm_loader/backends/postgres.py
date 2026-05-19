@@ -15,6 +15,8 @@ if TYPE_CHECKING:
     from ..loaders.data_classes import LoaderContext
     from ..tables.typing import CSVTableProtocol
 
+_VALID_PG_REPLICATION_ROLES = frozenset({"origin", "local", "replica"})
+
 
 class PostgresBackend(DatabaseBackend):
     @property
@@ -76,6 +78,23 @@ class PostgresBackend(DatabaseBackend):
             quote_mode=loader_context.quote_mode,
         )
 
+    @staticmethod
+    def _normalize_fk_check_state(previous_state: str | int) -> str:
+        if isinstance(previous_state, int):
+            raise ValueError(
+                f"Invalid PostgreSQL session_replication_role {previous_state!r}: "
+                "Postgres uses string roles ('origin', 'local', 'replica'), not integers. "
+                "The value passed here should always come from this backend's own "
+                "disable_fk_check(), which returns a string."
+            )
+        normalised = previous_state.strip().lower()
+        if normalised not in _VALID_PG_REPLICATION_ROLES:
+            raise ValueError(
+                f"Invalid PostgreSQL session_replication_role {previous_state!r}. "
+                f"Expected one of: {sorted(_VALID_PG_REPLICATION_ROLES)}"
+            )
+        return normalised
+
     def disable_fk_check(self, session: so.Session) -> str | int:
         previous_state = session.execute(sa.text("SHOW session_replication_role")).scalar()
         session.execute(sa.text("SET session_replication_role = 'replica'"))
@@ -93,7 +112,8 @@ class PostgresBackend(DatabaseBackend):
         session: so.Session,
         previous_state: str | int,
     ) -> None:
-        session.execute(sa.text(f"SET session_replication_role = '{previous_state}'"))
+        safe_state = self._normalize_fk_check_state(previous_state)
+        session.execute(sa.text(f"SET session_replication_role = '{safe_state}'"))
 
     def merge_replace(
         self,

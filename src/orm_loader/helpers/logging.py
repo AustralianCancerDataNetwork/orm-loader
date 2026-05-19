@@ -1,7 +1,8 @@
 from __future__ import annotations
+
 import logging
-from typing import Optional, Any
 import re
+from typing import Any, Optional
 
 SENSITIVE_KEYS = {
     "password",
@@ -15,10 +16,13 @@ SENSITIVE_KEYS = {
 }
 LOGGING_NAMESPACE = "sql_loader"
 
+
 def _coerce_log_level(level: int | str) -> int:
     if isinstance(level, int):
         return level
 
+    if not isinstance(level, str):
+        raise TypeError(f"log level must be an int or str, got {type(level).__name__}")
     s = level.strip().upper()
     if s.isdigit():
         return int(s)
@@ -28,6 +32,7 @@ def _coerce_log_level(level: int | str) -> int:
         return mapping[s]
 
     raise ValueError(f"Invalid log level: {level!r}")
+
 
 def get_logger(name: Optional[str] = None) -> logging.Logger:
     """
@@ -51,7 +56,8 @@ class RedactingFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         msg = super().format(record)
         return self._pattern.sub(r"\\1=<REDACTED>", msg)
-    
+
+
 def configure_logging(
     *,
     level: int | str = logging.INFO,

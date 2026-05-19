@@ -82,30 +82,79 @@ def test_sqlite_backend_drop_staging_table():
     assert session.statements == ['DROP TABLE IF EXISTS "_staging_target_table"']
 
 
-def test_sqlite_backend_fk_methods_emit_expected_sql():
+def test_sqlite_backend_disable_fk_reads_then_sets():
+    backend = SQLiteBackend()
+    session = _FakeSession(scalar_result=1)
+
+    previous = backend.disable_fk_check(_sess(session))
+
+    assert previous == 1
+    assert session.statements == [
+        "PRAGMA foreign_keys",       # read current state
+        "PRAGMA foreign_keys = OFF", # set to OFF
+    ]
+
+
+def test_sqlite_backend_enable_fk_reads_then_sets():
+    backend = SQLiteBackend()
+    session = _FakeSession(scalar_result=0)
+
+    previous = backend.enable_fk_check(_sess(session))
+
+    assert previous == 0
+    assert session.statements == [
+        "PRAGMA foreign_keys",      # read current state
+        "PRAGMA foreign_keys = ON", # set to ON
+    ]
+
+
+def test_sqlite_backend_restore_fk_normalises_int_and_emits():
     backend = SQLiteBackend()
     session = _FakeSession()
 
-    previous = backend.disable_fk_check(_sess(session))
-    enabled = backend.enable_fk_check(_sess(session))
-    backend.restore_fk_check(_sess(session), previous)
+    backend.restore_fk_check(_sess(session), 1)
+    backend.restore_fk_check(_sess(session), 0)
 
-    assert previous == 1
-    assert enabled == 1
     assert session.statements == [
-        "PRAGMA foreign_keys",
-        "PRAGMA foreign_keys = OFF",
-        "PRAGMA foreign_keys",
         "PRAGMA foreign_keys = ON",
-        "PRAGMA foreign_keys = 1",
+        "PRAGMA foreign_keys = OFF",
     ]
+
+
+def test_sqlite_backend_normalize_fk_check_state():
+    normalize = SQLiteBackend._normalize_fk_check_state
+
+    assert normalize(1) == "ON"
+    assert normalize(0) == "OFF"
+    assert normalize("1") == "ON"
+    assert normalize("0") == "OFF"
+    assert normalize("ON") == "ON"
+    assert normalize("OFF") == "OFF"
+    assert normalize("on") == "ON"
+    assert normalize("off") == "OFF"
+
+    try:
+        normalize(2)
+    except ValueError as exc:
+        assert "Invalid SQLite foreign_keys state" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for out-of-range int")
+
+    try:
+        normalize("enabled")
+    except ValueError as exc:
+        assert "Invalid SQLite foreign_keys state" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for unrecognised string")
 
 
 def test_sqlite_backend_merge_replace_single_pk():
     backend = SQLiteBackend()
     session = _FakeSession()
 
-    backend.merge_replace(_ComputedTableCls, _sess(session), "target_table", "_staging_target_table", ["id"])
+    backend.merge_replace(
+        _ComputedTableCls, _sess(session), "target_table", "_staging_target_table", ["id"]
+    )
 
     sql = session.statements[0]
     assert 'DELETE FROM "target_table"' in sql
@@ -116,10 +165,12 @@ def test_sqlite_backend_merge_replace_composite_pk():
     backend = SQLiteBackend()
     session = _FakeSession()
 
-    backend.merge_replace(_ComputedTableCls, _sess(session), "target_table", "_staging_target_table", ["id", "name"])
+    backend.merge_replace(
+        _ComputedTableCls, _sess(session), "target_table", "_staging_target_table", ["id", "name"]
+    )
 
     sql = session.statements[0]
-    assert 'WHERE EXISTS (' in sql
+    assert "WHERE EXISTS (" in sql
     assert '"target_table"."id" = "_staging_target_table"."id"' in sql
     assert '"target_table"."name" = "_staging_target_table"."name"' in sql
 
@@ -139,7 +190,9 @@ def test_sqlite_backend_merge_upsert_excludes_computed_columns():
     backend = SQLiteBackend()
     session = _FakeSession()
 
-    backend.merge_upsert(_ComputedTableCls, _sess(session), "target_table", "_staging_target_table", ["id"])
+    backend.merge_upsert(
+        _ComputedTableCls, _sess(session), "target_table", "_staging_target_table", ["id"]
+    )
 
     sql = session.statements[0]
     assert 'INSERT OR IGNORE INTO "target_table" ("id", "name")' in sql

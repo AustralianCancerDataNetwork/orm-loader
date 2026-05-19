@@ -87,6 +87,10 @@ class FakeBackend(DatabaseBackend):
     ) -> None:
         return None
 
+    @staticmethod
+    def _normalize_fk_check_state(previous_state: str | int) -> str | int:
+        return previous_state
+
     def disable_fk_check(self, session: so.Session) -> str | int:
         self.calls.append(("disable_fk_check", session))
         return "enabled"

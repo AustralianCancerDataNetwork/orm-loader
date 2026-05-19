@@ -93,7 +93,7 @@ class DatabaseBackend(ABC):
         bind: Engine | Connection,
     ) -> Iterator[Connection]:
         if isinstance(bind, Engine):
-            with bind.connect() as conn:
+            with bind.begin() as conn:
                 yield conn
         else:
             yield bind
@@ -139,6 +139,15 @@ class DatabaseBackend(ABC):
         backend has no fast-path loader for the given context.
         """
         return None
+
+    @staticmethod
+    @abstractmethod
+    def _normalize_fk_check_state(previous_state: str | int) -> str | int:
+        """Validate and normalise a previously-returned FK state before interpolating into SQL.
+
+        Each backend accepts a different type (SQLite: int, Postgres: str) and must
+        implement this to guard restore_fk_check() against invalid or injected values.
+        """
 
     @abstractmethod
     def disable_fk_check(self, session: so.Session) -> str | int:

@@ -1,6 +1,6 @@
 import sqlalchemy as sa
 import sqlalchemy.orm as so
-from sqlalchemy.exc import StatementError
+from sqlalchemy.exc import NoInspectionAvailable, StatementError
 from typing import Any
 import logging
 from .allocators import IdAllocator
@@ -63,10 +63,10 @@ class ORMTableBase:
         TypeError
             If the class is not a mapped SQLAlchemy ORM class.
         """
-        mapper: so.Mapper[Any] = sa.inspect(cls)
-        if not mapper:
+        try:
+            return sa.inspect(cls)
+        except NoInspectionAvailable:
             raise TypeError(f"{cls.__name__} is not a mapped ORM class")
-        return mapper
 
     @classmethod
     def pk_columns(cls) -> list[sa.ColumnElement[Any]]:

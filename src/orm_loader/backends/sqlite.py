@@ -46,6 +46,24 @@ class SQLiteBackend(DatabaseBackend):
             )
         return normalised
 
+    @staticmethod
+    def _normalize_fk_check_state(previous_state: str | int) -> str:
+        if isinstance(previous_state, int):
+            if previous_state == 1:
+                return "ON"
+            if previous_state == 0:
+                return "OFF"
+        elif isinstance(previous_state, str):
+            normalised = previous_state.strip().upper()
+            if normalised in {"1", "ON"}:
+                return "ON"
+            if normalised in {"0", "OFF"}:
+                return "OFF"
+        raise ValueError(
+            f"Invalid SQLite foreign_keys state {previous_state!r}. "
+            "Expected 0, 1, 'OFF', or 'ON'."
+        )
+
     @property
     def name(self) -> str:
         return "sqlite"
@@ -108,7 +126,8 @@ class SQLiteBackend(DatabaseBackend):
         session: so.Session,
         previous_state: str | int,
     ) -> None:
-        session.execute(text(f"PRAGMA foreign_keys = {previous_state}"))
+        safe_state = self._normalize_fk_check_state(previous_state)
+        session.execute(text(f"PRAGMA foreign_keys = {safe_state}"))
 
     def merge_replace(
         self,
