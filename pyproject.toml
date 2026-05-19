@@ -50,8 +50,7 @@ dev = [
     "mkdocs>=1.6.1",
     "mkdocs-mermaid2-plugin",
     "Pygments>=2.20.0",
-    "dotenv",
-    "ruff"
+    "python-dotenv"
 ]
 
 [tool.setuptools]
