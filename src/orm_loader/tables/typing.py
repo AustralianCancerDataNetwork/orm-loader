@@ -87,31 +87,29 @@ class CSVTableProtocol(ORMTableProtocol, Protocol):
         merge_strategy: str = "replace",
         quote_mode: str = "csv",
         index_strategy: str = "auto",
+        merge_batch_size: int = 1_000_000,
     ) -> int: ...
 
     @classmethod
-    def orm_staging_load(cls, loader: "LoaderInterface",loader_context: "LoaderContext") -> int: ...
+    def orm_staging_load(cls, loader: "LoaderInterface", loader_context: "LoaderContext") -> int: ...
 
     @classmethod
     def get_staging_table(cls, session: so.Session) -> sa.Table: ...
 
     @classmethod
-    def merge_from_staging(cls, session: so.Session, merge_strategy: str) -> None: ...
+    def merge_from_staging(
+        cls,
+        session: so.Session,
+        merge_strategy: str = "replace",
+        *,
+        merge_batch_size: int = 1_000_000,
+    ) -> None: ...
 
     @classmethod
     def drop_staging_table(cls, session: so.Session) -> None: ...
 
     @classmethod
-    def _merge_insert(cls, session: so.Session, target: str, staging: str) -> None: ...
-
-    @classmethod
     def _target_has_rows(cls, session: so.Session, target: str) -> bool: ...
-
-    @classmethod
-    def _merge_replace(cls, session: so.Session, target: str, staging: str, pk_cols: list[str]) -> None: ...
-
-    @classmethod
-    def _merge_upsert(cls, session: so.Session, target: str, staging: str, pk_cols: list[str]) -> None: ...
 
     @classmethod
     def manage_indices(cls, session: so.Session, index_strategy: str = "auto") -> AbstractContextManager[None]:

@@ -456,40 +456,6 @@ class CSVLoadableTableInterface(ORMTableBase):
         
 
     @classmethod
-    def _merge_replace(
-        cls: Type[CSVTableProtocol],
-        session: so.Session,
-        target: str,
-        staging: str,
-        pk_cols: list[str],
-        *,
-        merge_batch_size: int = 1_000_000,
-    ):
-        """
-        Merge staging data by replacing existing rows.
-
-        Existing target rows matching the staging primary keys are
-        deleted prior to insertion.
-        """
-        backend = resolve_backend(session)
-        backend.merge_replace(cls, session, target, staging, pk_cols, merge_batch_size=merge_batch_size)
-
-    @classmethod
-    def _merge_insert(
-        cls: Type[CSVTableProtocol],
-        session: so.Session,
-        target: str,
-        staging: str,
-        *,
-        merge_batch_size: int = 1_000_000,
-    ):
-        """
-        Insert all rows from the staging table into the target table.
-        """
-        backend = resolve_backend(session)
-        backend.merge_insert(cls, session, target, staging, merge_batch_size=merge_batch_size)
-
-    @classmethod
     def _target_has_rows(
         cls: Type[CSVTableProtocol],
         session: so.Session,
@@ -510,22 +476,6 @@ class CSVLoadableTableInterface(ORMTableBase):
         ).first()
         return row is not None
 
-
-    @classmethod
-    def _merge_upsert(
-        cls: Type[CSVTableProtocol],
-        session: so.Session,
-        target: str,
-        staging: str,
-        pk_cols: list[str],
-        *,
-        merge_batch_size: int = 1_000_000,
-    ):
-        """
-        Merge staging data using an upsert strategy.
-        """
-        backend = resolve_backend(session)
-        backend.merge_upsert(cls, session, target, staging, pk_cols, merge_batch_size=merge_batch_size)
 
     @classmethod
     def merge_from_staging(
@@ -551,6 +501,7 @@ class CSVLoadableTableInterface(ORMTableBase):
         pk_cols = cls.pk_names()
 
         _require_bind(session)
+        backend = resolve_backend(session)
         target_empty_confirmed = False
         if merge_strategy in {"replace", "upsert"}:
             logger.info(
@@ -576,25 +527,14 @@ class CSVLoadableTableInterface(ORMTableBase):
         if merge_strategy == "replace":
             logger.info(f"Table `{target}`: Merge replace delete phase starting.")
             delete_started = perf_counter()
-            cls._merge_replace(
-                session=session,
-                target=target,
-                staging=staging,
-                pk_cols=pk_cols,
-                merge_batch_size=merge_batch_size,
-            )
+            backend.merge_replace(cls, session, target, staging, pk_cols, merge_batch_size=merge_batch_size)
             logger.info(
                 f"Table `{target}`: Merge replace delete phase completed in "
                 f"{_format_elapsed(perf_counter() - delete_started)}."
             )
             logger.info(f"Table `{target}`: Merge insert phase starting.")
             insert_started = perf_counter()
-            cls._merge_insert(
-                session=session,
-                target=target,
-                staging=staging,
-                merge_batch_size=merge_batch_size,
-            )
+            backend.merge_insert(cls, session, target, staging, merge_batch_size=merge_batch_size)
             logger.info(
                 f"Table `{target}`: Merge insert phase completed in "
                 f"{_format_elapsed(perf_counter() - insert_started)}."
@@ -602,13 +542,7 @@ class CSVLoadableTableInterface(ORMTableBase):
         elif merge_strategy == "upsert":
             logger.info(f"Table `{target}`: Merge upsert phase starting.")
             upsert_started = perf_counter()
-            cls._merge_upsert(
-                session=session,
-                target=target,
-                staging=staging,
-                pk_cols=pk_cols,
-                merge_batch_size=merge_batch_size,
-            )
+            backend.merge_upsert(cls, session, target, staging, pk_cols, merge_batch_size=merge_batch_size)
             logger.info(
                 f"Table `{target}`: Merge upsert phase completed in "
                 f"{_format_elapsed(perf_counter() - upsert_started)}."
@@ -634,12 +568,7 @@ class CSVLoadableTableInterface(ORMTableBase):
 
             logger.info(f"Table `{target}`: Merge insert-if-empty phase starting.")
             insert_started = perf_counter()
-            cls._merge_insert(
-                session=session,
-                target=target,
-                staging=staging,
-                merge_batch_size=merge_batch_size,
-            )
+            backend.merge_insert(cls, session, target, staging, merge_batch_size=merge_batch_size)
             logger.info(
                 f"Table `{target}`: Merge insert-if-empty phase completed in "
                 f"{_format_elapsed(perf_counter() - insert_started)}."
