@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-from contextlib import contextmanager, AbstractContextManager
+from contextlib import AbstractContextManager, contextmanager
 from typing import TYPE_CHECKING, Any
-import sqlalchemy as sa
-import sqlalchemy.orm as so
-import sqlalchemy.event as sae
 
-from .base import BackendCapabilities, DatabaseBackend, Dialect
+import sqlalchemy as sa
+import sqlalchemy.event as sae
+import sqlalchemy.orm as so
+
 from ..loaders.loading_helpers import quick_load_pg
+from .base import BackendCapabilities, DatabaseBackend, Dialect
 
 if TYPE_CHECKING:
     from sqlalchemy.engine import Connection, Engine
@@ -56,6 +57,14 @@ class PostgresBackend(DatabaseBackend):
         computed_cols = [c.name for c in table.columns if c.computed is not None]
         for col in computed_cols:
             session.execute(sa.text(f'ALTER TABLE "{staging_name}" DROP COLUMN "{col}";'))
+
+        # allows pagniation in O(N log N) time for large tables in merge_insert without needing to add an index on every staging table
+        session.execute(
+            sa.text(
+                f'ALTER TABLE "{staging_name}" ADD COLUMN _rownum BIGINT'
+                f" GENERATED ALWAYS AS IDENTITY (CACHE 1000);"
+            )
+        )
 
         session.commit()
 
@@ -124,19 +133,33 @@ class PostgresBackend(DatabaseBackend):
         target_name: str,
         staging_name: str,
         pk_cols: list[str],
+        *,
+        merge_batch_size: int = 1_000_000,
     ) -> None:
-        pk_join = " AND ".join(
-            f't."{c}" = s."{c}"' for c in pk_cols
-        )
-        session.execute(
-            sa.text(
-                f"""
-                DELETE FROM "{target_name}" t
-                USING "{staging_name}" s
-                WHERE {pk_join};
-                """
+        pk_join = " AND ".join(f't."{c}" = s."{c}"' for c in pk_cols)
+        total = session.execute(sa.text(f'SELECT COUNT(*) FROM "{staging_name}"')).scalar_one()
+
+        if total <= merge_batch_size:
+            session.execute(sa.text(
+                f'DELETE FROM "{target_name}" t USING "{staging_name}" s WHERE {pk_join}'
+            ))
+            return
+
+        session.execute(sa.text(f'CREATE INDEX ON "{staging_name}" (_rownum)'))
+        session.commit()
+
+        start = 0
+        while start < total:
+            end = start + merge_batch_size
+            session.execute(
+                sa.text(
+                    f'DELETE FROM "{target_name}" t USING "{staging_name}" s'
+                    f' WHERE {pk_join} AND s._rownum > :start AND s._rownum <= :end'
+                ),
+                {"start": start, "end": end},
             )
-        )
+            session.commit()
+            start = end
 
     def merge_upsert(
         self,
@@ -145,19 +168,39 @@ class PostgresBackend(DatabaseBackend):
         target_name: str,
         staging_name: str,
         pk_cols: list[str],
+        *,
+        merge_batch_size: int = 1_000_000,
     ) -> None:
         insertable_cols = self._insertable_column_names(table_cls)
         cols_str = ", ".join(f'"{c}"' for c in insertable_cols)
         conflict_cols = ", ".join(f'"{c}"' for c in pk_cols)
-        session.execute(
-            sa.text(
-                f"""
-                INSERT INTO "{target_name}" ({cols_str})
-                SELECT {cols_str} FROM "{staging_name}"
-                ON CONFLICT ({conflict_cols}) DO NOTHING;
-                """
+        total = session.execute(sa.text(f'SELECT COUNT(*) FROM "{staging_name}"')).scalar_one()
+
+        if total <= merge_batch_size:
+            session.execute(sa.text(
+                f'INSERT INTO "{target_name}" ({cols_str})'
+                f' SELECT {cols_str} FROM "{staging_name}"'
+                f' ON CONFLICT ({conflict_cols}) DO NOTHING'
+            ))
+            return
+
+        session.execute(sa.text(f'CREATE INDEX ON "{staging_name}" (_rownum)'))
+        session.commit()
+
+        start = 0
+        while start < total:
+            end = start + merge_batch_size
+            session.execute(
+                sa.text(
+                    f'INSERT INTO "{target_name}" ({cols_str})'
+                    f' SELECT {cols_str} FROM "{staging_name}"'
+                    f' WHERE _rownum > :start AND _rownum <= :end'
+                    f' ON CONFLICT ({conflict_cols}) DO NOTHING'
+                ),
+                {"start": start, "end": end},
             )
-        )
+            session.commit()
+            start = end
 
     def merge_insert(
         self,
@@ -165,17 +208,41 @@ class PostgresBackend(DatabaseBackend):
         session: so.Session,
         target_name: str,
         staging_name: str,
+        *,
+        merge_batch_size: int = 1_000_000,
     ) -> None:
         insertable_cols = self._insertable_column_names(table_cls)
         cols_str = ", ".join(f'"{c}"' for c in insertable_cols)
-        session.execute(
-            sa.text(
-                f"""
-                INSERT INTO "{target_name}" ({cols_str})
-                SELECT {cols_str} FROM "{staging_name}";
-                """
+
+        total = session.execute(sa.text(f'SELECT COUNT(*) FROM "{staging_name}"')).scalar_one()
+
+        if total <= merge_batch_size:
+            session.execute(sa.text(
+                f'INSERT INTO "{target_name}" ({cols_str})'
+                f' SELECT {cols_str} FROM "{staging_name}"'
+            ))
+            return
+
+        # Large table: index _rownum for O(N log N) range pagination then
+        # INSERT in batch-sized transactions to bound WAL per commit.
+        # session_replication_role='replica' is session-level and persists
+        # across commits, so FK checks stay disabled for all batches.
+        session.execute(sa.text(f'CREATE INDEX ON "{staging_name}" (_rownum)'))
+        session.commit()
+
+        start = 0
+        while start < total:
+            end = start + merge_batch_size
+            session.execute(
+                sa.text(
+                    f'INSERT INTO "{target_name}" ({cols_str})'
+                    f' SELECT {cols_str} FROM "{staging_name}"'
+                    f' WHERE _rownum > :start AND _rownum <= :end'
+                ),
+                {"start": start, "end": end},
             )
-        )
+            session.commit()
+            start = end
 
     def merge_context(
         self,
@@ -183,8 +250,6 @@ class PostgresBackend(DatabaseBackend):
         session: so.Session,
     ) -> AbstractContextManager[None]:
         return self.bulk_load_context(session, disable_fk=True, no_autoflush=False)
-
-
 
     def create_materialized_view(
         self,
@@ -196,7 +261,7 @@ class PostgresBackend(DatabaseBackend):
 
         with self._as_connection(bind) as conn:
             conn.execute(CreateMaterializedView(name, selectable))
-            
+
     def refresh_materialized_view(
         self,
         bind: Engine | Connection,
@@ -207,9 +272,7 @@ class PostgresBackend(DatabaseBackend):
             dialect = getattr(conn, "dialect", None)
             if dialect is not None:
                 safe_name = dialect.identifier_preparer.quote(name)
-            conn.execute(
-                sa.text(f"REFRESH MATERIALIZED VIEW {safe_name};")
-            )
+            conn.execute(sa.text(f"REFRESH MATERIALIZED VIEW {safe_name};"))
 
     @contextmanager
     def engine_with_replica_role(self, engine: "Engine"):
@@ -230,8 +293,6 @@ class PostgresBackend(DatabaseBackend):
             with engine.connect() as conn:
                 conn = conn.execution_options(isolation_level="AUTOCOMMIT")
                 conn.execute(sa.text("SET session_replication_role = DEFAULT"))
-                role = conn.execute(
-                    sa.text("SHOW session_replication_role")
-                ).scalar()
+                role = conn.execute(sa.text("SHOW session_replication_role")).scalar()
                 if role != "origin":
                     raise RuntimeError("Failed to restore session_replication_role")

@@ -7,6 +7,29 @@ from tests.models import SimpleTable
 
 
 @pytest.mark.postgres
+def test_copy_into_staging_with_extra_identity_column(pg_session, tmp_path):
+    """COPY must succeed when the staging table has a _rownum identity column."""
+    csv = tmp_path / "test_table.csv"
+    pd.DataFrame([{"id": 1, "name": "alpha"}, {"id": 2, "name": "beta"}]).to_csv(csv, index=False)
+
+    SimpleTable.create_staging_table(pg_session)
+    staging_name = SimpleTable.staging_tablename()
+
+    cols = pg_session.execute(sa.text(
+        "SELECT column_name FROM information_schema.columns WHERE table_name = :t"
+    ), {"t": staging_name}).scalars().all()
+    assert "_rownum" in cols, "staging table should have _rownum before COPY"
+
+    total = quick_load_pg(path=csv, session=pg_session, tablename=staging_name)
+    assert total == 2
+
+    rownums = pg_session.execute(
+        sa.text(f'SELECT _rownum FROM "{staging_name}" ORDER BY _rownum')
+    ).scalars().all()
+    assert rownums == [1, 2], "_rownum must be auto-populated by IDENTITY sequence"
+
+
+@pytest.mark.postgres
 def test_copy_and_orm_path_equivalence(pg_session, tmp_path):
     csv = tmp_path / "test_table.csv"
 
@@ -171,10 +194,12 @@ def test_staging_schema_matches_target(pg_session, tmp_path):
         ORDER BY ordinal_position
     """), {"table": SimpleTable.staging_tablename()}).all()
 
-    assert cols == [
+    data_cols = [(name, dtype) for name, dtype in cols if name != "_rownum"]
+    assert data_cols == [
         ("id", "integer"),
         ("name", "character varying"),
     ]
+    assert any(name == "_rownum" and dtype == "bigint" for name, dtype in cols)
 
 
 def test_infer_encoding_ascii_promoted_to_utf8(tmp_path):

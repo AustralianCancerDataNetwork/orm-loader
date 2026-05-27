@@ -139,6 +139,8 @@ class SQLiteBackend(DatabaseBackend):
         target_name: str,
         staging_name: str,
         pk_cols: list[str],
+        *,
+        merge_batch_size: int = 1_000_000,
     ) -> None:
         if len(pk_cols) == 1:
             pk = pk_cols[0]
@@ -176,6 +178,8 @@ class SQLiteBackend(DatabaseBackend):
         target_name: str,
         staging_name: str,
         pk_cols: list[str],
+        *,
+        merge_batch_size: int = 1_000_000,
     ) -> None:
         insertable_cols = self._insertable_column_names(table_cls)
         cols_str = ", ".join(f'"{c}"' for c in insertable_cols)
@@ -194,6 +198,8 @@ class SQLiteBackend(DatabaseBackend):
         session: so.Session,
         target_name: str,
         staging_name: str,
+        *,
+        merge_batch_size: int = 1_000_000,
     ) -> None:
         insertable_cols = self._insertable_column_names(table_cls)
         cols_str = ", ".join(f'"{c}"' for c in insertable_cols)

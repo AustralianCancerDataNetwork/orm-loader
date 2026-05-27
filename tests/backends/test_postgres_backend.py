@@ -44,6 +44,9 @@ class _FakeSession:
             def scalar(self):
                 return self._value
 
+            def scalar_one(self):
+                return self._value
+
         return _Result(self.scalar_result)
 
     def commit(self) -> None:
@@ -115,11 +118,13 @@ def test_postgres_backend_fk_methods_emit_expected_sql():
 
 def test_postgres_backend_merge_replace_uses_using_delete():
     backend = PostgresBackend()
-    session = _FakeSession()
+    # scalar_result=0 → COUNT returns 0 → small-table path → single DELETE statement
+    session = _FakeSession(scalar_result=0)
 
     backend.merge_replace(_ComputedTableCls, _sess(session), "target_table", "_staging_target_table", ["id", "name"])
 
-    sql = session.statements[0]
+    # statements[0] is the COUNT query; statements[1] is the DELETE
+    sql = session.statements[1]
     assert 'DELETE FROM "target_table" t' in sql
     assert 'USING "_staging_target_table" s' in sql
     assert 't."id" = s."id" AND t."name" = s."name"' in sql
@@ -127,22 +132,26 @@ def test_postgres_backend_merge_replace_uses_using_delete():
 
 def test_postgres_backend_merge_insert_excludes_computed_columns():
     backend = PostgresBackend()
-    session = _FakeSession()
+    # scalar_result=0 → COUNT returns 0 → small-table path → single INSERT statement
+    session = _FakeSession(scalar_result=0)
 
     backend.merge_insert(_ComputedTableCls, _sess(session), "target_table", "_staging_target_table")
 
-    sql = session.statements[0]
+    # statements[0] is the COUNT query; statements[1] is the INSERT
+    sql = session.statements[1]
     assert 'INSERT INTO "target_table" ("id", "name")' in sql
     assert 'SELECT "id", "name" FROM "_staging_target_table"' in sql
 
 
 def test_postgres_backend_merge_upsert_excludes_computed_columns():
     backend = PostgresBackend()
-    session = _FakeSession()
+    # scalar_result=0 → COUNT returns 0 → small-table path → single INSERT statement
+    session = _FakeSession(scalar_result=0)
 
     backend.merge_upsert(_ComputedTableCls, _sess(session), "target_table", "_staging_target_table", ["id"])
 
-    sql = session.statements[0]
+    # statements[0] is the COUNT query; statements[1] is the INSERT
+    sql = session.statements[1]
     assert 'INSERT INTO "target_table" ("id", "name")' in sql
     assert 'ON CONFLICT ("id") DO NOTHING' in sql
 
