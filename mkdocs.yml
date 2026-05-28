@@ -64,3 +64,5 @@ nav:
       - Loader Context & Diagnostics: loaders/context.md
       - Loader Implementations: loaders/loaders.md
       - Loader Helpers: loaders/helpers.md
+  - Guides:
+      - Incremental Loads & Deletes: guides/incremental-loads.md

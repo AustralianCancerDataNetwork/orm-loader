@@ -42,29 +42,58 @@ class PostgresBackend(DatabaseBackend):
         table_cls: type["CSVTableProtocol"],
         session: so.Session,
         staging_name: str,
+        *,
+        has_delete_column: bool = False,
     ) -> None:
         table = table_cls.__table__
-        session.execute(sa.text(f'DROP TABLE IF EXISTS "{staging_name}";'))
+        safe_staging = self._quote_identifier(session, staging_name)
+        safe_table = self._quote_identifier(session, table.name)
+
+        session.execute(sa.text(f"DROP TABLE IF EXISTS {safe_staging};"))
         session.execute(
             sa.text(
                 f'''
-                CREATE UNLOGGED TABLE "{staging_name}"
-                (LIKE "{table.name}" INCLUDING DEFAULTS INCLUDING CONSTRAINTS);
+                CREATE UNLOGGED TABLE {safe_staging}
+                (LIKE {safe_table} INCLUDING DEFAULTS INCLUDING CONSTRAINTS);
                 '''
             )
         )
 
         computed_cols = [c.name for c in table.columns if c.computed is not None]
         for col in computed_cols:
-            session.execute(sa.text(f'ALTER TABLE "{staging_name}" DROP COLUMN "{col}";'))
+            safe_col = self._quote_identifier(session, col)
+            session.execute(sa.text(f"ALTER TABLE {safe_staging} DROP COLUMN {safe_col};"))
 
-        # allows pagniation in O(N log N) time for large tables in merge_insert without needing to add an index on every staging table
+        # Drop any nextval() defaults copied from the parent table's sequences.
+        # Leaving them would cause a dependency that prevents DROP TABLE on the parent
+        # when the staging table is still alive (e.g. after a test that skips cleanup).
+        seq_defaults = session.execute(
+            sa.text(
+                "SELECT column_name FROM information_schema.columns"
+                " WHERE table_schema = 'public' AND table_name = :t"
+                " AND column_default LIKE 'nextval(%'"
+            ),
+            {"t": staging_name},
+        ).scalars().all()
+        for col_name in seq_defaults:
+            safe_col = self._quote_identifier(session, col_name)
+            session.execute(
+                sa.text(f"ALTER TABLE {safe_staging} ALTER COLUMN {safe_col} DROP DEFAULT;")
+            )
+
+        # allows pagination in O(N log N) time for large tables in merge_insert without needing
+        # to add an index on every staging table
         session.execute(
             sa.text(
-                f'ALTER TABLE "{staging_name}" ADD COLUMN _rownum BIGINT'
+                f"ALTER TABLE {safe_staging} ADD COLUMN _rownum BIGINT"
                 f" GENERATED ALWAYS AS IDENTITY (CACHE 1000);"
             )
         )
+
+        if has_delete_column:
+            session.execute(
+                sa.text(f"ALTER TABLE {safe_staging} ADD COLUMN _delete BOOLEAN;")
+            )
 
         session.commit()
 
@@ -73,7 +102,8 @@ class PostgresBackend(DatabaseBackend):
         session: so.Session,
         staging_name: str,
     ) -> None:
-        session.execute(sa.text(f'DROP TABLE IF EXISTS "{staging_name}"'))
+        safe_staging = self._quote_identifier(session, staging_name)
+        session.execute(sa.text(f"DROP TABLE IF EXISTS {safe_staging}"))
 
     def load_staging_fast(
         self,
@@ -135,17 +165,23 @@ class PostgresBackend(DatabaseBackend):
         pk_cols: list[str],
         *,
         merge_batch_size: int = 1_000_000,
+        has_delete_column: bool = False,
     ) -> None:
-        pk_join = " AND ".join(f't."{c}" = s."{c}"' for c in pk_cols)
-        total = session.execute(sa.text(f'SELECT COUNT(*) FROM "{staging_name}"')).scalar_one()
+        safe_target = self._quote_identifier(session, target_name)
+        safe_staging = self._quote_identifier(session, staging_name)
+        pk_join = " AND ".join(
+            f"t.{self._quote_identifier(session, c)} = s.{self._quote_identifier(session, c)}"
+            for c in pk_cols
+        )
+        total = session.execute(sa.text(f"SELECT COUNT(*) FROM {safe_staging}")).scalar_one()
 
         if total <= merge_batch_size:
             session.execute(sa.text(
-                f'DELETE FROM "{target_name}" t USING "{staging_name}" s WHERE {pk_join}'
+                f"DELETE FROM {safe_target} t USING {safe_staging} s WHERE {pk_join}"
             ))
             return
 
-        session.execute(sa.text(f'CREATE INDEX ON "{staging_name}" (_rownum)'))
+        session.execute(sa.text(f"CREATE INDEX ON {safe_staging} (_rownum)"))
         session.commit()
 
         start = 0
@@ -153,8 +189,8 @@ class PostgresBackend(DatabaseBackend):
             end = start + merge_batch_size
             session.execute(
                 sa.text(
-                    f'DELETE FROM "{target_name}" t USING "{staging_name}" s'
-                    f' WHERE {pk_join} AND s._rownum > :start AND s._rownum <= :end'
+                    f"DELETE FROM {safe_target} t USING {safe_staging} s"
+                    f" WHERE {pk_join} AND s._rownum > :start AND s._rownum <= :end"
                 ),
                 {"start": start, "end": end},
             )
@@ -170,21 +206,37 @@ class PostgresBackend(DatabaseBackend):
         pk_cols: list[str],
         *,
         merge_batch_size: int = 1_000_000,
+        has_delete_column: bool = False,
     ) -> None:
         insertable_cols = self._insertable_column_names(table_cls)
-        cols_str = ", ".join(f'"{c}"' for c in insertable_cols)
-        conflict_cols = ", ".join(f'"{c}"' for c in pk_cols)
-        total = session.execute(sa.text(f'SELECT COUNT(*) FROM "{staging_name}"')).scalar_one()
+        safe_target = self._quote_identifier(session, target_name)
+        safe_staging = self._quote_identifier(session, staging_name)
+        safe_rownum = self._quote_identifier(session, "_rownum")
+        cols_str = ", ".join(self._quote_identifier(session, c) for c in insertable_cols)
+        conflict_cols = ", ".join(self._quote_identifier(session, c) for c in pk_cols)
+        where_delete = " AND _delete IS NOT TRUE" if has_delete_column else ""
+        total = session.execute(sa.text(f"SELECT COUNT(*) FROM {safe_staging}")).scalar_one()
 
         if total <= merge_batch_size:
             session.execute(sa.text(
-                f'INSERT INTO "{target_name}" ({cols_str})'
-                f' SELECT {cols_str} FROM "{staging_name}"'
-                f' ON CONFLICT ({conflict_cols}) DO NOTHING'
+                f"INSERT INTO {safe_target} ({cols_str})"
+                f" SELECT {cols_str} FROM {safe_staging}"
+                f" WHERE TRUE{where_delete}"
+                f" ON CONFLICT ({conflict_cols}) DO NOTHING"
             ))
+            if has_delete_column:
+                pk_join = " AND ".join(
+                    f"t.{self._quote_identifier(session, c)} = s.{self._quote_identifier(session, c)}"
+                    for c in pk_cols
+                )
+                session.execute(sa.text(
+                    f"DELETE FROM {safe_target} t"
+                    f" USING {safe_staging} s"
+                    f" WHERE {pk_join} AND s._delete IS TRUE"
+                ))
             return
 
-        session.execute(sa.text(f'CREATE INDEX ON "{staging_name}" (_rownum)'))
+        session.execute(sa.text(f"CREATE INDEX ON {safe_staging} (_rownum)"))
         session.commit()
 
         start = 0
@@ -192,15 +244,27 @@ class PostgresBackend(DatabaseBackend):
             end = start + merge_batch_size
             session.execute(
                 sa.text(
-                    f'INSERT INTO "{target_name}" ({cols_str})'
-                    f' SELECT {cols_str} FROM "{staging_name}"'
-                    f' WHERE _rownum > :start AND _rownum <= :end'
-                    f' ON CONFLICT ({conflict_cols}) DO NOTHING'
+                    f"INSERT INTO {safe_target} ({cols_str})"
+                    f" SELECT {cols_str} FROM {safe_staging}"
+                    f" WHERE {safe_rownum} > :start AND {safe_rownum} <= :end{where_delete}"
+                    f" ON CONFLICT ({conflict_cols}) DO NOTHING"
                 ),
                 {"start": start, "end": end},
             )
             session.commit()
             start = end
+
+        if has_delete_column:
+            pk_join = " AND ".join(
+                f"t.{self._quote_identifier(session, c)} = s.{self._quote_identifier(session, c)}"
+                for c in pk_cols
+            )
+            session.execute(sa.text(
+                f"DELETE FROM {safe_target} t"
+                f" USING {safe_staging} s"
+                f" WHERE {pk_join} AND s._delete IS TRUE"
+            ))
+            session.commit()
 
     def merge_insert(
         self,
@@ -210,16 +274,20 @@ class PostgresBackend(DatabaseBackend):
         staging_name: str,
         *,
         merge_batch_size: int = 1_000_000,
+        has_delete_column: bool = False,
     ) -> None:
         insertable_cols = self._insertable_column_names(table_cls)
-        cols_str = ", ".join(f'"{c}"' for c in insertable_cols)
+        safe_target = self._quote_identifier(session, target_name)
+        safe_staging = self._quote_identifier(session, staging_name)
+        cols_str = ", ".join(self._quote_identifier(session, c) for c in insertable_cols)
+        where_delete = " WHERE _delete IS NOT TRUE" if has_delete_column else ""
 
-        total = session.execute(sa.text(f'SELECT COUNT(*) FROM "{staging_name}"')).scalar_one()
+        total = session.execute(sa.text(f"SELECT COUNT(*) FROM {safe_staging}")).scalar_one()
 
         if total <= merge_batch_size:
             session.execute(sa.text(
-                f'INSERT INTO "{target_name}" ({cols_str})'
-                f' SELECT {cols_str} FROM "{staging_name}"'
+                f"INSERT INTO {safe_target} ({cols_str})"
+                f" SELECT {cols_str} FROM {safe_staging}{where_delete}"
             ))
             return
 
@@ -227,17 +295,18 @@ class PostgresBackend(DatabaseBackend):
         # INSERT in batch-sized transactions to bound WAL per commit.
         # session_replication_role='replica' is session-level and persists
         # across commits, so FK checks stay disabled for all batches.
-        session.execute(sa.text(f'CREATE INDEX ON "{staging_name}" (_rownum)'))
+        session.execute(sa.text(f"CREATE INDEX ON {safe_staging} (_rownum)"))
         session.commit()
 
+        and_delete = " AND _delete IS NOT TRUE" if has_delete_column else ""
         start = 0
         while start < total:
             end = start + merge_batch_size
             session.execute(
                 sa.text(
-                    f'INSERT INTO "{target_name}" ({cols_str})'
-                    f' SELECT {cols_str} FROM "{staging_name}"'
-                    f' WHERE _rownum > :start AND _rownum <= :end'
+                    f"INSERT INTO {safe_target} ({cols_str})"
+                    f" SELECT {cols_str} FROM {safe_staging}"
+                    f" WHERE _rownum > :start AND _rownum <= :end{and_delete}"
                 ),
                 {"start": start, "end": end},
             )

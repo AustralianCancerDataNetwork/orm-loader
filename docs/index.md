@@ -9,11 +9,16 @@ It focuses on:
 
 - ORM table introspection
 - safe bulk ingestion patterns
-- file-based loading via staging tables
+- file-based loading via staging tables, including incremental loads with explicit row deletes
 - model-agnostic validation scaffolding
 - operational helpers for supported backends
 
 It currently ships with backend implementations for SQLite and PostgreSQL.
+
+For file ingestion there are two distinct paths:
+
+- an ORM-managed path that can normalise values, drop invalid required rows, deduplicate within the source, and process data in chunks
+- a PostgreSQL `COPY` fast path that favours throughput over row-level cleaning and falls back to the ORM path if `COPY` itself fails
 
 ---
 
@@ -31,6 +36,10 @@ It currently ships with backend implementations for SQLite and PostgreSQL.
 - [Tables](tables/index.md)
 - [Registry & Validation](registry/index.md)
 - [Loaders](loaders/index.md)
+
+## Guides
+
+- [Incremental Loads & Deletes](guides/incremental-loads.md) — how source teams prepare delta files with delete markers, and how pipeline engineers configure the merge
 
 ---
 
@@ -59,6 +68,7 @@ and **above**:
 - No migrations
 - No concurrency guarantees
 - No support yet for arbitrary database dialects
+- No promise that every backend uses identical ingest semantics
 
 ---
 

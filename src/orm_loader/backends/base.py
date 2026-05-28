@@ -118,12 +118,41 @@ class DatabaseBackend(ABC):
         """
         return [c.name for c in table_cls.__table__.columns if c.computed is None]
 
+    @staticmethod
+    def _quote_identifier_fallback(identifier: str) -> str:
+        """Safely quote a SQL identifier when no dialect preparer is available."""
+        return '"' + identifier.replace('"', '""') + '"'
+
+    def _quote_identifier(
+        self,
+        bind_or_session: so.Session | Engine | Connection | object,
+        identifier: str,
+    ) -> str:
+        """Quote an identifier using the active dialect when available."""
+        bind = None
+        get_bind = getattr(bind_or_session, "get_bind", None)
+        if callable(get_bind):
+            try:
+                bind = get_bind()
+            except Exception:
+                bind = None
+
+        if bind is None:
+            bind = getattr(bind_or_session, "bind", None)
+
+        dialect = getattr(bind, "dialect", None) or getattr(bind_or_session, "dialect", None)
+        if dialect is not None:
+            return dialect.identifier_preparer.quote(identifier)
+        return self._quote_identifier_fallback(identifier)
+
     @abstractmethod
     def create_staging_table(
         self,
         table_cls: Type["CSVTableProtocol"],
         session: so.Session,
         staging_name: str,
+        *,
+        has_delete_column: bool = False,
     ) -> None:
         """Create a staging table for the supplied ORM table class."""
 
@@ -183,6 +212,7 @@ class DatabaseBackend(ABC):
         pk_cols: list[str],
         *,
         merge_batch_size: int = 1_000_000,
+        has_delete_column: bool = False,
     ) -> None:
         """Merge staging rows by replacing matching target rows first."""
 
@@ -196,6 +226,7 @@ class DatabaseBackend(ABC):
         pk_cols: list[str],
         *,
         merge_batch_size: int = 1_000_000,
+        has_delete_column: bool = False,
     ) -> None:
         """Merge staging rows using backend-specific upsert semantics."""
 
@@ -208,6 +239,7 @@ class DatabaseBackend(ABC):
         staging_name: str,
         *,
         merge_batch_size: int = 1_000_000,
+        has_delete_column: bool = False,
     ) -> None:
         """Insert all staging rows into the target table."""
 

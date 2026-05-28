@@ -42,6 +42,7 @@ postgres = [
 ]
 dev = [
     "pytest>=9.0.3",
+    "pytest-cov>=6.2.1",
     "mypy>=1.19.1",
     "ruff>=0.14.11",
     "mkdocs-material>=9.7.1",
@@ -73,6 +74,28 @@ addopts = "-ra"
 markers = [
     "postgres: requires a running Postgres instance (set TEST_POSTGRES_URL)",
 ]
+
+[tool.coverage.run]
+branch = true
+source = ["orm_loader"]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "@abstractmethod",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]
+
+[tool.coverage.xml]
+output = "coverage.xml"
+
+[tool.coverage.html]
+directory = "htmlcov"
 
 [tool.pyright]
 reportMissingTypeStubs = false

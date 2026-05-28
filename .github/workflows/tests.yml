@@ -51,4 +51,9 @@ jobs:
         env:
           PYTHONPATH: src
           TEST_POSTGRES_URL: postgresql+psycopg://test:test@localhost:5432/orm_loader_test
-        run: pytest
+        run: >
+          pytest
+          --cov=orm_loader
+          --cov-branch
+          --cov-report=term-missing
+          --cov-report=xml

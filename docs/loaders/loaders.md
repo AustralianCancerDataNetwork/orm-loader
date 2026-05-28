@@ -81,6 +81,28 @@ Deduplication here means deduplicating within the incoming data before it is ins
 
 ---
 
+## Delete-aware loading
+
+When the source file contains a `_delete` column, both loaders apply
+additional processing at each stage of the pipeline. See the
+[Incremental Loads guide](../guides/incremental-loads.md) for a full treatment;
+the key loader-level behaviours are:
+
+**Value normalisation** — string values (`true`, `1`, `yes`, `t` and their
+falsy counterparts) are converted to `bool` before any casting or deduplication.
+Values outside the accepted set raise `ValueError`.
+
+**Deduplication priority** — when `dedupe=True`, if the same primary key
+appears multiple times in the incoming data, delete-marked rows take priority.
+A correction and a delete arriving in the same batch will result in deletion.
+
+**Null-constraint preservation** — the normalisation step normally drops rows
+that violate NOT NULL constraints on required columns. Delete-marked rows are
+exempt: only the primary key is needed to drive the delete, so non-PK columns
+may be empty without the row being discarded.
+
+---
+
 ## Normalisation behaviour
 
 When enabled, loaders:

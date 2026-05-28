@@ -91,14 +91,19 @@ class SQLiteBackend(DatabaseBackend):
         table_cls: type["CSVTableProtocol"],
         session: so.Session,
         staging_name: str,
+        *,
+        has_delete_column: bool = False,
     ) -> None:
-        session.execute(sa.text(f'DROP TABLE IF EXISTS "{staging_name}";'))
+        safe_staging = self._quote_identifier(session, staging_name)
+        session.execute(sa.text(f"DROP TABLE IF EXISTS {safe_staging};"))
 
         metadata = sa.MetaData()
         staging_columns = [
             sa.Column(col.name, col.type, nullable=True)
             for col in table_cls.__table__.columns
         ]
+        if has_delete_column:
+            staging_columns.append(sa.Column("_delete", sa.Boolean, nullable=True))
         staging_table = sa.Table(staging_name, metadata, *staging_columns)
         metadata.create_all(bind=session.connection(), tables=[staging_table])
         session.commit()
@@ -108,7 +113,8 @@ class SQLiteBackend(DatabaseBackend):
         session: so.Session,
         staging_name: str,
     ) -> None:
-        session.execute(sa.text(f'DROP TABLE IF EXISTS "{staging_name}"'))
+        safe_staging = self._quote_identifier(session, staging_name)
+        session.execute(sa.text(f"DROP TABLE IF EXISTS {safe_staging}"))
 
     def disable_fk_check(self, session: so.Session) -> str | int:
         previous_state = session.execute(text("PRAGMA foreign_keys")).scalar()
@@ -141,15 +147,18 @@ class SQLiteBackend(DatabaseBackend):
         pk_cols: list[str],
         *,
         merge_batch_size: int = 1_000_000,
+        has_delete_column: bool = False,
     ) -> None:
+        safe_target = self._quote_identifier(session, target_name)
+        safe_staging = self._quote_identifier(session, staging_name)
         if len(pk_cols) == 1:
-            pk = pk_cols[0]
+            pk = self._quote_identifier(session, pk_cols[0])
             session.execute(
                 sa.text(
                     f"""
-                    DELETE FROM "{target_name}"
-                    WHERE "{pk}" IN (
-                        SELECT "{pk}" FROM "{staging_name}"
+                    DELETE FROM {safe_target}
+                    WHERE {pk} IN (
+                        SELECT {pk} FROM {safe_staging}
                     );
                     """
                 )
@@ -157,14 +166,16 @@ class SQLiteBackend(DatabaseBackend):
             return
 
         pk_match = " AND ".join(
-            f'"{target_name}"."{c}" = "{staging_name}"."{c}"' for c in pk_cols
+            f"{safe_target}.{self._quote_identifier(session, c)} = "
+            f"{safe_staging}.{self._quote_identifier(session, c)}"
+            for c in pk_cols
         )
         session.execute(
             sa.text(
                 f"""
-                DELETE FROM "{target_name}"
+                DELETE FROM {safe_target}
                 WHERE EXISTS (
-                    SELECT 1 FROM "{staging_name}"
+                    SELECT 1 FROM {safe_staging}
                     WHERE {pk_match}
                 );
                 """
@@ -180,17 +191,51 @@ class SQLiteBackend(DatabaseBackend):
         pk_cols: list[str],
         *,
         merge_batch_size: int = 1_000_000,
+        has_delete_column: bool = False,
     ) -> None:
         insertable_cols = self._insertable_column_names(table_cls)
-        cols_str = ", ".join(f'"{c}"' for c in insertable_cols)
+        safe_target = self._quote_identifier(session, target_name)
+        safe_staging = self._quote_identifier(session, staging_name)
+        cols_str = ", ".join(self._quote_identifier(session, c) for c in insertable_cols)
+        where_clause = " WHERE _delete IS NOT TRUE" if has_delete_column else ""
         session.execute(
             sa.text(
                 f"""
-                INSERT OR IGNORE INTO "{target_name}" ({cols_str})
-                SELECT {cols_str} FROM "{staging_name}";
+                INSERT OR IGNORE INTO {safe_target} ({cols_str})
+                SELECT {cols_str} FROM {safe_staging}{where_clause};
                 """
             )
         )
+        if has_delete_column:
+            if len(pk_cols) == 1:
+                pk = self._quote_identifier(session, pk_cols[0])
+                session.execute(
+                    sa.text(
+                        f"""
+                        DELETE FROM {safe_target}
+                        WHERE {pk} IN (
+                            SELECT {pk} FROM {safe_staging} WHERE _delete IS TRUE
+                        );
+                        """
+                    )
+                )
+            else:
+                pk_match = " AND ".join(
+                    f"{safe_target}.{self._quote_identifier(session, c)} = "
+                    f"{safe_staging}.{self._quote_identifier(session, c)}"
+                    for c in pk_cols
+                )
+                session.execute(
+                    sa.text(
+                        f"""
+                        DELETE FROM {safe_target}
+                        WHERE EXISTS (
+                            SELECT 1 FROM {safe_staging}
+                            WHERE {pk_match} AND {safe_staging}._delete IS TRUE
+                        );
+                        """
+                    )
+                )
 
     def merge_insert(
         self,
@@ -200,14 +245,18 @@ class SQLiteBackend(DatabaseBackend):
         staging_name: str,
         *,
         merge_batch_size: int = 1_000_000,
+        has_delete_column: bool = False,
     ) -> None:
         insertable_cols = self._insertable_column_names(table_cls)
-        cols_str = ", ".join(f'"{c}"' for c in insertable_cols)
+        safe_target = self._quote_identifier(session, target_name)
+        safe_staging = self._quote_identifier(session, staging_name)
+        cols_str = ", ".join(self._quote_identifier(session, c) for c in insertable_cols)
+        where_clause = " WHERE _delete IS NOT TRUE" if has_delete_column else ""
         session.execute(
             sa.text(
                 f"""
-                INSERT INTO "{target_name}" ({cols_str})
-                SELECT {cols_str} FROM "{staging_name}";
+                INSERT INTO {safe_target} ({cols_str})
+                SELECT {cols_str} FROM {safe_staging}{where_clause};
                 """
             )
         )

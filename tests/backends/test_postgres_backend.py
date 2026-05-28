@@ -30,7 +30,7 @@ class _FakeSession:
         self.scalar_result = scalar_result
         self.commits = 0
 
-    def execute(self, statement):
+    def execute(self, statement, parameters=None):
         if hasattr(statement, "compile"):
             sql = str(statement.compile(dialect=postgresql.dialect()))
         else:
@@ -46,6 +46,12 @@ class _FakeSession:
 
             def scalar_one(self):
                 return self._value
+
+            def scalars(self):
+                class _Scalars:
+                    def all(self_):
+                        return []
+                return _Scalars()
 
         return _Result(self.scalar_result)
 
@@ -95,6 +101,15 @@ def test_postgres_backend_drop_staging_table():
     backend.drop_staging_table(_sess(session), "_staging_target_table")
 
     assert session.statements == ['DROP TABLE IF EXISTS "_staging_target_table"']
+
+
+def test_postgres_backend_drop_staging_table_escapes_identifier_quotes():
+    backend = PostgresBackend()
+    session = _FakeSession()
+
+    backend.drop_staging_table(_sess(session), 'unsafe"name')
+
+    assert session.statements == ['DROP TABLE IF EXISTS "unsafe""name"']
 
 
 def test_postgres_backend_fk_methods_emit_expected_sql():
@@ -213,6 +228,30 @@ def test_postgres_backend_enable_fk_raises_when_show_returns_non_string():
         assert "Expected PostgreSQL FK state to be a string" in str(exc)
     else:
         raise AssertionError("Expected RuntimeError when SHOW returns a non-string")
+
+
+def test_postgres_backend_create_staging_table_adds_delete_column():
+    backend = PostgresBackend()
+    session = _FakeSession()
+
+    backend.create_staging_table(
+        _ComputedTableCls, _sess(session), "_staging_target_table", has_delete_column=True
+    )
+
+    assert any(
+        "ADD COLUMN _delete BOOLEAN" in sql for sql in session.statements
+    )
+
+
+def test_postgres_backend_create_staging_table_without_delete_column_no_delete_sql():
+    backend = PostgresBackend()
+    session = _FakeSession()
+
+    backend.create_staging_table(
+        _ComputedTableCls, _sess(session), "_staging_target_table", has_delete_column=False
+    )
+
+    assert not any("_delete" in sql for sql in session.statements)
 
 
 def test_postgres_backend_engine_with_replica_role_unregisters_listener(monkeypatch):

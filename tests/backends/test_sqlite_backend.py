@@ -83,6 +83,15 @@ def test_sqlite_backend_drop_staging_table():
     assert session.statements == ['DROP TABLE IF EXISTS "_staging_target_table"']
 
 
+def test_sqlite_backend_drop_staging_table_escapes_identifier_quotes():
+    backend = SQLiteBackend()
+    session = _FakeSession()
+
+    backend.drop_staging_table(_sess(session), 'unsafe"name')
+
+    assert session.statements == ['DROP TABLE IF EXISTS "unsafe""name"']
+
+
 def test_sqlite_backend_disable_fk_reads_then_sets():
     backend = SQLiteBackend()
     session = _FakeSession(scalar_result=1)
@@ -313,6 +322,29 @@ def test_sqlite_backend_restore_fk_accepts_string_values():
         "PRAGMA foreign_keys = ON",
         "PRAGMA foreign_keys = OFF",
     ]
+
+
+def test_sqlite_backend_create_staging_table_with_delete_column(session, engine):
+    backend = SQLiteBackend()
+
+    backend.create_staging_table(
+        _ComputedTableCls, session, "_staging_target_table", has_delete_column=True
+    )
+    inspector = sa.inspect(engine)
+    assert inspector.has_table("_staging_target_table") is True
+    col_names = [c["name"] for c in inspector.get_columns("_staging_target_table")]
+    assert "_delete" in col_names
+
+
+def test_sqlite_backend_create_staging_table_without_delete_column_excludes_it(session, engine):
+    backend = SQLiteBackend()
+
+    backend.create_staging_table(
+        _ComputedTableCls, session, "_staging_target_table", has_delete_column=False
+    )
+    inspector = sa.inspect(engine)
+    col_names = [c["name"] for c in inspector.get_columns("_staging_target_table")]
+    assert "_delete" not in col_names
 
 
 def test_sqlite_backend_fk_toggle_round_trip(session):

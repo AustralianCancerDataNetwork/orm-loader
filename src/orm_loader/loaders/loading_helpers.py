@@ -11,6 +11,8 @@ import pyarrow.compute as pc
 import pyarrow.csv as pv
 import io
 
+from ..constants import RESERVED_COLUMN_DELETE
+
 _SAFE_ENCODING = re.compile(r'^[A-Za-z][A-Za-z0-9_-]*$')
 
 logger = logging.getLogger(__name__)
@@ -186,7 +188,7 @@ def arrow_drop_duplicates(
 def conservative_load_parquet(path: Path, wanted_cols: list[str], chunksize: int | None = None) -> pa.Table:
     delimiter = infer_delim(path)
     encoding = infer_encoding(path)["encoding"]
-    convert_opts = pv.ConvertOptions(
+    convert_opts = pv.ConvertOptions(  # type: ignore
         strings_can_be_null=True,                
         include_columns=wanted_cols,
     )
@@ -195,20 +197,20 @@ def conservative_load_parquet(path: Path, wanted_cols: list[str], chunksize: int
         logger.warning("Skipping malformed CSV row: %r", row[:200])
         return "skip"
     
-    parse_opts = pv.ParseOptions(
+    parse_opts = pv.ParseOptions(  # type: ignore
         delimiter=delimiter,
         ignore_empty_lines=True,
         quote_char=False,
         invalid_row_handler=_invalid_row_handler
     )
-    read_opts = pv.ReadOptions(
+    read_opts = pv.ReadOptions(  # type: ignore
         block_size=chunksize or 64_000,
         encoding=encoding,
         use_threads=True,
     )
     if chunksize:
         read_opts.block_size = chunksize
-    with pv.open_csv(
+    with pv.open_csv( # type: ignore
         path,
         read_options=read_opts,
         parse_options=parse_opts,
@@ -216,6 +218,35 @@ def conservative_load_parquet(path: Path, wanted_cols: list[str], chunksize: int
     ) as reader:
         for batch in reader:
             yield batch
+
+def detect_source_columns(path: Path) -> list[str]:
+    """
+    Return the lowercased, normalised column names from a file header/schema
+    without reading any data rows.
+
+    Applies the same normalisation as NormalisedCSVStream (lowercase, strip
+    _hash suffix) so the result matches what the loader sees at ingest time.
+    Supports CSV, TSV, and Parquet files.
+    """
+    suffix = path.suffix.lower()
+    if suffix == ".parquet":
+        import pyarrow.parquet as pq
+        schema = pq.read_schema(path)
+        return list(schema.names)
+
+    encoding = infer_encoding(path)["encoding"] or "utf-8"
+    delimiter = infer_delim(path)
+    with open(path, encoding=encoding, errors="replace") as f:
+        raw_header = f.readline()
+    nl = check_line_ending(raw_header)
+    cols = raw_header.rstrip(nl).split(delimiter)
+    return [c.strip().lower().replace("_hash", "") for c in cols]
+
+
+def has_delete_column(source_columns: list[str]) -> bool:
+    """Return True when the source column list contains the reserved _delete column."""
+    return RESERVED_COLUMN_DELETE in source_columns
+
 
 def check_line_ending(raw_header: str) -> str:
     if raw_header.endswith("\r\n"):
@@ -227,6 +258,10 @@ def check_line_ending(raw_header: str) -> str:
     else:
         logger.warning("Unable to detect line ending from header: %r. Defaulting to '\\n'", raw_header)
         return "\n"
+
+
+def _quote_identifier(session: so.Session, identifier: str) -> str:
+    return session.get_bind().dialect.identifier_preparer.quote(identifier)
 
 def quick_load_pg(
     *,
@@ -273,7 +308,8 @@ def quick_load_pg(
         _raw_hdr = _f_peek.readline().decode(encoding)
     _nl = check_line_ending(_raw_hdr)
     _csv_cols = [c.strip().lower().replace('_hash', '') for c in _raw_hdr.rstrip(_nl).split(delimiter)]
-    _cols_sql = ", ".join(f'"{c}"' for c in _csv_cols)
+    _safe_table = _quote_identifier(session, tablename)
+    _cols_sql = ", ".join(_quote_identifier(session, c) for c in _csv_cols)
 
     logger.info(f"Bulk loading {tablename} via COPY (encoding={encoding}, delimiter={delimiter})")
 
@@ -283,7 +319,7 @@ def quick_load_pg(
             stream = NormalisedCSVStream(f, encoding=encoding, delimiter=delimiter)
             with cur.copy(
                 f'''
-                COPY "{tablename}" ({_cols_sql})
+                COPY {_safe_table} ({_cols_sql})
                 FROM STDIN
                 WITH (
                     {copy_options}
@@ -293,7 +329,7 @@ def quick_load_pg(
                 while data := stream.read(COPY_BLOCK_SIZE):
                     copy.write(data)
         session.flush()
-        total = session.execute(sa.text(f'SELECT COUNT(*) FROM "{tablename}"')).scalar_one()
+        total = session.execute(sa.text(f"SELECT COUNT(*) FROM {_safe_table}")).scalar_one()
         return total
     except Exception as e:
         logger.error(f"Error during bulk load via COPY: {e}")

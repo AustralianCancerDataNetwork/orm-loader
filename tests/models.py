@@ -35,3 +35,10 @@ class CompositeTable(Base, CSVLoadableTableInterface):
     a: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     b: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     value: so.Mapped[str] = so.mapped_column(sa.String)
+
+
+class DeleteTable(Base, CSVLoadableTableInterface):
+    __tablename__ = "delete_table"
+
+    id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
+    value: so.Mapped[str] = so.mapped_column(sa.String, nullable=False)

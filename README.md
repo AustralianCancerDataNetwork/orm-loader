@@ -62,6 +62,13 @@ class MyTable(CSVLoadableTableInterface, ORMTableBase, Base):
 
 The main extension points here are loader choice, column mapping, and the normal SQLAlchemy model definitions themselves. Most downstream projects do not need to override much beyond `csv_columns()` and the model schema.
 
+Two details matter in practice:
+
+* On SQLite and on ORM-based loads, `normalise`, `dedupe`, and `chunksize` are applied by the selected loader.
+* On PostgreSQL, the fast `COPY` path is deliberately lower-level. It prioritises throughput and does not apply loader-level casting, deduplication, or chunked row processing. If `COPY` fails, ingestion falls back to the ORM loader.
+
+Merge behaviour is also backend-aware. PostgreSQL can batch very large merges using `merge_batch_size` to keep transaction size under control. That is useful for large staged loads, but once batching is triggered the merge is committed in chunks rather than as one all-or-nothing transaction.
+
 3. Structured serialisation and hashing
 
 `SerialisableTableInterface` adds lightweight serialisation helpers for ORM rows.
@@ -128,6 +135,34 @@ bootstrap(engine, create=True)
 6. Bulk-loading helpers
 
 There are a few lower-level helpers for trusted bulk workflows, including backend-aware foreign key management and SQLite connection setup for heavy local loads.
+
+## Testing and coverage
+
+Install the development extras:
+
+```bash
+pip install -e ".[dev,postgres]"
+```
+
+Run the test suite:
+
+```bash
+PYTHONPATH=src pytest
+```
+
+Run the test suite with coverage reporting:
+
+```bash
+PYTHONPATH=src pytest --cov=orm_loader --cov-branch --cov-report=term-missing --cov-report=xml
+```
+
+The coverage configuration lives in `pyproject.toml`.
+
+Useful outputs:
+
+* terminal summary with missing lines
+* `coverage.xml` for CI tooling
+* `htmlcov/` if you also run `--cov-report=html`
 
 ## Summary
 

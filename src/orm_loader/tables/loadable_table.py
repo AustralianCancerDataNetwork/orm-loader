@@ -13,6 +13,8 @@ from .orm_table import ORMTableBase
 from .typing import CSVTableProtocol
 from ..backends.resolve import resolve_backend
 from ..loaders.loader_interface import LoaderInterface, LoaderContext, PandasLoader, ParquetLoader
+from ..loaders.loading_helpers import detect_source_columns, has_delete_column as _has_delete_column
+from ..constants import RESERVED_COLUMN_DELETE
 
 logger = logging.getLogger(__name__)
 
@@ -87,19 +89,26 @@ class CSVLoadableTableInterface(ORMTableBase):
     
     @classmethod
     def create_staging_table(
-        cls: Type[CSVTableProtocol], 
-        session: so.Session
+        cls: Type[CSVTableProtocol],
+        session: so.Session,
+        *,
+        has_delete_column: bool = False,
     ):
         """
         Create a fresh staging table for ingestion.
 
         Any existing staging table with the same name is dropped first.
-        The staging table schema mirrors the target table schema.
+        The staging table schema mirrors the target table schema, with an
+        optional ``_delete BOOLEAN`` column added when ``has_delete_column``
+        is True.
 
         Parameters
         ----------
         session
             An active SQLAlchemy session bound to an engine.
+        has_delete_column
+            When True, adds a ``_delete BOOLEAN`` column to the staging
+            table to support the explicit row-delete convention.
 
         Raises
         ------
@@ -110,7 +119,10 @@ class CSVLoadableTableInterface(ORMTableBase):
         """
         _require_bind(session)
         backend = resolve_backend(session)
-        backend.create_staging_table(cls, session, cls.staging_tablename())
+        backend.create_staging_table(
+            cls, session, cls.staging_tablename(),
+            has_delete_column=has_delete_column,
+        )
 
     @classmethod
     @contextmanager
@@ -285,8 +297,6 @@ class CSVLoadableTableInterface(ORMTableBase):
         total = 0
 
         try:
-            cls.create_staging_table(loader_context.session)
-
             try:
                 total = backend.load_staging_fast(
                     loader_context=loader_context,
@@ -302,7 +312,7 @@ class CSVLoadableTableInterface(ORMTableBase):
             total = cls.orm_staging_load(
                 loader=loader,
                 loader_context=loader_context
-            )   
+            )
         finally:
             cls._staging_tablename = None
         return total
@@ -359,6 +369,7 @@ class CSVLoadableTableInterface(ORMTableBase):
         quote_mode: str = "auto",
         index_strategy: str = "auto",
         merge_batch_size: int = 1_000_000,
+        honour_delete_marker: bool = True,
     ) -> int:
         
         """
@@ -426,15 +437,41 @@ class CSVLoadableTableInterface(ORMTableBase):
                     f"'insert_if_empty'"
                 )
 
+        # Detect whether the source file contains a _delete column.
+        source_cols = detect_source_columns(path)
+        has_delete = honour_delete_marker and _has_delete_column(source_cols)
+
+        if has_delete:
+            model_col_names = {c.name for c in cls.__table__.columns}
+            if RESERVED_COLUMN_DELETE in model_col_names:
+                raise ValueError(
+                    f"Table '{cls.__tablename__}': the model declares a column named "
+                    f"'{RESERVED_COLUMN_DELETE}', which conflicts with the reserved "
+                    f"CDC delete-marker column.  Rename the model column or pass "
+                    f"honour_delete_marker=False to bypass this check."
+                )
+
+        # Create staging table (with or without _delete column) before reflecting.
+        cls.create_staging_table(session, has_delete_column=has_delete)
+
+        # Reflect the freshly-created staging table so LoaderContext has the correct schema.
+        _engine = _require_bind(session)
+        staging_table = sa.Table(
+            cls.staging_tablename(),
+            sa.MetaData(),
+            autoload_with=_engine,
+        )
+
         loader_context = LoaderContext(
             tableclass=cls,
             session=session,
             path=path,
-            staging_table=cls.get_staging_table(session),
+            staging_table=staging_table,
             chunksize=chunksize,
             normalise=normalise,
             dedupe=dedupe,
             quote_mode=quote_mode,
+            has_delete_column=has_delete,
         )
 
         if loader is None:
@@ -447,8 +484,13 @@ class CSVLoadableTableInterface(ORMTableBase):
         # Merge staging to target (Wrapped in our index dropper!)
         logger.info(f"Table `{cls.__tablename__}`: Merging staging data into target table")
         with cls.manage_indices(session, index_strategy=index_strategy):
-            cls.merge_from_staging(session, merge_strategy=merge_strategy, merge_batch_size=merge_batch_size)
-        
+            cls.merge_from_staging(
+                session,
+                merge_strategy=merge_strategy,
+                merge_batch_size=merge_batch_size,
+                has_delete_column=has_delete,
+            )
+
         cls.drop_staging_table(session)
 
         logger.info(f"Table `{cls.__tablename__}`: Successfully finished ingestion. Total rows: {total}")
@@ -484,6 +526,7 @@ class CSVLoadableTableInterface(ORMTableBase):
         merge_strategy: str = "replace",
         *,
         merge_batch_size: int = 1_000_000,
+        has_delete_column: bool = False,
     ):
         """
         Merge data from the staging table into the target table.
@@ -517,12 +560,31 @@ class CSVLoadableTableInterface(ORMTableBase):
                 f"{_format_elapsed(perf_counter() - check_started)}."
             )
             if not has_rows:
-                logger.info(
-                    f"Table `{target}`: Target table is empty; routing merge strategy "
-                    f"`{merge_strategy}` to insert-if-empty fast path."
-                )
-                target_empty_confirmed = True
-                merge_strategy = "insert_if_empty"
+                # Upsert with a _delete column needs its own delete phase even on an empty
+                # target, so skip the fast-path routing to keep the delete logic intact.
+                if has_delete_column and merge_strategy == "upsert":
+                    logger.info(
+                        f"Table `{target}`: Target table is empty but _delete column present; "
+                        f"keeping upsert path to preserve delete phase."
+                    )
+                else:
+                    logger.info(
+                        f"Table `{target}`: Target table is empty; routing merge strategy "
+                        f"`{merge_strategy}` to insert-if-empty fast path."
+                    )
+                    target_empty_confirmed = True
+                    merge_strategy = "insert_if_empty"
+
+                    if has_delete_column:
+                        safe_staging_chk = backend._quote_identifier(session, staging)
+                        delete_count = session.execute(
+                            sa.text(f"SELECT COUNT(*) FROM {safe_staging_chk} WHERE _delete IS TRUE")
+                        ).scalar_one()
+                        if delete_count:
+                            logger.warning(
+                                f"Table `{target}`: delete-marked rows present but target is "
+                                f"empty; skipping delete phase."
+                            )
 
         if merge_strategy == "replace":
             logger.info(f"Table `{target}`: Merge replace delete phase starting.")
@@ -534,7 +596,7 @@ class CSVLoadableTableInterface(ORMTableBase):
             )
             logger.info(f"Table `{target}`: Merge insert phase starting.")
             insert_started = perf_counter()
-            backend.merge_insert(cls, session, target, staging, merge_batch_size=merge_batch_size)
+            backend.merge_insert(cls, session, target, staging, merge_batch_size=merge_batch_size, has_delete_column=has_delete_column)
             logger.info(
                 f"Table `{target}`: Merge insert phase completed in "
                 f"{_format_elapsed(perf_counter() - insert_started)}."
@@ -542,7 +604,7 @@ class CSVLoadableTableInterface(ORMTableBase):
         elif merge_strategy == "upsert":
             logger.info(f"Table `{target}`: Merge upsert phase starting.")
             upsert_started = perf_counter()
-            backend.merge_upsert(cls, session, target, staging, pk_cols, merge_batch_size=merge_batch_size)
+            backend.merge_upsert(cls, session, target, staging, pk_cols, merge_batch_size=merge_batch_size, has_delete_column=has_delete_column)
             logger.info(
                 f"Table `{target}`: Merge upsert phase completed in "
                 f"{_format_elapsed(perf_counter() - upsert_started)}."
@@ -566,9 +628,21 @@ class CSVLoadableTableInterface(ORMTableBase):
                         f"'insert_if_empty'"
                     )
 
+                if has_delete_column:
+                    safe_staging = backend._quote_identifier(session, staging)
+                    has_deletes = session.execute(
+                        sa.text(f"SELECT COUNT(*) FROM {safe_staging} WHERE _delete IS TRUE")
+                    ).scalar_one()
+                    if has_deletes:
+                        raise ValueError(
+                            f"Table `{target}`: Cannot use merge strategy 'insert_if_empty' when "
+                            f"the source file contains rows marked for deletion (_delete = TRUE). "
+                            f"Use 'replace' or 'upsert' for files with a _delete column."
+                        )
+
             logger.info(f"Table `{target}`: Merge insert-if-empty phase starting.")
             insert_started = perf_counter()
-            backend.merge_insert(cls, session, target, staging, merge_batch_size=merge_batch_size)
+            backend.merge_insert(cls, session, target, staging, merge_batch_size=merge_batch_size, has_delete_column=has_delete_column)
             logger.info(
                 f"Table `{target}`: Merge insert-if-empty phase completed in "
                 f"{_format_elapsed(perf_counter() - insert_started)}."

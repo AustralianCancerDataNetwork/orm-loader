@@ -71,6 +71,7 @@ class LoaderContext:
     normalise: bool = True
     dedupe: bool = True
     quote_mode: str = "auto"
+    has_delete_column: bool = False
 
 class LoaderInterface:
 

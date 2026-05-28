@@ -26,6 +26,11 @@ on globals or implicit configuration.
 | `normalise` | Whether to cast values to ORM types |
 | `dedupe` | Whether to deduplicate incoming data |
 | `quote_mode` | CSV quoting mode for PostgreSQL fast-path loading |
+| `has_delete_column` | Whether the source file contains a `_delete` column. Set automatically by `load_csv()` — do not pass this manually. |
+
+When `True`, the staging table gains a `_delete BOOLEAN` column and the loaders apply
+delete-aware value normalisation, deduplication priority, and null-constraint exemptions
+for delete-marked rows. See the [Incremental Loads guide](../guides/incremental-loads.md).
 
 ::: orm_loader.loaders.data_classes.LoaderContext
 
