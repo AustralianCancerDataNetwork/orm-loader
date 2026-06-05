@@ -11,10 +11,10 @@ if TYPE_CHECKING:
     from sqlalchemy.engine import Connection, Engine
 
 
-_BACKEND_TYPES: tuple[type[DatabaseBackend], ...] = (
-    PostgresBackend,
-    SQLiteBackend,
-)
+_BACKEND_TYPES: dict[Dialect, type[DatabaseBackend]] = {
+    Dialect.POSTGRESQL: PostgresBackend,
+    Dialect.SQLITE: SQLiteBackend,
+}
 
 
 def _dialect(bindable: "so.Session | Engine | Connection") -> Dialect:
@@ -34,13 +34,10 @@ def _dialect(bindable: "so.Session | Engine | Connection") -> Dialect:
         ) from exc
 
 
-def resolve_backend(bindable: "so.Session | Engine | Connection") -> DatabaseBackend:
-    """
-    Resolve a concrete backend from a SQLAlchemy session, engine, or connection.
-    """
+def resolve_backend(bindable: "so.Session | Engine | Connection", **kwargs) -> DatabaseBackend:
+    """Resolve a concrete backend from a SQLAlchemy session, engine, or connection."""
     dialect = _dialect(bindable)
-    for backend_type in _BACKEND_TYPES:
-        backend = backend_type()
-        if backend.supports_dialect(dialect):
-            return backend
-    raise NotImplementedError(f"No backend registered for dialect '{dialect.value}'")
+    try:
+        return _BACKEND_TYPES[dialect](**kwargs)
+    except KeyError:
+        raise NotImplementedError(f"No backend registered for dialect '{dialect.value}'")
