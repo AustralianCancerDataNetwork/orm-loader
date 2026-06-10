@@ -87,7 +87,7 @@ class CSVTableProtocol(ORMTableProtocol, Protocol):
         merge_strategy: str = "replace",
         quote_mode: str = "csv",
         index_strategy: str = "auto",
-        merge_batch_size: int = 1_000_000,
+        merge_batch_size: int | None = None,
     ) -> int: ...
 
     @classmethod
@@ -102,7 +102,7 @@ class CSVTableProtocol(ORMTableProtocol, Protocol):
         session: so.Session,
         merge_strategy: str = "replace",
         *,
-        merge_batch_size: int = 1_000_000,
+        merge_batch_size: int | None = None,
     ) -> None: ...
 
     @classmethod

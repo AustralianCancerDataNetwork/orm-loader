@@ -182,7 +182,7 @@ class DatabaseBackend(ABC):
         staging_name: str,
         pk_cols: list[str],
         *,
-        merge_batch_size: int = 1_000_000,
+        merge_batch_size: int | None = None,
     ) -> None:
         """Merge staging rows by replacing matching target rows first."""
 
@@ -195,7 +195,7 @@ class DatabaseBackend(ABC):
         staging_name: str,
         pk_cols: list[str],
         *,
-        merge_batch_size: int = 1_000_000,
+        merge_batch_size: int | None = None,
     ) -> None:
         """Merge staging rows using backend-specific upsert semantics."""
 
@@ -207,7 +207,7 @@ class DatabaseBackend(ABC):
         target_name: str,
         staging_name: str,
         *,
-        merge_batch_size: int = 1_000_000,
+        merge_batch_size: int | None = None,
     ) -> None:
         """Insert all staging rows into the target table."""
 

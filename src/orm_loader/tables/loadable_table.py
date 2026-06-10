@@ -358,7 +358,7 @@ class CSVLoadableTableInterface(ORMTableBase):
         merge_strategy: str = "replace",
         quote_mode: str = "auto",
         index_strategy: str = "auto",
-        merge_batch_size: int = 1_000_000,
+        merge_batch_size: int | None = None,
     ) -> int:
         
         """
@@ -483,7 +483,7 @@ class CSVLoadableTableInterface(ORMTableBase):
         session: so.Session,
         merge_strategy: str = "replace",
         *,
-        merge_batch_size: int = 1_000_000,
+        merge_batch_size: int | None = None,
     ):
         """
         Merge data from the staging table into the target table.

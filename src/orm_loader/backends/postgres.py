@@ -134,15 +134,21 @@ class PostgresBackend(DatabaseBackend):
         staging_name: str,
         pk_cols: list[str],
         *,
-        merge_batch_size: int = 1_000_000,
+        merge_batch_size: int | None = None,
     ) -> None:
         pk_join = " AND ".join(f't."{c}" = s."{c}"' for c in pk_cols)
-        total = session.execute(sa.text(f'SELECT COUNT(*) FROM "{staging_name}"')).scalar_one()
 
+        non_paginated_replace = sa.text(
+            f'DELETE FROM "{target_name}" t USING "{staging_name}" s WHERE {pk_join}'
+        )
+
+        if merge_batch_size is None:
+            session.execute(non_paginated_replace)
+            return
+
+        total = session.execute(sa.text(f'SELECT COUNT(*) FROM "{staging_name}"')).scalar_one()
         if total <= merge_batch_size:
-            session.execute(sa.text(
-                f'DELETE FROM "{target_name}" t USING "{staging_name}" s WHERE {pk_join}'
-            ))
+            session.execute(non_paginated_replace)
             return
 
         session.execute(sa.text(f'CREATE INDEX ON "{staging_name}" (_rownum)'))
@@ -169,19 +175,25 @@ class PostgresBackend(DatabaseBackend):
         staging_name: str,
         pk_cols: list[str],
         *,
-        merge_batch_size: int = 1_000_000,
+        merge_batch_size: int | None = None,
     ) -> None:
         insertable_cols = self._insertable_column_names(table_cls)
         cols_str = ", ".join(f'"{c}"' for c in insertable_cols)
         conflict_cols = ", ".join(f'"{c}"' for c in pk_cols)
-        total = session.execute(sa.text(f'SELECT COUNT(*) FROM "{staging_name}"')).scalar_one()
 
+        non_paginated_upsert = sa.text(
+            f'INSERT INTO "{target_name}" ({cols_str})'
+            f' SELECT {cols_str} FROM "{staging_name}"'
+            f' ON CONFLICT ({conflict_cols}) DO NOTHING'
+        )
+
+        if merge_batch_size is None:
+            session.execute(non_paginated_upsert)
+            return
+
+        total = session.execute(sa.text(f'SELECT COUNT(*) FROM "{staging_name}"')).scalar_one()
         if total <= merge_batch_size:
-            session.execute(sa.text(
-                f'INSERT INTO "{target_name}" ({cols_str})'
-                f' SELECT {cols_str} FROM "{staging_name}"'
-                f' ON CONFLICT ({conflict_cols}) DO NOTHING'
-            ))
+            session.execute(non_paginated_upsert)
             return
 
         session.execute(sa.text(f'CREATE INDEX ON "{staging_name}" (_rownum)'))
@@ -209,21 +221,26 @@ class PostgresBackend(DatabaseBackend):
         target_name: str,
         staging_name: str,
         *,
-        merge_batch_size: int = 1_000_000,
+        merge_batch_size: int | None = None,
     ) -> None:
         insertable_cols = self._insertable_column_names(table_cls)
         cols_str = ", ".join(f'"{c}"' for c in insertable_cols)
 
-        total = session.execute(sa.text(f'SELECT COUNT(*) FROM "{staging_name}"')).scalar_one()
+        non_paginated_insert = sa.text(
+            f'INSERT INTO "{target_name}" ({cols_str})'
+            f' SELECT {cols_str} FROM "{staging_name}"'
+        )
 
-        if total <= merge_batch_size:
-            session.execute(sa.text(
-                f'INSERT INTO "{target_name}" ({cols_str})'
-                f' SELECT {cols_str} FROM "{staging_name}"'
-            ))
+        if merge_batch_size is None:
+            session.execute(non_paginated_insert)
             return
 
-        # Large table: index _rownum for O(N log N) range pagination then
+        total = session.execute(sa.text(f'SELECT COUNT(*) FROM "{staging_name}"')).scalar_one()
+        if total <= merge_batch_size:
+            session.execute(non_paginated_insert)
+            return
+
+        # Paginated path: index _rownum for O(N log N) range scans then
         # INSERT in batch-sized transactions to bound WAL per commit.
         # session_replication_role='replica' is session-level and persists
         # across commits, so FK checks stay disabled for all batches.
