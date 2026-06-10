@@ -14,7 +14,7 @@ SENSITIVE_KEYS = {
     "uri",
     "url",
 }
-LOGGING_NAMESPACE = "sql_loader"
+LOGGING_NAMESPACE = "orm_loader"
 
 
 def _coerce_log_level(level: int | str) -> int:
@@ -39,8 +39,8 @@ def get_logger(name: Optional[str] = None) -> logging.Logger:
     Return a namespaced logger.
 
     Examples:
-        get_logger() -> sql_loader
-        get_logger("loadable_table") -> sql_loader.loadable_table
+        get_logger() -> orm_loader
+        get_logger("loadable_table") -> orm_loader.loadable_table
     """
     full_name = LOGGING_NAMESPACE if name is None else f"{LOGGING_NAMESPACE}.{name}"
     return logging.getLogger(full_name)
