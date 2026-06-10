@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "chardet>=5.2.0",
+    #"oa-configurator",
     "pandas>=2.3.3",
     "pyarrow>=23.0.0",
     "sqlalchemy>=2.0.45",
@@ -52,6 +53,9 @@ dev = [
     "Pygments>=2.20.0",
     "python-dotenv"
 ]
+
+[project.entry-points."omop.config"]
+orm_loader = "orm_loader.config:OrmLoaderConfig"
 
 [tool.setuptools]
 packages = ["orm_loader"]

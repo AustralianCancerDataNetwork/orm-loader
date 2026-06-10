@@ -1,5 +1,4 @@
 from .errors import IngestError, ValidationError
-from .logging import get_logger, configure_logging
 from .bootstrap import bootstrap, create_db
 from .sqlite import (
     attach_sqlite_bulk_load_pragmas,
@@ -14,8 +13,6 @@ from .null_handlers import normalise_null
 __all__ = [
     "IngestError",
     "ValidationError",
-    "get_logger",
-    "configure_logging",
     "bootstrap",
     "create_db",
     "attach_sqlite_bulk_load_pragmas",

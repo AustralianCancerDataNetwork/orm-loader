@@ -1,11 +1,11 @@
+import logging
 from contextlib import contextmanager
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 from typing import Iterator
 from ..backends.resolve import resolve_backend
-from .logging import get_logger
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 def disable_fk_check(session: Session) -> str | int:
     """Disable foreign-key checks for the current session and return the previous state."""
