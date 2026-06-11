@@ -70,6 +70,8 @@ class FakeBackend(DatabaseBackend):
         target_name: str,
         staging_name: str,
         pk_cols: list[str],
+        *,
+        merge_batch_size: int | None = None,
     ) -> None:
         return None
 
@@ -80,6 +82,8 @@ class FakeBackend(DatabaseBackend):
         target_name: str,
         staging_name: str,
         pk_cols: list[str],
+        *,
+        merge_batch_size: int | None = None,
     ) -> None:
         return None
 
@@ -89,6 +93,8 @@ class FakeBackend(DatabaseBackend):
         session: so.Session,
         target_name: str,
         staging_name: str,
+        *,
+        merge_batch_size: int | None = None,
     ) -> None:
         return None
 
