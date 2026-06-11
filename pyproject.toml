@@ -74,9 +74,6 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-ra"
-markers = [
-    "postgres: requires a running Postgres instance (set TEST_POSTGRES_URL)",
-]
 
 [tool.pyright]
 reportMissingTypeStubs = false
