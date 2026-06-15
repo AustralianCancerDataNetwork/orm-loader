@@ -151,7 +151,7 @@ class PostgresBackend(DatabaseBackend):
             session.execute(non_paginated_replace)
             return
 
-        session.execute(sa.text(f'CREATE INDEX ON "{staging_name}" (_rownum)'))
+        session.execute(sa.text(f'CREATE INDEX IF NOT EXISTS "{staging_name}_rownum_idx" ON "{staging_name}" (_rownum)'))
         session.commit()
 
         start = 0
@@ -196,7 +196,7 @@ class PostgresBackend(DatabaseBackend):
             session.execute(non_paginated_upsert)
             return
 
-        session.execute(sa.text(f'CREATE INDEX ON "{staging_name}" (_rownum)'))
+        session.execute(sa.text(f'CREATE INDEX IF NOT EXISTS "{staging_name}_rownum_idx" ON "{staging_name}" (_rownum)'))
         session.commit()
 
         start = 0
@@ -244,7 +244,7 @@ class PostgresBackend(DatabaseBackend):
         # INSERT in batch-sized transactions to bound WAL per commit.
         # session_replication_role='replica' is session-level and persists
         # across commits, so FK checks stay disabled for all batches.
-        session.execute(sa.text(f'CREATE INDEX ON "{staging_name}" (_rownum)'))
+        session.execute(sa.text(f'CREATE INDEX IF NOT EXISTS "{staging_name}_rownum_idx" ON "{staging_name}" (_rownum)'))
         session.commit()
 
         start = 0

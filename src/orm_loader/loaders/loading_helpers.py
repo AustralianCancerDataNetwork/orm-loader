@@ -272,6 +272,8 @@ def quick_load_pg(
     with open(path, "rb") as _f_peek:
         _raw_hdr = _f_peek.readline().decode(encoding)
     _nl = check_line_ending(_raw_hdr)
+    # _hash is an internal convention for encrypted/hashed columns; strip it so
+    # CSV headers map to the base column names that PostgreSQL COPY expects.
     _csv_cols = [c.strip().lower().replace('_hash', '') for c in _raw_hdr.rstrip(_nl).split(delimiter)]
     _cols_sql = ", ".join(f'"{c}"' for c in _csv_cols)
 
