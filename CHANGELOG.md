@@ -1,3 +1,9 @@
+# 0.5.0
+- paginated merge support via optional `merge_batch_size` parameter to bound memory per transaction on large datasets
+- more efficient backend resolving
+- logging namespace updated to reflect package name
+- Python 3.13 support (updated oa-configurator dependency)
+
 ## 0.1.0
 - initial commit
 - stripped out generalisable functionality from omop-alchemy so that it could be reused in multiple clinical data models

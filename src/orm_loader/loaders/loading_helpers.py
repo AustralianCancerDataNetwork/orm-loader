@@ -266,15 +266,26 @@ def quick_load_pg(
     else:
         raise ValueError(f"Unknown quote_mode: {quote_mode}")
     
+    # Peek at the CSV header to build an explicit column list for COPY.
+    # Without this, PostgreSQL expects ALL table columns including internal staging
+    # columns like _rownum (GENERATED ALWAYS AS IDENTITY), which the CSV doesn't have.
+    with open(path, "rb") as _f_peek:
+        _raw_hdr = _f_peek.readline().decode(encoding)
+    _nl = check_line_ending(_raw_hdr)
+    # _hash is an internal convention for encrypted/hashed columns; strip it so
+    # CSV headers map to the base column names that PostgreSQL COPY expects.
+    _csv_cols = [c.strip().lower().replace('_hash', '') for c in _raw_hdr.rstrip(_nl).split(delimiter)]
+    _cols_sql = ", ".join(f'"{c}"' for c in _csv_cols)
+
     logger.info(f"Bulk loading {tablename} via COPY (encoding={encoding}, delimiter={delimiter})")
-    
+
     cur = raw_conn.cursor()
     try:
         with open(path, "rb") as f:
             stream = NormalisedCSVStream(f, encoding=encoding, delimiter=delimiter)
             with cur.copy(
                 f'''
-                COPY "{tablename}"
+                COPY "{tablename}" ({_cols_sql})
                 FROM STDIN
                 WITH (
                     {copy_options}

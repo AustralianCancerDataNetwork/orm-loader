@@ -30,7 +30,7 @@ class _FakeSession:
         self.scalar_result = scalar_result
         self.commits = 0
 
-    def execute(self, statement):
+    def execute(self, statement, parameters=None):
         if hasattr(statement, "compile"):
             sql = str(statement.compile(dialect=postgresql.dialect()))
         else:
@@ -42,6 +42,9 @@ class _FakeSession:
                 self._value = value
 
             def scalar(self):
+                return self._value
+
+            def scalar_one(self):
                 return self._value
 
         return _Result(self.scalar_result)
@@ -115,10 +118,11 @@ def test_postgres_backend_fk_methods_emit_expected_sql():
 
 def test_postgres_backend_merge_replace_uses_using_delete():
     backend = PostgresBackend()
-    session = _FakeSession()
+    session = _FakeSession(scalar_result=0)
 
     backend.merge_replace(_ComputedTableCls, _sess(session), "target_table", "_staging_target_table", ["id", "name"])
 
+    # No merge_batch_size → non-paginated path → single DELETE statement at index 0
     sql = session.statements[0]
     assert 'DELETE FROM "target_table" t' in sql
     assert 'USING "_staging_target_table" s' in sql
@@ -127,10 +131,11 @@ def test_postgres_backend_merge_replace_uses_using_delete():
 
 def test_postgres_backend_merge_insert_excludes_computed_columns():
     backend = PostgresBackend()
-    session = _FakeSession()
+    session = _FakeSession(scalar_result=0)
 
     backend.merge_insert(_ComputedTableCls, _sess(session), "target_table", "_staging_target_table")
 
+    # No merge_batch_size → non-paginated path → single INSERT statement at index 0
     sql = session.statements[0]
     assert 'INSERT INTO "target_table" ("id", "name")' in sql
     assert 'SELECT "id", "name" FROM "_staging_target_table"' in sql
@@ -138,13 +143,59 @@ def test_postgres_backend_merge_insert_excludes_computed_columns():
 
 def test_postgres_backend_merge_upsert_excludes_computed_columns():
     backend = PostgresBackend()
-    session = _FakeSession()
+    session = _FakeSession(scalar_result=0)
 
     backend.merge_upsert(_ComputedTableCls, _sess(session), "target_table", "_staging_target_table", ["id"])
 
+    # No merge_batch_size → non-paginated path → single INSERT statement at index 0
     sql = session.statements[0]
     assert 'INSERT INTO "target_table" ("id", "name")' in sql
     assert 'ON CONFLICT ("id") DO NOTHING' in sql
+
+
+def test_postgres_backend_merge_replace_paginated_path():
+    backend = PostgresBackend()
+    session = _FakeSession(scalar_result=10)
+
+    backend.merge_replace(
+        _ComputedTableCls, _sess(session), "target_table", "_staging_target_table",
+        ["id", "name"], merge_batch_size=3,
+    )
+
+    sqls = session.statements
+    assert any("CREATE INDEX IF NOT EXISTS" in s and "_rownum" in s for s in sqls)
+    assert any("_rownum >" in s and "DELETE" in s for s in sqls)
+    assert session.commits >= 4  # 1 for index + 4 batches (ceil(10/3))
+
+
+def test_postgres_backend_merge_insert_paginated_path():
+    backend = PostgresBackend()
+    session = _FakeSession(scalar_result=10)
+
+    backend.merge_insert(
+        _ComputedTableCls, _sess(session), "target_table", "_staging_target_table",
+        merge_batch_size=3,
+    )
+
+    sqls = session.statements
+    assert any("CREATE INDEX IF NOT EXISTS" in s and "_rownum" in s for s in sqls)
+    assert any("_rownum >" in s and "INSERT" in s for s in sqls)
+    assert session.commits >= 4
+
+
+def test_postgres_backend_merge_upsert_paginated_path():
+    backend = PostgresBackend()
+    session = _FakeSession(scalar_result=10)
+
+    backend.merge_upsert(
+        _ComputedTableCls, _sess(session), "target_table", "_staging_target_table",
+        ["id"], merge_batch_size=3,
+    )
+
+    sqls = session.statements
+    assert any("CREATE INDEX IF NOT EXISTS" in s and "_rownum" in s for s in sqls)
+    assert any("_rownum >" in s and "INSERT" in s for s in sqls)
+    assert session.commits >= 4
 
 
 def test_postgres_backend_materialized_view_methods_emit_expected_sql():

@@ -98,7 +98,7 @@ class PandasLoader(LoaderInterface):
         if required_cols:
             null_mask = df[required_cols].isna()
             for col in required_cols:
-                null_count = int(null_mask[col].sum())
+                null_count = int(null_mask[col].sum())  # type: ignore[arg-type]
                 if null_count > 0:
                     logger.warning(
                         "Found %d rows with unexpected nulls in %s.%s",
