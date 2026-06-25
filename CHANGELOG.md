@@ -125,3 +125,9 @@
 # 0.4.1
 - improved loader logging
 - skip merge step if table empty
+
+## 0.5.0
+- oa-config update
+
+## 0.5.1 
+- tighten version pinning for oa-config
