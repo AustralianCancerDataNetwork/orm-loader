@@ -653,7 +653,7 @@ wheels = [
 
 [[package]]
 name = "oa-configurator"
-version = "0.1.1"
+version = "0.1.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
@@ -663,9 +663,9 @@ dependencies = [
     { name = "tomli-w" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/0d/7b/1c3aa611b6a4b0441314e3f8fbbf66e4a6dd3377ff039b434d6e69d6a52f/oa_configurator-0.1.1.tar.gz", hash = "sha256:888608c265799e670097bbb5d967460449c51e03dabe97176ad8443d992ce3e6", size = 123250, upload-time = "2026-06-15T06:05:57.8Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/7c/9a/9c2f0fc040acc0c55da2b46caf9300cd28b889195b6b51b6e7cb28f080f9/oa_configurator-0.1.2.tar.gz", hash = "sha256:03980414e02fe2d31a62d2e96fc5dca9752fb5958eec8cc72d9798ea922e05b5", size = 127812, upload-time = "2026-06-24T22:46:01.017Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c9/87/7437b6dce109f7c84267ec1b87bd1897bb983ba0dcc4d5fba82b28d2bc20/oa_configurator-0.1.1-py3-none-any.whl", hash = "sha256:2b63a87c6d242b6e49b219d61bbacf664454beb1755e8747cdff910611633747", size = 30088, upload-time = "2026-06-15T06:05:58.632Z" },
+    { url = "https://files.pythonhosted.org/packages/5d/16/617057decd5e309a2ff2667c68b8ac2662e3998550339f64dde22e1c4536/oa_configurator-0.1.2-py3-none-any.whl", hash = "sha256:e2d2643e5d32bd64c904e55ec22ba11a978b244f3c18349a769ff4a8cdf5b24d", size = 34855, upload-time = "2026-06-24T22:46:00.082Z" },
 ]
 
 [package.optional-dependencies]
@@ -711,8 +711,8 @@ requires-dist = [
     { name = "mkdocs-mermaid2-plugin", marker = "extra == 'dev'" },
     { name = "mkdocstrings-python", marker = "extra == 'dev'", specifier = ">=2.0.1" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.19.1" },
-    { name = "oa-configurator", specifier = ">=0.1.1" },
-    { name = "oa-configurator", extras = ["postgres"], marker = "extra == 'dev'", specifier = ">=0.1.1" },
+    { name = "oa-configurator", specifier = "==0.1.2" },
+    { name = "oa-configurator", extras = ["postgres"], marker = "extra == 'dev'", specifier = "==0.1.2" },
     { name = "pandas", specifier = ">=2.3.3" },
     { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.2" },
     { name = "pyarrow", specifier = ">=23.0.0" },

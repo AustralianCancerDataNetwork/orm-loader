@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from oa_configurator import PackageConfigBase, ResourceSpec
+from oa_configurator import DatabaseConfig, PackageConfigBase, ResourceSpec
 
 
 class OrmLoaderConfig(PackageConfigBase):
@@ -24,15 +24,14 @@ class OrmLoaderConfig(PackageConfigBase):
         connection_name_hint="pg_test_orm",
         is_cdm_database=False,
         cdm_schema_default="public",
-        defaults={
-            "dialect": "postgresql+psycopg",
-            "host": "localhost",
-            "port": "55432",
-            "user": "test",
-            "password": "test",
-            "database_name": "test",
-            "cdm_schema": "public",
-        },
+        connection_defaults=DatabaseConfig(
+            dialect="postgresql+psycopg",
+            host="localhost",
+            port=55432,
+            user="test",
+            password="test",
+            database_name="test",
+        ),
     )
 
     tool_name: ClassVar[str] = "orm_loader"
