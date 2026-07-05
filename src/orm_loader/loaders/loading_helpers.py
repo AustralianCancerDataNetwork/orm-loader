@@ -168,10 +168,10 @@ def resolve_quote_mode(
       guess wrong when the discriminating rows fall outside the sample.
     - ``"by_delimiter"`` — derive the mode from the delimiter alone, no content
       scan: tab-delimited input never embeds the delimiter in a field so any
-      double-quote is literal data (``"literal"``); comma-delimited input must
-      wrap fields containing the delimiter in quotes so quoting is meaningful
-      (``"csv"``). Deterministic and immune to the sampling gamble; use it when
-      the source guarantees tab fields never contain embedded tabs/newlines.
+      double-quote is literal data (``"literal"``); for non-tab delimiters this
+      resolves to ``"csv"`` where RFC-4180 quoting can be meaningful. Deterministic
+      and immune to the sampling gamble; use it when the source guarantees tab
+      fields never contain embedded tabs/newlines.
     """
     if quote_mode in ("csv", "literal"):
         return quote_mode
