@@ -1,5 +1,14 @@
+from pathlib import Path
+
+import pytest
+
 from orm_loader.loaders.data_classes import ColumnCastingStats, TableCastingStats
-from orm_loader.loaders.loading_helpers import infer_delim, infer_encoding, infer_quote_mode
+from orm_loader.loaders.loading_helpers import (
+    infer_delim,
+    infer_encoding,
+    infer_quote_mode,
+    resolve_quote_mode,
+)
 
 def test_column_casting_stats_records_examples():
     stats = ColumnCastingStats()
@@ -67,3 +76,48 @@ def test_infer_quote_mode_unbalanced_quote_returns_literal(tmp_path):
     p = tmp_path / "x.csv"
     p.write_text('id\tname\n1\t"open\n2\t"open\n3\t"open\n')
     assert infer_quote_mode(p, delimiter="\t") == "literal"
+
+
+# ---------------------------------------------------------------------------
+# resolve_quote_mode
+# ---------------------------------------------------------------------------
+
+def test_resolve_quote_mode_explicit_csv_passthrough():
+    # Explicit modes are returned unchanged and never read the file
+    assert resolve_quote_mode("csv", Path("does-not-exist.csv"), ",") == "csv"
+
+
+def test_resolve_quote_mode_explicit_literal_passthrough():
+    assert resolve_quote_mode("literal", Path("does-not-exist.csv"), "\t") == "literal"
+
+
+def test_resolve_quote_mode_by_delimiter_tab_is_literal():
+    # Tab-delimited input never embeds the delimiter in a field, so any
+    # double-quote is literal data — derived from the delimiter, no file scan
+    assert resolve_quote_mode("by_delimiter", Path("does-not-exist.tsv"), "\t") == "literal"
+
+
+def test_resolve_quote_mode_by_delimiter_comma_is_csv():
+    # Comma-delimited input must wrap fields containing the delimiter in quotes,
+    # so quoting is meaningful
+    assert resolve_quote_mode("by_delimiter", Path("does-not-exist.csv"), ",") == "csv"
+
+
+def test_resolve_quote_mode_auto_delegates_to_infer(tmp_path):
+    # "auto" defers to the content sniff: an unbalanced leading quote is only
+    # consistent under literal parsing
+    p = tmp_path / "x.csv"
+    p.write_text('id\tname\n1\t"open\n2\t"open\n3\t"open\n')
+    assert resolve_quote_mode("auto", p, delimiter="\t") == "literal"
+
+
+def test_resolve_quote_mode_auto_clean_file_returns_csv(tmp_path):
+    # No quotes anywhere: the sniff falls back to the csv default
+    p = tmp_path / "x.csv"
+    p.write_text("id\tname\n1\tAlice\n2\tBob\n")
+    assert resolve_quote_mode("auto", p, delimiter="\t") == "csv"
+
+
+def test_resolve_quote_mode_unknown_raises(tmp_path):
+    with pytest.raises(ValueError, match="Unknown quote_mode"):
+        resolve_quote_mode("bogus", tmp_path / "x.csv", ",")
