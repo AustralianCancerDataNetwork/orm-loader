@@ -131,3 +131,6 @@
 
 ## 0.5.1 
 - tighten version pinning for oa-config
+
+## 0.5.2
+- changes to quote handling in tab delim files
