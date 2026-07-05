@@ -95,7 +95,7 @@ def infer_quote_mode(
     path: Path,
     delimiter: str,
     encoding: str = "utf-8",
-    sample_rows: int = 200,
+    sample_rows: int = 2000,
 ) -> str:
     """Return 'csv' or 'literal' by comparing column-count consistency under both
     quoting interpretations across a sample of rows.
@@ -149,6 +149,38 @@ def infer_quote_mode(
 
     # Prefer csv on a tie; only choose literal when it is strictly more consistent
     return "literal" if lit_ok > csv_ok else "csv"
+
+
+def resolve_quote_mode(
+    quote_mode: str,
+    path: Path,
+    delimiter: str,
+    encoding: str = "utf-8",
+) -> str:
+    """Resolve a requested quote_mode to a concrete ``"csv"`` or ``"literal"``.
+
+    Recognised inputs:
+
+    - ``"csv"`` / ``"literal"`` — returned unchanged (explicit override).
+    - ``"auto"`` — legacy content sniff via :func:`infer_quote_mode`. Compares
+      column-count consistency under both interpretations across a sample of
+      rows. Supports RFC-4180 quoting (embedded delimiters/newlines) but can
+      guess wrong when the discriminating rows fall outside the sample.
+    - ``"by_delimiter"`` — derive the mode from the delimiter alone, no content
+      scan: tab-delimited input never embeds the delimiter in a field so any
+      double-quote is literal data (``"literal"``); comma-delimited input must
+      wrap fields containing the delimiter in quotes so quoting is meaningful
+      (``"csv"``). Deterministic and immune to the sampling gamble; use it when
+      the source guarantees tab fields never contain embedded tabs/newlines.
+    """
+    if quote_mode in ("csv", "literal"):
+        return quote_mode
+    if quote_mode == "by_delimiter":
+        return "literal" if delimiter == "\t" else "csv"
+    if quote_mode == "auto":
+        return infer_quote_mode(path, delimiter=delimiter, encoding=encoding)
+    raise ValueError(f"Unknown quote_mode: {quote_mode!r}")
+
 
 def arrow_drop_duplicates(
     table: pa.Table,
@@ -244,9 +276,8 @@ def quick_load_pg(
     if not _SAFE_ENCODING.match(encoding):
         raise ValueError(f"Unsafe encoding value from chardet: {encoding!r}")
     delimiter = infer_delim(path)
-    if quote_mode == "auto":
-        quote_mode = infer_quote_mode(path, delimiter=delimiter, encoding=encoding)
-        logger.info(f"Auto-detected quote_mode={quote_mode!r} for {path.name}")
+    quote_mode = resolve_quote_mode(quote_mode, path, delimiter, encoding)
+    logger.info(f"Using quote_mode={quote_mode!r} for {path.name} (delimiter={delimiter!r})")
     if quote_mode == "csv":
         copy_options = f"""
             FORMAT csv,
