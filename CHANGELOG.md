@@ -1,3 +1,6 @@
+> [!NOTE]
+> This file is no longer maintained. Release history from this point forward is in [GitHub Releases](https://github.com/AustralianCancerDataNetwork/orm-loader/releases).
+
 # 0.5.0
 - paginated merge support via optional `merge_batch_size` parameter to bound memory per transaction on large datasets
 - more efficient backend resolving

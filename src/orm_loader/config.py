@@ -22,8 +22,6 @@ class OrmLoaderConfig(PackageConfigBase):
         display_name="ORM Loader Test Database",
         description="PostgreSQL database for running orm-loader integration tests.",
         connection_name_hint="pg_test_orm",
-        is_cdm_database=False,
-        cdm_schema_default="public",
         connection_defaults=DatabaseConfig(
             dialect="postgresql+psycopg",
             host="localhost",
