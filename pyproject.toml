@@ -11,7 +11,7 @@ dependencies = [
     "chardet>=5.2.0",
     "oa-configurator==0.1.2",
     "pandas>=2.3.3",
-    "pyarrow>=23.0.0",
+    "pyarrow>=23.0.1",
     "sqlalchemy>=2.0.45",
 ]
 

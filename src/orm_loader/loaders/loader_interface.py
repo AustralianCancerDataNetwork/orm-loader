@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import Any
+import csv as _csv
 import pandas as pd
 import logging
 import pyarrow as pa
@@ -7,7 +8,7 @@ import pyarrow.dataset as ds
 import pyarrow.compute as pc
 from functools import reduce
 from .data_classes import LoaderContext, TableCastingStats, LoaderInterface
-from .loading_helpers import infer_delim, infer_encoding, conservative_load_parquet, arrow_drop_duplicates
+from .loading_helpers import infer_delim, infer_encoding, conservative_load_parquet, arrow_drop_duplicates, resolve_quote_mode
 from .data import perform_cast, cast_arrow_column
 
 logger = logging.getLogger(__name__)
@@ -126,6 +127,14 @@ class PandasLoader(LoaderInterface):
         delimiter = infer_delim(ctx.path)
         encoding = infer_encoding(ctx.path)['encoding']
 
+        # Resolve to the same concrete mode the COPY fast-path would use, so a
+        # file that falls back here is parsed identically. Without this the
+        # fallback ignored quote_mode entirely and applied RFC-4180 quoting
+        # unconditionally — re-breaking on the stray quotes that pushed a
+        # literal-mode file off the fast-path.
+        quote_mode = resolve_quote_mode(ctx.quote_mode, ctx.path, delimiter, encoding or "utf-8")
+        quoting = _csv.QUOTE_NONE if quote_mode == "literal" else _csv.QUOTE_MINIMAL
+
         try:
             reader = pd.read_csv(
                 ctx.path,
@@ -133,6 +142,7 @@ class PandasLoader(LoaderInterface):
                 dtype=str,
                 chunksize=ctx.chunksize,
                 encoding=encoding,
+                quoting=quoting,
             )
         except pd.errors.EmptyDataError:
             logger.info(f"File {ctx.path.name} is empty — skipping load for {ctx.tableclass.__tablename__}")
