@@ -60,11 +60,6 @@ class CSVTableProtocol(ORMTableProtocol, Protocol):
     No assumptions are made about the underlying database or schema.
     """
 
-    _staging_tablename: ClassVar[Optional[str]] = None
-
-    @classmethod
-    def staging_tablename(cls) -> str: ...
-
     @classmethod
     def _select_loader(cls, path: Path) -> "LoaderInterface": ...
 

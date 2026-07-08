@@ -13,10 +13,14 @@ from orm_loader.helpers.sqlite import attach_sqlite_bulk_load_pragmas
 if TYPE_CHECKING:
     from orm_loader.tables.typing import CSVTableProtocol
 
+_TARGET_TABLE = "target_table"
+_STAGING_TABLE = f"_staging_{_TARGET_TABLE}"
+
 
 class _ComputedTable:
+    __tablename__ = _TARGET_TABLE
     __table__ = sa.Table(
-        "target_table",
+        _TARGET_TABLE,
         sa.MetaData(),
         sa.Column("id", sa.Integer, primary_key=True),
         sa.Column("name", sa.String),
@@ -66,10 +70,10 @@ def test_sqlite_backend_identity_and_capabilities():
 def test_sqlite_backend_create_staging_table(session, engine):
     backend = SQLiteBackend()
 
-    backend.create_staging_table(_ComputedTableCls, session, "_staging_target_table")
+    backend.create_staging_table(_ComputedTableCls, session)
     inspector = sa.inspect(engine)
-    assert inspector.has_table("_staging_target_table") is True
-    cols = inspector.get_columns("_staging_target_table")
+    assert inspector.has_table(_STAGING_TABLE) is True
+    cols = inspector.get_columns(_STAGING_TABLE)
     assert [c["name"] for c in cols] == ["id", "name", "slug"]
     assert all(c["nullable"] is True for c in cols)
 
@@ -78,9 +82,10 @@ def test_sqlite_backend_drop_staging_table():
     backend = SQLiteBackend()
     session = _FakeSession()
 
-    backend.drop_staging_table(_sess(session), "_staging_target_table")
+    backend.drop_staging_table(_ComputedTableCls, _sess(session))
 
-    assert session.statements == ['DROP TABLE IF EXISTS "_staging_target_table"']
+    assert session.statements == [f'DROP TABLE IF EXISTS "{_STAGING_TABLE}"']
+
 
 
 def test_sqlite_backend_disable_fk_reads_then_sets():
@@ -154,12 +159,12 @@ def test_sqlite_backend_merge_replace_single_pk():
     session = _FakeSession()
 
     backend.merge_replace(
-        _ComputedTableCls, _sess(session), "target_table", "_staging_target_table", ["id"]
+        _ComputedTableCls, _sess(session), _TARGET_TABLE, ["id"]
     )
 
     sql = session.statements[0]
-    assert 'DELETE FROM "target_table"' in sql
-    assert 'SELECT "id" FROM "_staging_target_table"' in sql
+    assert f'DELETE FROM "{_TARGET_TABLE}"' in sql
+    assert f'SELECT "id" FROM "{_STAGING_TABLE}"' in sql
 
 
 def test_sqlite_backend_merge_replace_composite_pk():
@@ -167,24 +172,24 @@ def test_sqlite_backend_merge_replace_composite_pk():
     session = _FakeSession()
 
     backend.merge_replace(
-        _ComputedTableCls, _sess(session), "target_table", "_staging_target_table", ["id", "name"]
+        _ComputedTableCls, _sess(session), _TARGET_TABLE, ["id", "name"]
     )
 
     sql = session.statements[0]
     assert "WHERE EXISTS (" in sql
-    assert '"target_table"."id" = "_staging_target_table"."id"' in sql
-    assert '"target_table"."name" = "_staging_target_table"."name"' in sql
+    assert f'"{_TARGET_TABLE}"."id" = "{_STAGING_TABLE}"."id"' in sql
+    assert f'"{_TARGET_TABLE}"."name" = "{_STAGING_TABLE}"."name"' in sql
 
 
 def test_sqlite_backend_merge_insert_excludes_computed_columns():
     backend = SQLiteBackend()
     session = _FakeSession()
 
-    backend.merge_insert(_ComputedTableCls, _sess(session), "target_table", "_staging_target_table")
+    backend.merge_insert(_ComputedTableCls, _sess(session), _TARGET_TABLE)
 
     sql = session.statements[0]
-    assert 'INSERT INTO "target_table" ("id", "name")' in sql
-    assert 'SELECT "id", "name" FROM "_staging_target_table"' in sql
+    assert f'INSERT INTO "{_TARGET_TABLE}" ("id", "name")' in sql
+    assert f'SELECT "id", "name" FROM "{_STAGING_TABLE}"' in sql
 
 
 def test_sqlite_backend_merge_upsert_excludes_computed_columns():
@@ -192,11 +197,11 @@ def test_sqlite_backend_merge_upsert_excludes_computed_columns():
     session = _FakeSession()
 
     backend.merge_upsert(
-        _ComputedTableCls, _sess(session), "target_table", "_staging_target_table", ["id"]
+        _ComputedTableCls, _sess(session), _TARGET_TABLE, ["id"]
     )
 
     sql = session.statements[0]
-    assert 'INSERT OR IGNORE INTO "target_table" ("id", "name")' in sql
+    assert f'INSERT OR IGNORE INTO "{_TARGET_TABLE}" ("id", "name")' in sql
 
 
 def test_sqlite_backend_materialized_view_methods_raise(engine):
