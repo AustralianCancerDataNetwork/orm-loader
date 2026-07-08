@@ -132,7 +132,7 @@ def test_postgres_backend_merge_replace_uses_using_delete():
     sql = session.statements[0]
     assert f'DELETE FROM "{_TARGET_TABLE}" t' in sql
     assert f'USING {_STAGING_TABLE_WITH_SCHEMA} s' in sql
-    assert f't."id" = s."id" AND t."name" = s."name"' in sql
+    assert 't."id" = s."id" AND t."name" = s."name"' in sql
     assert f'USING {qualify_identifier(_TARGET_TABLE, STAGING_SCHEMA)}' not in sql
 
 
