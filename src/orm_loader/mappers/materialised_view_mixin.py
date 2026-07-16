@@ -30,7 +30,7 @@ class CreateMaterializedView(DDLElement):
         self.selectable = selectable
 
 @compiler.compiles(CreateMaterializedView)
-def _create_view( # type: ignore
+def _create_view(
     element: CreateMaterializedView, 
     compiler: sa.sql.compiler.SQLCompiler, 
     **kwargs: Any
@@ -296,7 +296,7 @@ def refresh_all_mvs(bind: "sa.engine.Connection | sa.engine.Engine", mv_classes:
         refresh_all_mvs(engine, ALL_MVS)
     ```
     """
-    ordered: list[type[MaterializedViewMixin]] = resolve_mv_refresh_order(mv_classes)
+    ordered: list[type[MaterializedViewMixin]] = resolve_mv_refresh_order(mv_classes)  # ty: ignore[invalid-assignment]
 
     for mv in ordered:
         mv.refresh_mv(bind)

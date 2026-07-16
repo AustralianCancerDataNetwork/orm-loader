@@ -5,7 +5,7 @@ ModelT = TypeVar("ModelT", bound=Base)
 
 def get_model_by_tablename(
     tablename: str,
-    base: type[ModelT] = Base,
+    base: type[ModelT] = Base,  # ty: ignore[invalid-parameter-default]
 ) -> type[ModelT] | None:
     tablename = tablename.lower().strip()
     for mapper in base.registry.mappers:

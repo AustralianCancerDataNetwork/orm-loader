@@ -81,7 +81,7 @@ class CSVLoadableTableInterface(ORMTableBase):
         str
             The staging table name.
         """
-        if cls._staging_tablename:  # type: ignore
+        if cls._staging_tablename:
             return cls._staging_tablename
         return f"_staging_{cls.__tablename__}"
     

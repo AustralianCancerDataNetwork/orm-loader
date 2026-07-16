@@ -51,7 +51,7 @@ postgres = [
 dev = [
     "oa-configurator[postgres]==0.1.2",
     "pytest>=9.0.3",
-    "mypy>=1.19.1",
+    "ty>=0.0.59",
     "ruff>=0.14.11",
     "mkdocs-material>=9.7.1",
     "mkdocstrings-python>=2.0.1",
