@@ -303,7 +303,7 @@ class ModelRegistry:
         model
             ORM-mapped table class.
         """
-        desc = ModelDescriptor.from_model(model)
+        desc = ModelDescriptor.from_model(model)  # ty: ignore[invalid-argument-type]
         self._models[desc.table_name] = desc
 
     def models(self) -> dict[str, ModelDescriptor]:
