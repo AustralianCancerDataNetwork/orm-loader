@@ -246,7 +246,7 @@ class SQLiteBackend(DatabaseBackend):
 
     def install_engine_hooks(self, engine: "Engine") -> None:
         @event.listens_for(engine, "connect")
-        def _enable_sqlite_foreign_keys( # type: ignore
+        def _enable_sqlite_foreign_keys(
             dbapi_connection: sa.engine.interfaces.DBAPIConnection, 
             _connection_record: Any
         ) -> None:

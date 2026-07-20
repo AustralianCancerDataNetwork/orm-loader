@@ -1,29 +1,20 @@
 name: CI
-
 on:
-  push:
-    branches: [main]
   pull_request:
-
+    branches: [main]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
 jobs:
-  ruff:
-    name: ruff
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install ruff
-        run: |
-          python -m pip install --upgrade pip
-          pip install ruff
-
-      - name: Run ruff
-        run: |
-          ruff check src tests
+  label-gate:
+    uses: AustralianCancerDataNetwork/cava-devops/.github/workflows/label-gate.yml@main
+  build-test:
+    uses: AustralianCancerDataNetwork/cava-devops/.github/workflows/build-test-postgres.yml@main
+    with:
+      postgres-db: orm_loader_test
+      setup-commands: |
+        uv run omop-config configure orm_loader \
+          --test-dialect postgresql+psycopg \
+          --test-host localhost \
+          --test-port 5432 \
+          --test-user test \
+          --test-password test \
+          --test-database-name orm_loader_test
