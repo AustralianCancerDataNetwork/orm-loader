@@ -8,7 +8,7 @@ import sqlalchemy.event as sae
 import sqlalchemy.orm as so
 
 from ..loaders.loading_helpers import quick_load_pg
-from .base import BackendCapabilities, DatabaseBackend, Dialect
+from .base import BackendCapabilities, DatabaseBackend, Dialect, STAGING_SCHEMA
 
 if TYPE_CHECKING:
     from sqlalchemy.engine import Connection, Engine
@@ -20,6 +20,13 @@ _VALID_PG_REPLICATION_ROLES = frozenset({"origin", "local", "replica"})
 
 
 class PostgresBackend(DatabaseBackend):
+    def __init__(self, *, staging_schema: str | None = STAGING_SCHEMA) -> None:
+        super().__init__(staging_schema=staging_schema)
+
+    @staticmethod
+    def staging_name_for_table(tablename: str) -> str:
+        return f"_staging_{tablename}"
+
     @property
     def name(self) -> str:
         return "postgres"
@@ -41,14 +48,14 @@ class PostgresBackend(DatabaseBackend):
         self,
         table_cls: type["CSVTableProtocol"],
         session: so.Session,
-        staging_name: str,
     ) -> None:
         table = table_cls.__table__
-        session.execute(sa.text(f'DROP TABLE IF EXISTS "{staging_name}";'))
+        staging_ref = self.qualified_staging_name(table_cls.__tablename__)
+        session.execute(sa.text(f'DROP TABLE IF EXISTS {staging_ref};'))
         session.execute(
             sa.text(
                 f'''
-                CREATE UNLOGGED TABLE "{staging_name}"
+                CREATE UNLOGGED TABLE {staging_ref}
                 (LIKE "{table.name}" INCLUDING DEFAULTS INCLUDING CONSTRAINTS);
                 '''
             )
@@ -56,12 +63,12 @@ class PostgresBackend(DatabaseBackend):
 
         computed_cols = [c.name for c in table.columns if c.computed is not None]
         for col in computed_cols:
-            session.execute(sa.text(f'ALTER TABLE "{staging_name}" DROP COLUMN "{col}";'))
+            session.execute(sa.text(f'ALTER TABLE {staging_ref} DROP COLUMN "{col}";'))
 
-        # allows pagniation in O(N log N) time for large tables in merge_insert without needing to add an index on every staging table
+        # allows pagination in O(N log N) time for large tables in merge_insert without needing to add an index on every staging table
         session.execute(
             sa.text(
-                f'ALTER TABLE "{staging_name}" ADD COLUMN _rownum BIGINT'
+                f'ALTER TABLE {staging_ref} ADD COLUMN _rownum BIGINT'
                 f" GENERATED ALWAYS AS IDENTITY (CACHE 1000);"
             )
         )
@@ -70,20 +77,21 @@ class PostgresBackend(DatabaseBackend):
 
     def drop_staging_table(
         self,
+        table_cls: type["CSVTableProtocol"],
         session: so.Session,
-        staging_name: str,
     ) -> None:
-        session.execute(sa.text(f'DROP TABLE IF EXISTS "{staging_name}"'))
+        session.execute(sa.text(f'DROP TABLE IF EXISTS {self.qualified_staging_name(table_cls.__tablename__)}'))
 
     def load_staging_fast(
         self,
         loader_context: "LoaderContext",
-        staging_name: str,
     ) -> int | None:
+        tablename = loader_context.tableclass.__tablename__
         return quick_load_pg(
             path=loader_context.path,
             session=loader_context.session,
-            tablename=staging_name,
+            tablename=self.staging_name_for_table(tablename),
+            schema=self.staging_schema,
             quote_mode=loader_context.quote_mode,
         )
 
@@ -131,27 +139,28 @@ class PostgresBackend(DatabaseBackend):
         table_cls: type["CSVTableProtocol"],
         session: so.Session,
         target_name: str,
-        staging_name: str,
         pk_cols: list[str],
         *,
         merge_batch_size: int | None = None,
     ) -> None:
+        staging_ref = self.qualified_staging_name(table_cls.__tablename__)
         pk_join = " AND ".join(f't."{c}" = s."{c}"' for c in pk_cols)
 
         non_paginated_replace = sa.text(
-            f'DELETE FROM "{target_name}" t USING "{staging_name}" s WHERE {pk_join}'
+            f'DELETE FROM "{target_name}" t USING {staging_ref} s WHERE {pk_join}'
         )
 
         if merge_batch_size is None:
             session.execute(non_paginated_replace)
             return
 
-        total = session.execute(sa.text(f'SELECT COUNT(*) FROM "{staging_name}"')).scalar_one()
+        total = session.execute(sa.text(f'SELECT COUNT(*) FROM {staging_ref}')).scalar_one()
         if total <= merge_batch_size:
             session.execute(non_paginated_replace)
             return
 
-        session.execute(sa.text(f'CREATE INDEX IF NOT EXISTS "{staging_name}_rownum_idx" ON "{staging_name}" (_rownum)'))
+        staging_name = self.staging_name_for_table(table_cls.__tablename__)
+        session.execute(sa.text(f'CREATE INDEX IF NOT EXISTS "{staging_name}_rownum_idx" ON {staging_ref} (_rownum)'))
         session.commit()
 
         start = 0
@@ -159,7 +168,7 @@ class PostgresBackend(DatabaseBackend):
             end = start + merge_batch_size
             session.execute(
                 sa.text(
-                    f'DELETE FROM "{target_name}" t USING "{staging_name}" s'
+                    f'DELETE FROM "{target_name}" t USING {staging_ref} s'
                     f' WHERE {pk_join} AND s._rownum > :start AND s._rownum <= :end'
                 ),
                 {"start": start, "end": end},
@@ -172,18 +181,18 @@ class PostgresBackend(DatabaseBackend):
         table_cls: type["CSVTableProtocol"],
         session: so.Session,
         target_name: str,
-        staging_name: str,
         pk_cols: list[str],
         *,
         merge_batch_size: int | None = None,
     ) -> None:
+        staging_ref = self.qualified_staging_name(table_cls.__tablename__)
         insertable_cols = self._insertable_column_names(table_cls)
         cols_str = ", ".join(f'"{c}"' for c in insertable_cols)
         conflict_cols = ", ".join(f'"{c}"' for c in pk_cols)
 
         non_paginated_upsert = sa.text(
             f'INSERT INTO "{target_name}" ({cols_str})'
-            f' SELECT {cols_str} FROM "{staging_name}"'
+            f' SELECT {cols_str} FROM {staging_ref}'
             f' ON CONFLICT ({conflict_cols}) DO NOTHING'
         )
 
@@ -191,12 +200,13 @@ class PostgresBackend(DatabaseBackend):
             session.execute(non_paginated_upsert)
             return
 
-        total = session.execute(sa.text(f'SELECT COUNT(*) FROM "{staging_name}"')).scalar_one()
+        total = session.execute(sa.text(f'SELECT COUNT(*) FROM {staging_ref}')).scalar_one()
         if total <= merge_batch_size:
             session.execute(non_paginated_upsert)
             return
 
-        session.execute(sa.text(f'CREATE INDEX IF NOT EXISTS "{staging_name}_rownum_idx" ON "{staging_name}" (_rownum)'))
+        staging_name = self.staging_name_for_table(table_cls.__tablename__)
+        session.execute(sa.text(f'CREATE INDEX IF NOT EXISTS "{staging_name}_rownum_idx" ON {staging_ref} (_rownum)'))
         session.commit()
 
         start = 0
@@ -205,7 +215,7 @@ class PostgresBackend(DatabaseBackend):
             session.execute(
                 sa.text(
                     f'INSERT INTO "{target_name}" ({cols_str})'
-                    f' SELECT {cols_str} FROM "{staging_name}"'
+                    f' SELECT {cols_str} FROM {staging_ref}'
                     f' WHERE _rownum > :start AND _rownum <= :end'
                     f' ON CONFLICT ({conflict_cols}) DO NOTHING'
                 ),
@@ -219,23 +229,23 @@ class PostgresBackend(DatabaseBackend):
         table_cls: type["CSVTableProtocol"],
         session: so.Session,
         target_name: str,
-        staging_name: str,
         *,
         merge_batch_size: int | None = None,
     ) -> None:
+        staging_ref = self.qualified_staging_name(table_cls.__tablename__)
         insertable_cols = self._insertable_column_names(table_cls)
         cols_str = ", ".join(f'"{c}"' for c in insertable_cols)
 
         non_paginated_insert = sa.text(
             f'INSERT INTO "{target_name}" ({cols_str})'
-            f' SELECT {cols_str} FROM "{staging_name}"'
+            f' SELECT {cols_str} FROM {staging_ref}'
         )
 
         if merge_batch_size is None:
             session.execute(non_paginated_insert)
             return
 
-        total = session.execute(sa.text(f'SELECT COUNT(*) FROM "{staging_name}"')).scalar_one()
+        total = session.execute(sa.text(f'SELECT COUNT(*) FROM {staging_ref}')).scalar_one()
         if total <= merge_batch_size:
             session.execute(non_paginated_insert)
             return
@@ -244,7 +254,8 @@ class PostgresBackend(DatabaseBackend):
         # INSERT in batch-sized transactions to bound WAL per commit.
         # session_replication_role='replica' is session-level and persists
         # across commits, so FK checks stay disabled for all batches.
-        session.execute(sa.text(f'CREATE INDEX IF NOT EXISTS "{staging_name}_rownum_idx" ON "{staging_name}" (_rownum)'))
+        staging_name = self.staging_name_for_table(table_cls.__tablename__)
+        session.execute(sa.text(f'CREATE INDEX IF NOT EXISTS "{staging_name}_rownum_idx" ON {staging_ref} (_rownum)'))
         session.commit()
 
         start = 0
@@ -253,7 +264,7 @@ class PostgresBackend(DatabaseBackend):
             session.execute(
                 sa.text(
                     f'INSERT INTO "{target_name}" ({cols_str})'
-                    f' SELECT {cols_str} FROM "{staging_name}"'
+                    f' SELECT {cols_str} FROM {staging_ref}'
                     f' WHERE _rownum > :start AND _rownum <= :end'
                 ),
                 {"start": start, "end": end},

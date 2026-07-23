@@ -4,7 +4,7 @@ import sqlalchemy.orm as so
 import logging
 from sqlalchemy.exc import InvalidRequestError, UnboundExecutionError
 
-from typing import Type, ClassVar, Optional, Any, Iterator
+from typing import Type, Any, Iterator
 from pathlib import Path
 from contextlib import contextmanager
 from time import perf_counter
@@ -65,30 +65,23 @@ class CSVLoadableTableInterface(ORMTableBase):
     """
 
     __abstract__ = True
-    _staging_tablename: ClassVar[Optional[str]] = None
 
     @classmethod
     def staging_tablename(cls: Type[CSVTableProtocol]) -> str:
         """
         Return the name of the staging table for this model.
 
-        If a custom staging table name has been set on the class, it is
-        used; otherwise a default name derived from ``__tablename__``
-        is returned.
-
         Returns
         -------
         str
-            The staging table name.
+            The staging table name, derived from ``__tablename__``.
         """
-        if cls._staging_tablename:
-            return cls._staging_tablename
         return f"_staging_{cls.__tablename__}"
     
     @classmethod
     def create_staging_table(
-        cls: Type[CSVTableProtocol], 
-        session: so.Session
+        cls: Type[CSVTableProtocol],
+        session: so.Session,
     ):
         """
         Create a fresh staging table for ingestion.
@@ -110,7 +103,7 @@ class CSVLoadableTableInterface(ORMTableBase):
         """
         _require_bind(session)
         backend = resolve_backend(session)
-        backend.create_staging_table(cls, session, cls.staging_tablename())
+        backend.create_staging_table(cls, session)
 
     @classmethod
     @contextmanager
@@ -227,7 +220,6 @@ class CSVLoadableTableInterface(ORMTableBase):
         cls: Type[CSVTableProtocol],
         session: so.Session,
     ) -> sa.Table:
-
         """
         Return the reflected staging table, creating it if necessary.
 
@@ -242,24 +234,26 @@ class CSVLoadableTableInterface(ORMTableBase):
             The reflected staging table.
         """
         engine = _require_bind(session)
+        backend = resolve_backend(session)
         inspector = sa.inspect(engine)
-        staging_name = cls.staging_tablename()
+        staging_name = backend.staging_name_for_table(cls.__tablename__)
 
-        if not inspector.has_table(staging_name):
+        if not inspector.has_table(staging_name, schema=backend.staging_schema):
             logger.debug(f"Staging table {staging_name} does not exist; recreating",)
             cls.create_staging_table(session)
 
         return sa.Table(
             staging_name,
-            cls.metadata,
+            sa.MetaData(),  # throwaway — keeps staging table out of Base.metadata
             autoload_with=engine,
+            schema=backend.staging_schema,
         )
 
-    @classmethod   
+    @classmethod
     def load_staging(
         cls: Type[CSVTableProtocol],
         loader: LoaderInterface,
-        loader_context: LoaderContext
+        loader_context: LoaderContext,
     ) -> int:
         """
         Load data into the staging table.
@@ -284,27 +278,21 @@ class CSVLoadableTableInterface(ORMTableBase):
         backend = resolve_backend(loader_context.session)
         total = 0
 
+        cls.create_staging_table(loader_context.session)
+
         try:
-            cls.create_staging_table(loader_context.session)
+            total = backend.load_staging_fast(loader_context=loader_context)
+            if total is not None:
+                return total
+        except Exception as e:
+            loader_context.session.rollback()
+            logger.warning(f"Fast-path load failed for {cls.__tablename__}: {e}")
+            logger.info('Falling back to ORM-based load functionality')
 
-            try:
-                total = backend.load_staging_fast(
-                    loader_context=loader_context,
-                    staging_name=cls.staging_tablename(),
-                )
-                if total is not None:
-                    return total
-            except Exception as e:
-                loader_context.session.rollback()
-                logger.warning(f"Fast-path load failed for {cls.staging_tablename()}: {e}")
-                logger.info('Falling back to ORM-based load functionality')
-
-            total = cls.orm_staging_load(
-                loader=loader,
-                loader_context=loader_context
-            )   
-        finally:
-            cls._staging_tablename = None
+        total = cls.orm_staging_load(
+            loader=loader,
+            loader_context=loader_context
+        )
         return total
 
     @classmethod
@@ -448,7 +436,7 @@ class CSVLoadableTableInterface(ORMTableBase):
         logger.info(f"Table `{cls.__tablename__}`: Merging staging data into target table")
         with cls.manage_indices(session, index_strategy=index_strategy):
             cls.merge_from_staging(session, merge_strategy=merge_strategy, merge_batch_size=merge_batch_size)
-        
+
         cls.drop_staging_table(session)
 
         logger.info(f"Table `{cls.__tablename__}`: Successfully finished ingestion. Total rows: {total}")
@@ -497,7 +485,6 @@ class CSVLoadableTableInterface(ORMTableBase):
             ``upsert``, or ``insert_if_empty``).
         """
         target = cls.__tablename__
-        staging = cls.staging_tablename()
         pk_cols = cls.pk_names()
 
         _require_bind(session)
@@ -527,14 +514,14 @@ class CSVLoadableTableInterface(ORMTableBase):
         if merge_strategy == "replace":
             logger.info(f"Table `{target}`: Merge replace delete phase starting.")
             delete_started = perf_counter()
-            backend.merge_replace(cls, session, target, staging, pk_cols, merge_batch_size=merge_batch_size)
+            backend.merge_replace(cls, session, target, pk_cols, merge_batch_size=merge_batch_size)
             logger.info(
                 f"Table `{target}`: Merge replace delete phase completed in "
                 f"{_format_elapsed(perf_counter() - delete_started)}."
             )
             logger.info(f"Table `{target}`: Merge insert phase starting.")
             insert_started = perf_counter()
-            backend.merge_insert(cls, session, target, staging, merge_batch_size=merge_batch_size)
+            backend.merge_insert(cls, session, target, merge_batch_size=merge_batch_size)
             logger.info(
                 f"Table `{target}`: Merge insert phase completed in "
                 f"{_format_elapsed(perf_counter() - insert_started)}."
@@ -542,7 +529,7 @@ class CSVLoadableTableInterface(ORMTableBase):
         elif merge_strategy == "upsert":
             logger.info(f"Table `{target}`: Merge upsert phase starting.")
             upsert_started = perf_counter()
-            backend.merge_upsert(cls, session, target, staging, pk_cols, merge_batch_size=merge_batch_size)
+            backend.merge_upsert(cls, session, target, pk_cols, merge_batch_size=merge_batch_size)
             logger.info(
                 f"Table `{target}`: Merge upsert phase completed in "
                 f"{_format_elapsed(perf_counter() - upsert_started)}."
@@ -568,7 +555,7 @@ class CSVLoadableTableInterface(ORMTableBase):
 
             logger.info(f"Table `{target}`: Merge insert-if-empty phase starting.")
             insert_started = perf_counter()
-            backend.merge_insert(cls, session, target, staging, merge_batch_size=merge_batch_size)
+            backend.merge_insert(cls, session, target, merge_batch_size=merge_batch_size)
             logger.info(
                 f"Table `{target}`: Merge insert-if-empty phase completed in "
                 f"{_format_elapsed(perf_counter() - insert_started)}."
@@ -577,12 +564,20 @@ class CSVLoadableTableInterface(ORMTableBase):
             raise ValueError(f"Unknown merge strategy '{merge_strategy}'")
     
     @classmethod
-    def drop_staging_table(cls: Type[CSVTableProtocol], session: so.Session):
+    def drop_staging_table(
+        cls: Type[CSVTableProtocol],
+        session: so.Session,
+    ):
         """
         Drop the staging table if it exists.
+
+        Parameters
+        ----------
+        session
+            An active SQLAlchemy session bound to an engine.
         """
         backend = resolve_backend(session)
-        backend.drop_staging_table(session, cls.staging_tablename())
+        backend.drop_staging_table(cls, session)
 
     @classmethod
     def csv_columns(cls) -> dict[str, sa.ColumnElement[Any]]:

@@ -55,46 +55,49 @@ class FakeBackend(DatabaseBackend):
             supports_fk_toggle=True,
         )
 
+    @staticmethod
+    def staging_name_for_table(tablename: str) -> str:
+        return f"_staging_{tablename}"
+
     def create_staging_table(
-        self, table_cls: Type[CSVTableProtocol], session: so.Session, staging_name: str
+        self, _table_cls: Type[CSVTableProtocol], _session: so.Session
     ) -> None:
         return None
 
-    def drop_staging_table(self, session: so.Session, staging_name: str) -> None:
+    def drop_staging_table(
+        self, _table_cls: Type[CSVTableProtocol], _session: so.Session
+    ) -> None:
         return None
 
     def merge_replace(
         self,
-        table_cls: Type[CSVTableProtocol],
-        session: so.Session,
-        target_name: str,
-        staging_name: str,
-        pk_cols: list[str],
+        _table_cls: Type[CSVTableProtocol],
+        _session: so.Session,
+        _target_name: str,
+        _pk_cols: list[str],
         *,
-        merge_batch_size: int | None = None,
+        _merge_batch_size: int | None = None,
     ) -> None:
         return None
 
     def merge_upsert(
         self,
-        table_cls: Type[CSVTableProtocol],
-        session: so.Session,
-        target_name: str,
-        staging_name: str,
-        pk_cols: list[str],
+        _table_cls: Type[CSVTableProtocol],
+        _session: so.Session,
+        _target_name: str,
+        _pk_cols: list[str],
         *,
-        merge_batch_size: int | None = None,
+        _merge_batch_size: int | None = None,
     ) -> None:
         return None
 
     def merge_insert(
         self,
-        table_cls: Type[CSVTableProtocol],
-        session: so.Session,
-        target_name: str,
-        staging_name: str,
+        _table_cls: Type[CSVTableProtocol],
+        _session: so.Session,
+        _target_name: str,
         *,
-        merge_batch_size: int | None = None,
+        _merge_batch_size: int | None = None,
     ) -> None:
         return None
 
@@ -160,7 +163,7 @@ def test_fake_backend_can_implement_contract():
     assert backend.supports_dialect(Dialect.POSTGRESQL) is False
     assert backend.resolve_index_strategy("auto") == "drop_rebuild"
     assert backend.resolve_index_strategy("keep") == "keep"
-    assert backend.load_staging_fast(cast("LoaderContext", None), "staging") is None
+    assert backend.load_staging_fast(cast("LoaderContext", None)) is None
 
     with backend.merge_context(cast("Type[CSVTableProtocol]", None), cast(so.Session, None)):
         pass

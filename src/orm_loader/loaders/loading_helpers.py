@@ -11,6 +11,8 @@ import pyarrow.compute as pc
 import pyarrow.csv as pv
 import io
 
+from ..helpers.sql import qualify_identifier
+
 _SAFE_ENCODING = re.compile(r'^[A-Za-z][A-Za-z0-9_-]*$')
 
 logger = logging.getLogger(__name__)
@@ -265,12 +267,14 @@ def quick_load_pg(
     path: Path,
     session: so.Session,
     tablename: str,
+    schema: str | None = None,
     quote_mode: str = "auto",
 ) -> int:
     raw_conn = session.connection().connection
     if not hasattr(raw_conn, "cursor"):
         raise RuntimeError("Expected DB-API connection for COPY")
 
+    table_ref = qualify_identifier(tablename, schema)
 
     encoding = infer_encoding(path)['encoding'] or 'utf-8'
     if not _SAFE_ENCODING.match(encoding):
@@ -308,7 +312,7 @@ def quick_load_pg(
     _csv_cols = [c.strip().lower().replace('_hash', '') for c in _raw_hdr.rstrip(_nl).split(delimiter)]
     _cols_sql = ", ".join(f'"{c}"' for c in _csv_cols)
 
-    logger.info(f"Bulk loading {tablename} via COPY (encoding={encoding}, delimiter={delimiter})")
+    logger.info(f"Bulk loading {table_ref} via COPY (encoding={encoding}, delimiter={delimiter})")
 
     cur = raw_conn.cursor()
     try:
@@ -316,7 +320,7 @@ def quick_load_pg(
             stream = NormalisedCSVStream(f, encoding=encoding, delimiter=delimiter)
             with cur.copy(
                 f'''
-                COPY "{tablename}" ({_cols_sql})
+                COPY {table_ref} ({_cols_sql})
                 FROM STDIN
                 WITH (
                     {copy_options}
@@ -326,7 +330,7 @@ def quick_load_pg(
                 while data := stream.read(COPY_BLOCK_SIZE):
                     copy.write(data)
         session.flush()
-        total = session.execute(sa.text(f'SELECT COUNT(*) FROM "{tablename}"')).scalar_one()
+        total = session.execute(sa.text(f'SELECT COUNT(*) FROM {table_ref}')).scalar_one()
         return total
     except Exception as e:
         logger.error(f"Error during bulk load via COPY: {e}")

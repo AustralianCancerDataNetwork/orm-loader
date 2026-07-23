@@ -1,6 +1,7 @@
 import sqlalchemy as sa
 import pandas as pd
 import pytest
+from orm_loader.backends import STAGING_SCHEMA
 from orm_loader.loaders.loading_helpers import infer_encoding, infer_delim, check_line_ending, quick_load_pg
 from orm_loader.config import OrmLoaderConfig
 
@@ -17,15 +18,16 @@ def test_copy_into_staging_with_extra_identity_column(pg_session, tmp_path):
     staging_name = SimpleTable.staging_tablename()
 
     cols = pg_session.execute(sa.text(
-        "SELECT column_name FROM information_schema.columns WHERE table_name = :t"
-    ), {"t": staging_name}).scalars().all()
+        "SELECT column_name FROM information_schema.columns"
+        " WHERE table_schema = :s AND table_name = :t"
+    ), {"s": STAGING_SCHEMA, "t": staging_name}).scalars().all()
     assert "_rownum" in cols, "staging table should have _rownum before COPY"
 
-    total = quick_load_pg(path=csv, session=pg_session, tablename=staging_name)
+    total = quick_load_pg(path=csv, session=pg_session, tablename=staging_name, schema=STAGING_SCHEMA)
     assert total == 2
 
     rownums = pg_session.execute(
-        sa.text(f'SELECT _rownum FROM "{staging_name}" ORDER BY _rownum')
+        sa.text(f'SELECT _rownum FROM "{STAGING_SCHEMA}"."{staging_name}" ORDER BY _rownum')
     ).scalars().all()
     assert rownums == [1, 2], "_rownum must be auto-populated by IDENTITY sequence"
 
@@ -191,9 +193,9 @@ def test_staging_schema_matches_target(pg_session, tmp_path):
     cols = pg_session.execute(sa.text("""
         SELECT column_name, data_type
         FROM information_schema.columns
-        WHERE table_name = :table
+        WHERE table_schema = :s AND table_name = :table
         ORDER BY ordinal_position
-    """), {"table": SimpleTable.staging_tablename()}).all()
+    """), {"s": STAGING_SCHEMA, "table": SimpleTable.staging_tablename()}).all()
 
     data_cols = [(name, dtype) for name, dtype in cols if name != "_rownum"]
     assert data_cols == [

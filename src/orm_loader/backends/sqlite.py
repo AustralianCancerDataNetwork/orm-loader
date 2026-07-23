@@ -26,6 +26,10 @@ VALID_SQLITE_JOURNAL_MODES = frozenset(
 
 
 class SQLiteBackend(DatabaseBackend):
+    @staticmethod
+    def staging_name_for_table(tablename: str) -> str:
+        return f"_staging_{tablename}"
+
     def __init__(
         self,
         *,
@@ -33,6 +37,7 @@ class SQLiteBackend(DatabaseBackend):
         journal_mode: str = "WAL",
         defer_foreign_keys: bool = True,
     ) -> None:
+        super().__init__(staging_schema=None)  # SQLite does not support schema-qualified staging tables
         self.busy_timeout_ms = busy_timeout_ms
         self.journal_mode = self._validate_journal_mode(journal_mode)
         self.defer_foreign_keys = defer_foreign_keys
@@ -90,8 +95,8 @@ class SQLiteBackend(DatabaseBackend):
         self,
         table_cls: type["CSVTableProtocol"],
         session: so.Session,
-        staging_name: str,
     ) -> None:
+        staging_name = self.staging_name_for_table(table_cls.__tablename__)
         session.execute(sa.text(f'DROP TABLE IF EXISTS "{staging_name}";'))
 
         metadata = sa.MetaData()
@@ -105,10 +110,10 @@ class SQLiteBackend(DatabaseBackend):
 
     def drop_staging_table(
         self,
+        table_cls: type["CSVTableProtocol"],
         session: so.Session,
-        staging_name: str,
     ) -> None:
-        session.execute(sa.text(f'DROP TABLE IF EXISTS "{staging_name}"'))
+        session.execute(sa.text(f'DROP TABLE IF EXISTS "{self.staging_name_for_table(table_cls.__tablename__)}"'))
 
     def disable_fk_check(self, session: so.Session) -> str | int:
         previous_state = session.execute(text("PRAGMA foreign_keys")).scalar()
@@ -137,11 +142,11 @@ class SQLiteBackend(DatabaseBackend):
         table_cls: type["CSVTableProtocol"],
         session: so.Session,
         target_name: str,
-        staging_name: str,
         pk_cols: list[str],
         *,
         merge_batch_size: int | None = None,
     ) -> None:
+        staging_name = self.staging_name_for_table(table_cls.__tablename__)
         if len(pk_cols) == 1:
             pk = pk_cols[0]
             session.execute(
@@ -176,11 +181,11 @@ class SQLiteBackend(DatabaseBackend):
         table_cls: type["CSVTableProtocol"],
         session: so.Session,
         target_name: str,
-        staging_name: str,
         pk_cols: list[str],
         *,
         merge_batch_size: int | None = None,
     ) -> None:
+        staging_name = self.staging_name_for_table(table_cls.__tablename__)
         insertable_cols = self._insertable_column_names(table_cls)
         cols_str = ", ".join(f'"{c}"' for c in insertable_cols)
         session.execute(
@@ -197,10 +202,10 @@ class SQLiteBackend(DatabaseBackend):
         table_cls: type["CSVTableProtocol"],
         session: so.Session,
         target_name: str,
-        staging_name: str,
         *,
         merge_batch_size: int | None = None,
     ) -> None:
+        staging_name = self.staging_name_for_table(table_cls.__tablename__)
         insertable_cols = self._insertable_column_names(table_cls)
         cols_str = ", ".join(f'"{c}"' for c in insertable_cols)
         session.execute(
