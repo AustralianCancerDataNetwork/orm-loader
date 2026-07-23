@@ -18,3 +18,16 @@ jobs:
           --test-user test \
           --test-password test \
           --test-database-name orm_loader_test
+  build-test-lowest-direct:
+    uses: AustralianCancerDataNetwork/cava-devops/.github/workflows/build-test-postgres.yml@main
+    with:
+      postgres-db: orm_loader_test
+      resolution: lowest-direct
+      setup-commands: |
+        uv run omop-config configure orm_loader \
+          --test-dialect postgresql+psycopg \
+          --test-host localhost \
+          --test-port 5432 \
+          --test-user test \
+          --test-password test \
+          --test-database-name orm_loader_test
