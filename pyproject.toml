@@ -9,7 +9,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "chardet>=5.2.0",
-    "oa-configurator>=0.1.2,<1.0.0",
+    "oa-configurator==0.1.2",
     "pandas>=2.3.3",
     "pyarrow>=23.0.1",
     "sqlalchemy>=2.0.45",
@@ -49,7 +49,7 @@ postgres = [
   "psycopg[binary]>=3.2",
 ]
 dev = [
-    "oa-configurator[postgres]>=0.1.2,<1.0.0",
+    "oa-configurator[postgres]==0.1.2",
     "pytest>=9.0.3",
     "ty>=0.0.59",
     "ruff>=0.14.11",
