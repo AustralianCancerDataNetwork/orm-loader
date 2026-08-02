@@ -6,9 +6,11 @@ from typing import TYPE_CHECKING, Any
 import sqlalchemy as sa
 import sqlalchemy.event as sae
 import sqlalchemy.orm as so
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.sql.compiler import IdentifierPreparer
 
 from ..loaders.loading_helpers import quick_load_pg
-from .base import BackendCapabilities, DatabaseBackend, Dialect, STAGING_SCHEMA
+from .base import BackendCapabilities, DatabaseBackend, Dialect
 
 if TYPE_CHECKING:
     from sqlalchemy.engine import Connection, Engine
@@ -20,7 +22,7 @@ _VALID_PG_REPLICATION_ROLES = frozenset({"origin", "local", "replica"})
 
 
 class PostgresBackend(DatabaseBackend):
-    def __init__(self, *, staging_schema: str | None = STAGING_SCHEMA) -> None:
+    def __init__(self, *, staging_schema: str | None = None) -> None:
         super().__init__(staging_schema=staging_schema)
 
     @staticmethod
@@ -34,6 +36,10 @@ class PostgresBackend(DatabaseBackend):
     @property
     def dialect(self) -> Dialect:
         return Dialect.POSTGRESQL
+
+    @property
+    def identifier_preparer(self) -> IdentifierPreparer:
+        return postgresql.dialect().identifier_preparer
 
     @property
     def capabilities(self) -> BackendCapabilities:
@@ -50,20 +56,22 @@ class PostgresBackend(DatabaseBackend):
         session: so.Session,
     ) -> None:
         table = table_cls.__table__
+        preparer = self.identifier_preparer
         staging_ref = self.qualified_staging_name(table_cls.__tablename__)
+        source_ref = preparer.quote_identifier(table.name)
         session.execute(sa.text(f'DROP TABLE IF EXISTS {staging_ref};'))
         session.execute(
             sa.text(
                 f'''
                 CREATE UNLOGGED TABLE {staging_ref}
-                (LIKE "{table.name}" INCLUDING DEFAULTS INCLUDING CONSTRAINTS);
+                (LIKE {source_ref} INCLUDING DEFAULTS INCLUDING CONSTRAINTS);
                 '''
             )
         )
 
         computed_cols = [c.name for c in table.columns if c.computed is not None]
         for col in computed_cols:
-            session.execute(sa.text(f'ALTER TABLE {staging_ref} DROP COLUMN "{col}";'))
+            session.execute(sa.text(f'ALTER TABLE {staging_ref} DROP COLUMN {preparer.quote_identifier(col)};'))
 
         # allows pagination in O(N log N) time for large tables in merge_insert without needing to add an index on every staging table
         session.execute(
@@ -143,11 +151,15 @@ class PostgresBackend(DatabaseBackend):
         *,
         merge_batch_size: int | None = None,
     ) -> None:
+        preparer = self.identifier_preparer
         staging_ref = self.qualified_staging_name(table_cls.__tablename__)
-        pk_join = " AND ".join(f't."{c}" = s."{c}"' for c in pk_cols)
+        target_ref = preparer.quote_identifier(target_name)
+        pk_join = " AND ".join(
+            f't.{preparer.quote_identifier(c)} = s.{preparer.quote_identifier(c)}' for c in pk_cols
+        )
 
         non_paginated_replace = sa.text(
-            f'DELETE FROM "{target_name}" t USING {staging_ref} s WHERE {pk_join}'
+            f'DELETE FROM {target_ref} t USING {staging_ref} s WHERE {pk_join}'
         )
 
         if merge_batch_size is None:
@@ -160,7 +172,8 @@ class PostgresBackend(DatabaseBackend):
             return
 
         staging_name = self.staging_name_for_table(table_cls.__tablename__)
-        session.execute(sa.text(f'CREATE INDEX IF NOT EXISTS "{staging_name}_rownum_idx" ON {staging_ref} (_rownum)'))
+        idx_ref = preparer.quote_identifier(f"{staging_name}_rownum_idx")
+        session.execute(sa.text(f'CREATE INDEX IF NOT EXISTS {idx_ref} ON {staging_ref} (_rownum)'))
         session.commit()
 
         start = 0
@@ -168,7 +181,7 @@ class PostgresBackend(DatabaseBackend):
             end = start + merge_batch_size
             session.execute(
                 sa.text(
-                    f'DELETE FROM "{target_name}" t USING {staging_ref} s'
+                    f'DELETE FROM {target_ref} t USING {staging_ref} s'
                     f' WHERE {pk_join} AND s._rownum > :start AND s._rownum <= :end'
                 ),
                 {"start": start, "end": end},
@@ -185,13 +198,15 @@ class PostgresBackend(DatabaseBackend):
         *,
         merge_batch_size: int | None = None,
     ) -> None:
+        preparer = self.identifier_preparer
         staging_ref = self.qualified_staging_name(table_cls.__tablename__)
+        target_ref = preparer.quote_identifier(target_name)
         insertable_cols = self._insertable_column_names(table_cls)
-        cols_str = ", ".join(f'"{c}"' for c in insertable_cols)
-        conflict_cols = ", ".join(f'"{c}"' for c in pk_cols)
+        cols_str = ", ".join(preparer.quote_identifier(c) for c in insertable_cols)
+        conflict_cols = ", ".join(preparer.quote_identifier(c) for c in pk_cols)
 
         non_paginated_upsert = sa.text(
-            f'INSERT INTO "{target_name}" ({cols_str})'
+            f'INSERT INTO {target_ref} ({cols_str})'
             f' SELECT {cols_str} FROM {staging_ref}'
             f' ON CONFLICT ({conflict_cols}) DO NOTHING'
         )
@@ -206,7 +221,8 @@ class PostgresBackend(DatabaseBackend):
             return
 
         staging_name = self.staging_name_for_table(table_cls.__tablename__)
-        session.execute(sa.text(f'CREATE INDEX IF NOT EXISTS "{staging_name}_rownum_idx" ON {staging_ref} (_rownum)'))
+        idx_ref = preparer.quote_identifier(f"{staging_name}_rownum_idx")
+        session.execute(sa.text(f'CREATE INDEX IF NOT EXISTS {idx_ref} ON {staging_ref} (_rownum)'))
         session.commit()
 
         start = 0
@@ -214,7 +230,7 @@ class PostgresBackend(DatabaseBackend):
             end = start + merge_batch_size
             session.execute(
                 sa.text(
-                    f'INSERT INTO "{target_name}" ({cols_str})'
+                    f'INSERT INTO {target_ref} ({cols_str})'
                     f' SELECT {cols_str} FROM {staging_ref}'
                     f' WHERE _rownum > :start AND _rownum <= :end'
                     f' ON CONFLICT ({conflict_cols}) DO NOTHING'
@@ -232,12 +248,14 @@ class PostgresBackend(DatabaseBackend):
         *,
         merge_batch_size: int | None = None,
     ) -> None:
+        preparer = self.identifier_preparer
         staging_ref = self.qualified_staging_name(table_cls.__tablename__)
+        target_ref = preparer.quote_identifier(target_name)
         insertable_cols = self._insertable_column_names(table_cls)
-        cols_str = ", ".join(f'"{c}"' for c in insertable_cols)
+        cols_str = ", ".join(preparer.quote_identifier(c) for c in insertable_cols)
 
         non_paginated_insert = sa.text(
-            f'INSERT INTO "{target_name}" ({cols_str})'
+            f'INSERT INTO {target_ref} ({cols_str})'
             f' SELECT {cols_str} FROM {staging_ref}'
         )
 
@@ -255,7 +273,8 @@ class PostgresBackend(DatabaseBackend):
         # session_replication_role='replica' is session-level and persists
         # across commits, so FK checks stay disabled for all batches.
         staging_name = self.staging_name_for_table(table_cls.__tablename__)
-        session.execute(sa.text(f'CREATE INDEX IF NOT EXISTS "{staging_name}_rownum_idx" ON {staging_ref} (_rownum)'))
+        idx_ref = preparer.quote_identifier(f"{staging_name}_rownum_idx")
+        session.execute(sa.text(f'CREATE INDEX IF NOT EXISTS {idx_ref} ON {staging_ref} (_rownum)'))
         session.commit()
 
         start = 0
@@ -263,7 +282,7 @@ class PostgresBackend(DatabaseBackend):
             end = start + merge_batch_size
             session.execute(
                 sa.text(
-                    f'INSERT INTO "{target_name}" ({cols_str})'
+                    f'INSERT INTO {target_ref} ({cols_str})'
                     f' SELECT {cols_str} FROM {staging_ref}'
                     f' WHERE _rownum > :start AND _rownum <= :end'
                 ),

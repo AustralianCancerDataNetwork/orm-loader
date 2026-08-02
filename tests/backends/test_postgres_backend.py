@@ -13,7 +13,8 @@ from orm_loader.helpers.sql import qualify_identifier
 
 _TARGET_TABLE = "target_table"
 _STAGING_TABLE = f"_staging_{_TARGET_TABLE}"
-_STAGING_TABLE_WITH_SCHEMA: str = qualify_identifier(_STAGING_TABLE, STAGING_SCHEMA)
+_PREPARER = postgresql.dialect().identifier_preparer
+_STAGING_TABLE_WITH_SCHEMA: str = qualify_identifier(_STAGING_TABLE, STAGING_SCHEMA, _PREPARER)
 
 
 if TYPE_CHECKING:
@@ -83,8 +84,20 @@ def test_postgres_backend_identity_and_capabilities():
     assert backend.capabilities.supports_materialized_views is True
 
 
-def test_postgres_backend_create_staging_table_drops_computed_columns():
+def test_qualify_identifier_escapes_embedded_quotes():
+    assert qualify_identifier("table", 'schema"name', _PREPARER) == '"schema""name"."table"'
+    assert qualify_identifier('ta"ble', None, _PREPARER) == '"ta""ble"'
+
+
+def test_postgres_backend_default_staging_schema_is_none():
     backend = PostgresBackend()
+
+    assert backend.staging_schema is None
+    assert backend.qualified_staging_name(_TARGET_TABLE) == _PREPARER.quote_identifier(_STAGING_TABLE)
+
+
+def test_postgres_backend_create_staging_table_drops_computed_columns():
+    backend = PostgresBackend(staging_schema=STAGING_SCHEMA)
     session = _FakeSession()
 
     backend.create_staging_table(_ComputedTableCls, _sess(session))
@@ -96,7 +109,7 @@ def test_postgres_backend_create_staging_table_drops_computed_columns():
 
 
 def test_postgres_backend_drop_staging_table():
-    backend = PostgresBackend()
+    backend = PostgresBackend(staging_schema=STAGING_SCHEMA)
     session = _FakeSession()
 
     backend.drop_staging_table(_ComputedTableCls, _sess(session))
@@ -124,7 +137,7 @@ def test_postgres_backend_fk_methods_emit_expected_sql():
 
 
 def test_postgres_backend_merge_replace_uses_using_delete():
-    backend = PostgresBackend()
+    backend = PostgresBackend(staging_schema=STAGING_SCHEMA)
     session = _FakeSession(scalar_result=0)
 
     backend.merge_replace(_ComputedTableCls, _sess(session), _TARGET_TABLE, ["id", "name"])
@@ -133,11 +146,11 @@ def test_postgres_backend_merge_replace_uses_using_delete():
     assert f'DELETE FROM "{_TARGET_TABLE}" t' in sql
     assert f'USING {_STAGING_TABLE_WITH_SCHEMA} s' in sql
     assert 't."id" = s."id" AND t."name" = s."name"' in sql
-    assert f'USING {qualify_identifier(_TARGET_TABLE, STAGING_SCHEMA)}' not in sql
+    assert f'USING {qualify_identifier(_TARGET_TABLE, STAGING_SCHEMA, _PREPARER)}' not in sql
 
 
 def test_postgres_backend_merge_insert_excludes_computed_columns():
-    backend = PostgresBackend()
+    backend = PostgresBackend(staging_schema=STAGING_SCHEMA)
     session = _FakeSession(scalar_result=0)
 
     backend.merge_insert(_ComputedTableCls, _sess(session), _TARGET_TABLE)
@@ -148,7 +161,7 @@ def test_postgres_backend_merge_insert_excludes_computed_columns():
 
 
 def test_postgres_backend_merge_upsert_excludes_computed_columns():
-    backend = PostgresBackend()
+    backend = PostgresBackend(staging_schema=STAGING_SCHEMA)
     session = _FakeSession(scalar_result=0)
 
     backend.merge_upsert(_ComputedTableCls, _sess(session), _TARGET_TABLE, ["id"])
@@ -159,7 +172,7 @@ def test_postgres_backend_merge_upsert_excludes_computed_columns():
 
 
 def test_postgres_backend_merge_replace_paginated_path():
-    backend = PostgresBackend()
+    backend = PostgresBackend(staging_schema=STAGING_SCHEMA)
     session = _FakeSession(scalar_result=10)
 
     backend.merge_replace(
@@ -174,7 +187,7 @@ def test_postgres_backend_merge_replace_paginated_path():
 
 
 def test_postgres_backend_merge_insert_paginated_path():
-    backend = PostgresBackend()
+    backend = PostgresBackend(staging_schema=STAGING_SCHEMA)
     session = _FakeSession(scalar_result=10)
 
     backend.merge_insert(
@@ -189,7 +202,7 @@ def test_postgres_backend_merge_insert_paginated_path():
 
 
 def test_postgres_backend_merge_upsert_paginated_path():
-    backend = PostgresBackend()
+    backend = PostgresBackend(staging_schema=STAGING_SCHEMA)
     session = _FakeSession(scalar_result=10)
 
     backend.merge_upsert(

@@ -64,7 +64,7 @@ class CSVTableProtocol(ORMTableProtocol, Protocol):
     def _select_loader(cls, path: Path) -> "LoaderInterface": ...
 
     @classmethod
-    def create_staging_table(cls, session: so.Session) -> None: ...
+    def create_staging_table(cls, session: so.Session, *, staging_schema: str | None = None) -> None: ...
 
     @classmethod
     def load_staging(cls: Type["CSVTableProtocol"], loader: "LoaderInterface", loader_context: "LoaderContext") -> int: ...
@@ -83,13 +83,14 @@ class CSVTableProtocol(ORMTableProtocol, Protocol):
         quote_mode: str = "csv",
         index_strategy: str = "auto",
         merge_batch_size: int | None = None,
+        staging_schema: str | None = None,
     ) -> int: ...
 
     @classmethod
     def orm_staging_load(cls, loader: "LoaderInterface", loader_context: "LoaderContext") -> int: ...
 
     @classmethod
-    def get_staging_table(cls, session: so.Session) -> sa.Table: ...
+    def get_staging_table(cls, session: so.Session, *, staging_schema: str | None = None) -> sa.Table: ...
 
     @classmethod
     def merge_from_staging(
@@ -98,16 +99,19 @@ class CSVTableProtocol(ORMTableProtocol, Protocol):
         merge_strategy: str = "replace",
         *,
         merge_batch_size: int | None = None,
+        staging_schema: str | None = None,
     ) -> None: ...
 
     @classmethod
-    def drop_staging_table(cls, session: so.Session) -> None: ...
+    def drop_staging_table(cls, session: so.Session, *, staging_schema: str | None = None) -> None: ...
 
     @classmethod
     def _target_has_rows(cls, session: so.Session, target: str) -> bool: ...
 
     @classmethod
-    def manage_indices(cls, session: so.Session, index_strategy: str = "auto") -> AbstractContextManager[None]:
+    def manage_indices(
+        cls, session: so.Session, index_strategy: str = "auto", *, staging_schema: str | None = None
+    ) -> AbstractContextManager[None]:
         ...
     
 

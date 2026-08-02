@@ -9,7 +9,9 @@ from contextlib import AbstractContextManager
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 from sqlalchemy import event, text
+from sqlalchemy.dialects import sqlite as sqlite_dialect
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.sql.compiler import IdentifierPreparer
 
 from .base import BackendCapabilities, DatabaseBackend, Dialect
 
@@ -33,11 +35,17 @@ class SQLiteBackend(DatabaseBackend):
     def __init__(
         self,
         *,
+        staging_schema: str | None = None,
         busy_timeout_ms: int = 60000,
         journal_mode: str = "WAL",
         defer_foreign_keys: bool = True,
     ) -> None:
-        super().__init__(staging_schema=None)  # SQLite does not support schema-qualified staging tables
+        if staging_schema is not None:
+            raise ValueError(
+                "SQLite does not support schema-qualified staging tables; "
+                f"got staging_schema={staging_schema!r}. Pass None (the default)."
+            )
+        super().__init__(staging_schema=None)
         self.busy_timeout_ms = busy_timeout_ms
         self.journal_mode = self._validate_journal_mode(journal_mode)
         self.defer_foreign_keys = defer_foreign_keys
@@ -79,6 +87,10 @@ class SQLiteBackend(DatabaseBackend):
         return Dialect.SQLITE
 
     @property
+    def identifier_preparer(self) -> IdentifierPreparer:
+        return sqlite_dialect.dialect().identifier_preparer
+
+    @property
     def capabilities(self) -> BackendCapabilities:
         return BackendCapabilities(
             supports_fast_load=False,
@@ -97,7 +109,7 @@ class SQLiteBackend(DatabaseBackend):
         session: so.Session,
     ) -> None:
         staging_name = self.staging_name_for_table(table_cls.__tablename__)
-        session.execute(sa.text(f'DROP TABLE IF EXISTS "{staging_name}";'))
+        session.execute(sa.text(f'DROP TABLE IF EXISTS {self.identifier_preparer.quote_identifier(staging_name)};'))
 
         metadata = sa.MetaData()
         staging_columns = [
@@ -113,7 +125,8 @@ class SQLiteBackend(DatabaseBackend):
         table_cls: type["CSVTableProtocol"],
         session: so.Session,
     ) -> None:
-        session.execute(sa.text(f'DROP TABLE IF EXISTS "{self.staging_name_for_table(table_cls.__tablename__)}"'))
+        staging_ref = self.identifier_preparer.quote_identifier(self.staging_name_for_table(table_cls.__tablename__))
+        session.execute(sa.text(f'DROP TABLE IF EXISTS {staging_ref}'))
 
     def disable_fk_check(self, session: so.Session) -> str | int:
         previous_state = session.execute(text("PRAGMA foreign_keys")).scalar()
@@ -146,15 +159,18 @@ class SQLiteBackend(DatabaseBackend):
         *,
         merge_batch_size: int | None = None,
     ) -> None:
+        preparer = self.identifier_preparer
         staging_name = self.staging_name_for_table(table_cls.__tablename__)
+        target_ref = preparer.quote_identifier(target_name)
+        staging_ref = preparer.quote_identifier(staging_name)
         if len(pk_cols) == 1:
-            pk = pk_cols[0]
+            pk_ref = preparer.quote_identifier(pk_cols[0])
             session.execute(
                 sa.text(
                     f"""
-                    DELETE FROM "{target_name}"
-                    WHERE "{pk}" IN (
-                        SELECT "{pk}" FROM "{staging_name}"
+                    DELETE FROM {target_ref}
+                    WHERE {pk_ref} IN (
+                        SELECT {pk_ref} FROM {staging_ref}
                     );
                     """
                 )
@@ -162,14 +178,15 @@ class SQLiteBackend(DatabaseBackend):
             return
 
         pk_match = " AND ".join(
-            f'"{target_name}"."{c}" = "{staging_name}"."{c}"' for c in pk_cols
+            f'{target_ref}.{preparer.quote_identifier(c)} = {staging_ref}.{preparer.quote_identifier(c)}'
+            for c in pk_cols
         )
         session.execute(
             sa.text(
                 f"""
-                DELETE FROM "{target_name}"
+                DELETE FROM {target_ref}
                 WHERE EXISTS (
-                    SELECT 1 FROM "{staging_name}"
+                    SELECT 1 FROM {staging_ref}
                     WHERE {pk_match}
                 );
                 """
@@ -185,14 +202,16 @@ class SQLiteBackend(DatabaseBackend):
         *,
         merge_batch_size: int | None = None,
     ) -> None:
-        staging_name = self.staging_name_for_table(table_cls.__tablename__)
+        preparer = self.identifier_preparer
+        staging_ref = preparer.quote_identifier(self.staging_name_for_table(table_cls.__tablename__))
+        target_ref = preparer.quote_identifier(target_name)
         insertable_cols = self._insertable_column_names(table_cls)
-        cols_str = ", ".join(f'"{c}"' for c in insertable_cols)
+        cols_str = ", ".join(preparer.quote_identifier(c) for c in insertable_cols)
         session.execute(
             sa.text(
                 f"""
-                INSERT OR IGNORE INTO "{target_name}" ({cols_str})
-                SELECT {cols_str} FROM "{staging_name}";
+                INSERT OR IGNORE INTO {target_ref} ({cols_str})
+                SELECT {cols_str} FROM {staging_ref};
                 """
             )
         )
@@ -205,14 +224,16 @@ class SQLiteBackend(DatabaseBackend):
         *,
         merge_batch_size: int | None = None,
     ) -> None:
-        staging_name = self.staging_name_for_table(table_cls.__tablename__)
+        preparer = self.identifier_preparer
+        staging_ref = preparer.quote_identifier(self.staging_name_for_table(table_cls.__tablename__))
+        target_ref = preparer.quote_identifier(target_name)
         insertable_cols = self._insertable_column_names(table_cls)
-        cols_str = ", ".join(f'"{c}"' for c in insertable_cols)
+        cols_str = ", ".join(preparer.quote_identifier(c) for c in insertable_cols)
         session.execute(
             sa.text(
                 f"""
-                INSERT INTO "{target_name}" ({cols_str})
-                SELECT {cols_str} FROM "{staging_name}";
+                INSERT INTO {target_ref} ({cols_str})
+                SELECT {cols_str} FROM {staging_ref};
                 """
             )
         )

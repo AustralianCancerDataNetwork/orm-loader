@@ -49,6 +49,12 @@ class FakeBackend(DatabaseBackend):
         return Dialect.SQLITE
 
     @property
+    def identifier_preparer(self):
+        from sqlalchemy.dialects import sqlite
+
+        return sqlite.dialect().identifier_preparer
+
+    @property
     def capabilities(self) -> BackendCapabilities:
         return BackendCapabilities(
             supports_fast_load=True,

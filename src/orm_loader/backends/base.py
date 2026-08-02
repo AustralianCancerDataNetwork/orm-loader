@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Type, Any, Iterator
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.sql.compiler import IdentifierPreparer
 
 from ..helpers.sql import qualify_identifier
 
@@ -96,7 +97,9 @@ class DatabaseBackend(ABC):
         str
             e.g. '"staging"."_staging_concept"' or '"_staging_concept"'.
         """
-        return qualify_identifier(self.staging_name_for_table(tablename), self.staging_schema)
+        return qualify_identifier(
+            self.staging_name_for_table(tablename), self.staging_schema, self.identifier_preparer
+        )
 
     @property
     @abstractmethod
@@ -107,6 +110,11 @@ class DatabaseBackend(ABC):
     @abstractmethod
     def dialect(self) -> Dialect:
         """SQLAlchemy dialect handled by this backend."""
+
+    @property
+    @abstractmethod
+    def identifier_preparer(self) -> IdentifierPreparer:
+        """The dialect-specific identifier preparer used to quote/escape SQL identifiers."""
 
     @property
     @abstractmethod
