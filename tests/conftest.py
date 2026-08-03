@@ -31,10 +31,10 @@ def session(engine):
 
 @pytest.fixture(scope="session")
 def pg_engine():
-    from oa_configurator.pytest_plugin import ensure_test_db_exists, resolve_test_resource
+    from oa_configurator.pytest_plugin import ensure_test_db_exists, resolve_test_database
     from orm_loader.config import OrmLoaderConfig
 
-    url = resolve_test_resource(OrmLoaderConfig.TEST_DB)
+    url = resolve_test_database(OrmLoaderConfig.TEST_DB)
 
     try:
         ensure_test_db_exists(url)
