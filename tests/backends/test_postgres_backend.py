@@ -8,15 +8,23 @@ import sqlalchemy.orm as so
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import Connection, Engine
 
-from orm_loader.backends import Dialect, PostgresBackend
+from orm_loader.backends import STAGING_SCHEMA, Dialect, PostgresBackend
+from orm_loader.helpers.sql import qualify_identifier
+
+_TARGET_TABLE = "target_table"
+_STAGING_TABLE = f"_staging_{_TARGET_TABLE}"
+_PREPARER = postgresql.dialect().identifier_preparer
+_STAGING_TABLE_WITH_SCHEMA: str = qualify_identifier(_STAGING_TABLE, STAGING_SCHEMA, _PREPARER)
+
 
 if TYPE_CHECKING:
     from orm_loader.tables.typing import CSVTableProtocol
 
 
 class _ComputedTable:
+    __tablename__ = _TARGET_TABLE
     __table__ = sa.Table(
-        "target_table",
+        _TARGET_TABLE,
         sa.MetaData(),
         sa.Column("id", sa.Integer, primary_key=True),
         sa.Column("name", sa.String),
@@ -76,25 +84,37 @@ def test_postgres_backend_identity_and_capabilities():
     assert backend.capabilities.supports_materialized_views is True
 
 
-def test_postgres_backend_create_staging_table_drops_computed_columns():
+def test_qualify_identifier_escapes_embedded_quotes():
+    assert qualify_identifier("table", 'schema"name', _PREPARER) == '"schema""name"."table"'
+    assert qualify_identifier('ta"ble', None, _PREPARER) == '"ta""ble"'
+
+
+def test_postgres_backend_default_staging_schema_is_none():
     backend = PostgresBackend()
+
+    assert backend.staging_schema is None
+    assert backend.qualified_staging_name(_TARGET_TABLE) == _PREPARER.quote_identifier(_STAGING_TABLE)
+
+
+def test_postgres_backend_create_staging_table_drops_computed_columns():
+    backend = PostgresBackend(staging_schema=STAGING_SCHEMA)
     session = _FakeSession()
 
-    backend.create_staging_table(_ComputedTableCls, _sess(session), "_staging_target_table")
+    backend.create_staging_table(_ComputedTableCls, _sess(session))
 
-    assert any('DROP TABLE IF EXISTS "_staging_target_table"' in sql for sql in session.statements)
-    assert any('CREATE UNLOGGED TABLE "_staging_target_table"' in sql for sql in session.statements)
-    assert any('ALTER TABLE "_staging_target_table" DROP COLUMN "slug"' in sql for sql in session.statements)
+    assert any(f'DROP TABLE IF EXISTS {_STAGING_TABLE_WITH_SCHEMA}' in sql for sql in session.statements)
+    assert any(f'CREATE UNLOGGED TABLE {_STAGING_TABLE_WITH_SCHEMA}' in sql for sql in session.statements)
+    assert any(f'ALTER TABLE {_STAGING_TABLE_WITH_SCHEMA} DROP COLUMN "slug"' in sql for sql in session.statements)
     assert session.commits == 1
 
 
 def test_postgres_backend_drop_staging_table():
-    backend = PostgresBackend()
+    backend = PostgresBackend(staging_schema=STAGING_SCHEMA)
     session = _FakeSession()
 
-    backend.drop_staging_table(_sess(session), "_staging_target_table")
+    backend.drop_staging_table(_ComputedTableCls, _sess(session))
 
-    assert session.statements == ['DROP TABLE IF EXISTS "_staging_target_table"']
+    assert session.statements == [f'DROP TABLE IF EXISTS {_STAGING_TABLE_WITH_SCHEMA}']
 
 
 def test_postgres_backend_fk_methods_emit_expected_sql():
@@ -117,48 +137,46 @@ def test_postgres_backend_fk_methods_emit_expected_sql():
 
 
 def test_postgres_backend_merge_replace_uses_using_delete():
-    backend = PostgresBackend()
+    backend = PostgresBackend(staging_schema=STAGING_SCHEMA)
     session = _FakeSession(scalar_result=0)
 
-    backend.merge_replace(_ComputedTableCls, _sess(session), "target_table", "_staging_target_table", ["id", "name"])
+    backend.merge_replace(_ComputedTableCls, _sess(session), _TARGET_TABLE, ["id", "name"])
 
-    # No merge_batch_size → non-paginated path → single DELETE statement at index 0
     sql = session.statements[0]
-    assert 'DELETE FROM "target_table" t' in sql
-    assert 'USING "_staging_target_table" s' in sql
+    assert f'DELETE FROM "{_TARGET_TABLE}" t' in sql
+    assert f'USING {_STAGING_TABLE_WITH_SCHEMA} s' in sql
     assert 't."id" = s."id" AND t."name" = s."name"' in sql
+    assert f'USING {qualify_identifier(_TARGET_TABLE, STAGING_SCHEMA, _PREPARER)}' not in sql
 
 
 def test_postgres_backend_merge_insert_excludes_computed_columns():
-    backend = PostgresBackend()
+    backend = PostgresBackend(staging_schema=STAGING_SCHEMA)
     session = _FakeSession(scalar_result=0)
 
-    backend.merge_insert(_ComputedTableCls, _sess(session), "target_table", "_staging_target_table")
+    backend.merge_insert(_ComputedTableCls, _sess(session), _TARGET_TABLE)
 
-    # No merge_batch_size → non-paginated path → single INSERT statement at index 0
     sql = session.statements[0]
-    assert 'INSERT INTO "target_table" ("id", "name")' in sql
-    assert 'SELECT "id", "name" FROM "_staging_target_table"' in sql
+    assert f'INSERT INTO "{_TARGET_TABLE}" ("id", "name")' in sql
+    assert f'SELECT "id", "name" FROM {_STAGING_TABLE_WITH_SCHEMA}' in sql
 
 
 def test_postgres_backend_merge_upsert_excludes_computed_columns():
-    backend = PostgresBackend()
+    backend = PostgresBackend(staging_schema=STAGING_SCHEMA)
     session = _FakeSession(scalar_result=0)
 
-    backend.merge_upsert(_ComputedTableCls, _sess(session), "target_table", "_staging_target_table", ["id"])
+    backend.merge_upsert(_ComputedTableCls, _sess(session), _TARGET_TABLE, ["id"])
 
-    # No merge_batch_size → non-paginated path → single INSERT statement at index 0
     sql = session.statements[0]
-    assert 'INSERT INTO "target_table" ("id", "name")' in sql
+    assert f'INSERT INTO "{_TARGET_TABLE}" ("id", "name")' in sql
     assert 'ON CONFLICT ("id") DO NOTHING' in sql
 
 
 def test_postgres_backend_merge_replace_paginated_path():
-    backend = PostgresBackend()
+    backend = PostgresBackend(staging_schema=STAGING_SCHEMA)
     session = _FakeSession(scalar_result=10)
 
     backend.merge_replace(
-        _ComputedTableCls, _sess(session), "target_table", "_staging_target_table",
+        _ComputedTableCls, _sess(session), _TARGET_TABLE,
         ["id", "name"], merge_batch_size=3,
     )
 
@@ -169,11 +187,11 @@ def test_postgres_backend_merge_replace_paginated_path():
 
 
 def test_postgres_backend_merge_insert_paginated_path():
-    backend = PostgresBackend()
+    backend = PostgresBackend(staging_schema=STAGING_SCHEMA)
     session = _FakeSession(scalar_result=10)
 
     backend.merge_insert(
-        _ComputedTableCls, _sess(session), "target_table", "_staging_target_table",
+        _ComputedTableCls, _sess(session), _TARGET_TABLE,
         merge_batch_size=3,
     )
 
@@ -184,11 +202,11 @@ def test_postgres_backend_merge_insert_paginated_path():
 
 
 def test_postgres_backend_merge_upsert_paginated_path():
-    backend = PostgresBackend()
+    backend = PostgresBackend(staging_schema=STAGING_SCHEMA)
     session = _FakeSession(scalar_result=10)
 
     backend.merge_upsert(
-        _ComputedTableCls, _sess(session), "target_table", "_staging_target_table",
+        _ComputedTableCls, _sess(session), _TARGET_TABLE,
         ["id"], merge_batch_size=3,
     )
 
@@ -255,6 +273,7 @@ def test_postgres_backend_enable_fk_raises_when_show_returns_non_string():
         assert "Expected PostgreSQL FK state to be a string" in str(exc)
     else:
         raise AssertionError("Expected RuntimeError when SHOW returns a non-string")
+
 
 
 def test_postgres_backend_engine_with_replica_role_unregisters_listener(monkeypatch):

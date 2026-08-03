@@ -61,6 +61,9 @@ class LoaderContext:
         Whether to apply type casting / normalisation.
     dedupe
         Whether to perform deduplication (pre-insertion for source issues)
+    staging_schema
+        Schema the staging table lives in, passed to resolve_backend() so
+        every backend resolution within this load shares the same schema.
     """
     tableclass: Type["CSVTableProtocol"]
     session: so.Session
@@ -71,6 +74,7 @@ class LoaderContext:
     normalise: bool = True
     dedupe: bool = True
     quote_mode: str = "auto"
+    staging_schema: str | None = None
 
 class LoaderInterface:
 

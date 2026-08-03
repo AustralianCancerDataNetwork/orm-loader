@@ -6,6 +6,7 @@ import sqlalchemy as sa
 import sqlalchemy.orm as so
 from dotenv import load_dotenv
 
+from orm_loader.backends import STAGING_SCHEMA
 from tests.models import Base
 
 load_dotenv(Path(__file__).parent.parent / ".env")
@@ -65,6 +66,8 @@ def pg_engine():
 def pg_session(pg_engine):
     Session = so.sessionmaker(pg_engine, future=True)
     with pg_engine.begin() as conn:
+        conn.execute(sa.text(f"DROP SCHEMA IF EXISTS {STAGING_SCHEMA} CASCADE"))
+        conn.execute(sa.text(f"CREATE SCHEMA {STAGING_SCHEMA}"))
         Base.metadata.drop_all(conn)
         Base.metadata.create_all(conn)
 

@@ -1,6 +1,7 @@
 import sqlalchemy as sa
 import pandas as pd
 import pytest
+from orm_loader.backends import STAGING_SCHEMA
 from orm_loader.loaders.loading_helpers import infer_encoding, infer_delim, check_line_ending, quick_load_pg
 from orm_loader.config import OrmLoaderConfig
 
@@ -13,19 +14,20 @@ def test_copy_into_staging_with_extra_identity_column(pg_session, tmp_path):
     csv = tmp_path / "test_table.csv"
     pd.DataFrame([{"id": 1, "name": "alpha"}, {"id": 2, "name": "beta"}]).to_csv(csv, index=False)
 
-    SimpleTable.create_staging_table(pg_session)
+    SimpleTable.create_staging_table(pg_session, staging_schema=STAGING_SCHEMA)
     staging_name = SimpleTable.staging_tablename()
 
     cols = pg_session.execute(sa.text(
-        "SELECT column_name FROM information_schema.columns WHERE table_name = :t"
-    ), {"t": staging_name}).scalars().all()
+        "SELECT column_name FROM information_schema.columns"
+        " WHERE table_schema = :s AND table_name = :t"
+    ), {"s": STAGING_SCHEMA, "t": staging_name}).scalars().all()
     assert "_rownum" in cols, "staging table should have _rownum before COPY"
 
-    total = quick_load_pg(path=csv, session=pg_session, tablename=staging_name)
+    total = quick_load_pg(path=csv, session=pg_session, tablename=staging_name, schema=STAGING_SCHEMA)
     assert total == 2
 
     rownums = pg_session.execute(
-        sa.text(f'SELECT _rownum FROM "{staging_name}" ORDER BY _rownum')
+        sa.text(f'SELECT _rownum FROM "{STAGING_SCHEMA}"."{staging_name}" ORDER BY _rownum')
     ).scalars().all()
     assert rownums == [1, 2], "_rownum must be auto-populated by IDENTITY sequence"
 
@@ -41,7 +43,7 @@ def test_copy_and_orm_path_equivalence(pg_session, tmp_path):
         ]
     ).to_csv(csv, index=False, sep="\t")
 
-    SimpleTable.load_csv(pg_session, csv)
+    SimpleTable.load_csv(pg_session, csv, staging_schema=STAGING_SCHEMA)
     pg_session.commit()
 
     rows = pg_session.execute(sa.select(SimpleTable).order_by(SimpleTable.id)).scalars().all()
@@ -57,7 +59,7 @@ def test_postgres_copy_fast_path(pg_session, tmp_path):
     csv = tmp_path / "test_table.csv"
     pd.DataFrame([{"id": 1, "name": "alpha"}]).to_csv(csv, index=False)
 
-    inserted = SimpleTable.load_csv(pg_session, csv)
+    inserted = SimpleTable.load_csv(pg_session, csv, staging_schema=STAGING_SCHEMA)
     pg_session.commit()
 
     assert inserted == 1
@@ -76,7 +78,7 @@ def test_postgres_copy_fast_path_is_used(pg_session, tmp_path, monkeypatch):
     import orm_loader.backends.postgres as pg_backend
     monkeypatch.setattr(pg_backend, "quick_load_pg", fake_quick_load_pg)
 
-    inserted = SimpleTable.load_csv(pg_session, csv)
+    inserted = SimpleTable.load_csv(pg_session, csv, staging_schema=STAGING_SCHEMA)
     pg_session.commit()
 
     assert called["copy"] is True
@@ -94,7 +96,7 @@ def test_copy_failure_falls_back_to_orm(pg_session, tmp_path, monkeypatch):
 
     monkeypatch.setattr(pg_backend, "quick_load_pg", broken_copy)
 
-    inserted = SimpleTable.load_csv(pg_session, csv)
+    inserted = SimpleTable.load_csv(pg_session, csv, staging_schema=STAGING_SCHEMA)
     pg_session.commit()
 
     rows = pg_session.execute(sa.select(SimpleTable)).scalars().all()
@@ -107,12 +109,12 @@ def test_postgres_upsert_does_not_update(pg_session, tmp_path):
     csv = tmp_path / "test_table.csv"
 
     pd.DataFrame([{"id": 1, "name": "alpha"}]).to_csv(csv, index=False)
-    SimpleTable.load_csv(pg_session, csv)
+    SimpleTable.load_csv(pg_session, csv, staging_schema=STAGING_SCHEMA)
     pg_session.commit()
 
     pd.DataFrame([{"id": 1, "name": "alpha_updated"}]).to_csv(csv, index=False)
 
-    SimpleTable.load_csv(pg_session, csv, merge_strategy="upsert")
+    SimpleTable.load_csv(pg_session, csv, merge_strategy="upsert", staging_schema=STAGING_SCHEMA)
     pg_session.commit()
 
     rows = pg_session.execute(sa.select(SimpleTable)).scalars().all()
@@ -134,6 +136,7 @@ def test_postgres_insert_if_empty(pg_session, tmp_path):
         pg_session,
         csv,
         merge_strategy="insert_if_empty",
+        staging_schema=STAGING_SCHEMA,
     )
     pg_session.commit()
 
@@ -151,7 +154,7 @@ def test_postgres_insert_if_empty_raises_on_non_empty_target(pg_session, tmp_pat
     csv = tmp_path / "test_table.csv"
 
     pd.DataFrame([{"id": 1, "name": "alpha"}]).to_csv(csv, index=False)
-    SimpleTable.load_csv(pg_session, csv)
+    SimpleTable.load_csv(pg_session, csv, staging_schema=STAGING_SCHEMA)
     pg_session.commit()
 
     pd.DataFrame([{"id": 2, "name": "beta"}]).to_csv(csv, index=False)
@@ -161,6 +164,7 @@ def test_postgres_insert_if_empty_raises_on_non_empty_target(pg_session, tmp_pat
             pg_session,
             csv,
             merge_strategy="insert_if_empty",
+            staging_schema=STAGING_SCHEMA,
         )
 
 
@@ -173,7 +177,7 @@ def test_postgres_copy_large_batch(pg_session, tmp_path):
     )
     df.to_csv(csv, index=False)
 
-    inserted = SimpleTable.load_csv(pg_session, csv)
+    inserted = SimpleTable.load_csv(pg_session, csv, staging_schema=STAGING_SCHEMA)
     pg_session.commit()
 
     count = pg_session.execute(sa.text('SELECT COUNT(*) FROM test_table')).scalar()
@@ -186,14 +190,14 @@ def test_staging_schema_matches_target(pg_session, tmp_path):
     csv = tmp_path / "test_table.csv"
     pd.DataFrame([{"id": 1, "name": "alpha"}]).to_csv(csv, index=False)
 
-    SimpleTable.create_staging_table(pg_session)
+    SimpleTable.create_staging_table(pg_session, staging_schema=STAGING_SCHEMA)
 
     cols = pg_session.execute(sa.text("""
         SELECT column_name, data_type
         FROM information_schema.columns
-        WHERE table_name = :table
+        WHERE table_schema = :s AND table_name = :table
         ORDER BY ordinal_position
-    """), {"table": SimpleTable.staging_tablename()}).all()
+    """), {"s": STAGING_SCHEMA, "table": SimpleTable.staging_tablename()}).all()
 
     data_cols = [(name, dtype) for name, dtype in cols if name != "_rownum"]
     assert data_cols == [

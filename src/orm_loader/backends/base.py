@@ -9,6 +9,9 @@ from typing import TYPE_CHECKING, Type, Any, Iterator
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.sql.compiler import IdentifierPreparer
+
+from ..helpers.sql import qualify_identifier
 
 if TYPE_CHECKING:
     from ..loaders.data_classes import LoaderContext
@@ -37,6 +40,9 @@ class Dialect(str, Enum):
     POSTGRESQL = "postgresql"
 
 
+STAGING_SCHEMA: str = "staging"
+
+
 class DatabaseBackend(ABC):
     """
     Abstract base class for database-specific loader behavior.
@@ -44,6 +50,56 @@ class DatabaseBackend(ABC):
     This class defines the stable contract for future backend implementations
     without changing existing loader orchestration yet.
     """
+
+    def __init__(self, staging_schema: str | None = None) -> None:
+        """
+        Parameters
+        ----------
+        staging_schema
+            Schema in which staging tables are created. ``None`` means no
+            schema qualification — staging tables land in whatever schema the
+            connection's search_path resolves to. Backends that support
+            schema-isolated staging (e.g. PostgreSQL, DuckDB) should declare
+            their own ``__init__`` that defaults this to ``STAGING_SCHEMA``
+            rather than relying on this base default. SQLite has no schema
+            concept and always passes ``None``.
+        """
+        self.staging_schema = staging_schema
+
+    @staticmethod
+    @abstractmethod
+    def staging_name_for_table(tablename: str) -> str:
+        """
+        Return the unqualified staging table name for a given target tablename.
+
+        Parameters
+        ----------
+        tablename
+            The target table's ``__tablename__``.
+
+        Returns
+        -------
+        str
+            The staging table name (no schema prefix).
+        """
+
+    def qualified_staging_name(self, tablename: str) -> str:
+        """
+        Return the fully schema-qualified staging identifier.
+
+        Parameters
+        ----------
+        tablename
+            The target table's ``__tablename__``.
+
+        Returns
+        -------
+        str
+            e.g. '"staging"."_staging_concept"' or '"_staging_concept"'.
+        """
+        return qualify_identifier(
+            self.staging_name_for_table(tablename), self.staging_schema, self.identifier_preparer
+        )
 
     @property
     @abstractmethod
@@ -54,6 +110,11 @@ class DatabaseBackend(ABC):
     @abstractmethod
     def dialect(self) -> Dialect:
         """SQLAlchemy dialect handled by this backend."""
+
+    @property
+    @abstractmethod
+    def identifier_preparer(self) -> IdentifierPreparer:
+        """The dialect-specific identifier preparer used to quote/escape SQL identifiers."""
 
     @property
     @abstractmethod
@@ -123,22 +184,20 @@ class DatabaseBackend(ABC):
         self,
         table_cls: Type["CSVTableProtocol"],
         session: so.Session,
-        staging_name: str,
     ) -> None:
         """Create a staging table for the supplied ORM table class."""
 
     @abstractmethod
     def drop_staging_table(
         self,
+        table_cls: Type["CSVTableProtocol"],
         session: so.Session,
-        staging_name: str,
     ) -> None:
         """Drop a staging table if it exists."""
 
     def load_staging_fast(
         self,
         loader_context: "LoaderContext",
-        staging_name: str,
     ) -> int | None:
         """
         Attempt a backend-native fast-path load.
@@ -179,7 +238,6 @@ class DatabaseBackend(ABC):
         table_cls: Type["CSVTableProtocol"],
         session: so.Session,
         target_name: str,
-        staging_name: str,
         pk_cols: list[str],
         *,
         merge_batch_size: int | None = None,
@@ -192,7 +250,6 @@ class DatabaseBackend(ABC):
         table_cls: Type["CSVTableProtocol"],
         session: so.Session,
         target_name: str,
-        staging_name: str,
         pk_cols: list[str],
         *,
         merge_batch_size: int | None = None,
@@ -205,7 +262,6 @@ class DatabaseBackend(ABC):
         table_cls: Type["CSVTableProtocol"],
         session: so.Session,
         target_name: str,
-        staging_name: str,
         *,
         merge_batch_size: int | None = None,
     ) -> None:

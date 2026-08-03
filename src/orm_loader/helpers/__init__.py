@@ -9,6 +9,7 @@ from .bulk import bulk_load_context, engine_with_replica_role
 from .metadata import Base
 from .discovery import get_model_by_tablename
 from .null_handlers import normalise_null
+from .sql import qualify_identifier
 
 __all__ = [
     "IngestError",
@@ -23,4 +24,5 @@ __all__ = [
     "Base",
     "get_model_by_tablename",
     "normalise_null",
+    "qualify_identifier",
 ]
