@@ -58,7 +58,10 @@ dev = [
     "requests>=2.33.0",
     "mkdocs>=1.6.1",
     "mkdocs-mermaid2-plugin",
-    "Pygments>=2.20.0",
+    # Pinned below 2.20 (the current latest): 2.20.0's HtmlFormatter passes filename=None
+    # through to html.escape() and crashes `mkdocs build`. Fix is merged upstream for a
+    # future 2.20.1 but not yet released. https://github.com/pygments/pygments/issues/3076
+    "Pygments>=2.19.1,<2.20",
     "python-dotenv"
 ]
 
