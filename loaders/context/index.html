@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
     
     
       
@@ -1508,6 +1508,18 @@ into a staging table, without relying on global variables.</p>
             <td>
               <div class="doc-md-description">
                 <p>Whether to perform deduplication (pre-insertion for source issues)</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="orm_loader.loaders.data_classes.LoaderContext.staging_schema">staging_schema</span></code></td>
+            <td>
+                  <code><span title="str">str</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Schema the staging table lives in, passed to resolve_backend() so
+every backend resolution within this load shares the same schema.</p>
               </div>
             </td>
           </tr>

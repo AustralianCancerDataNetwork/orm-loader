@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
     
     
       
@@ -1369,7 +1369,7 @@ not attempt to provide concurrency guarantees.</p>
 
 
 <h2 id="orm_loader.tables.loadable_table.CSVLoadableTableInterface.create_staging_table" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">create_staging_table</span><span class="p">(</span><span class="n">session</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">create_staging_table</span><span class="p">(</span><span class="n">session</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">staging_schema</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-classmethod"><code>classmethod</code></small>
@@ -1410,6 +1410,23 @@ The staging table schema mirrors the target table schema.</p>
             </td>
             <td>
                 <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>staging_schema</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Schema the staging table should be created in. <code>None</code> means no
+schema qualification (backend-default behavior).</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
             </td>
           </tr>
       </tbody>
@@ -1504,7 +1521,7 @@ Override this method to implement custom column mappings.</p>
 
 
 <h2 id="orm_loader.tables.loadable_table.CSVLoadableTableInterface.drop_staging_table" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">drop_staging_table</span><span class="p">(</span><span class="n">session</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">drop_staging_table</span><span class="p">(</span><span class="n">session</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">staging_schema</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-classmethod"><code>classmethod</code></small>
@@ -1518,6 +1535,54 @@ Override this method to implement custom column mappings.</p>
         <p>Drop the staging table if it exists.</p>
 
 
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>session</code>
+            </td>
+            <td>
+                  <code><span title="sqlalchemy.orm.Session">Session</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>An active SQLAlchemy session bound to an engine.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>staging_schema</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Schema the staging table lives in. <code>None</code> means no schema
+qualification (backend-default behavior).</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
     </div>
 
 </div>
@@ -1526,7 +1591,7 @@ Override this method to implement custom column mappings.</p>
 
 
 <h2 id="orm_loader.tables.loadable_table.CSVLoadableTableInterface.get_staging_table" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">get_staging_table</span><span class="p">(</span><span class="n">session</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">get_staging_table</span><span class="p">(</span><span class="n">session</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">staging_schema</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-classmethod"><code>classmethod</code></small>
@@ -1567,6 +1632,23 @@ Override this method to implement custom column mappings.</p>
                 <em>required</em>
             </td>
           </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>staging_schema</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Schema the staging table lives in. <code>None</code> means no schema
+qualification (backend-default behavior).</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
       </tbody>
     </table>
 
@@ -1602,7 +1684,7 @@ Override this method to implement custom column mappings.</p>
 
 
 <h2 id="orm_loader.tables.loadable_table.CSVLoadableTableInterface.load_csv" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">load_csv</span><span class="p">(</span><span class="n">session</span><span class="p">,</span> <span class="n">path</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">loader</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">normalise</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">dedupe</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">chunksize</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">merge_strategy</span><span class="o">=</span><span class="s1">&#39;replace&#39;</span><span class="p">,</span> <span class="n">quote_mode</span><span class="o">=</span><span class="s1">&#39;auto&#39;</span><span class="p">,</span> <span class="n">index_strategy</span><span class="o">=</span><span class="s1">&#39;auto&#39;</span><span class="p">,</span> <span class="n">merge_batch_size</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">load_csv</span><span class="p">(</span><span class="n">session</span><span class="p">,</span> <span class="n">path</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">loader</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">normalise</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">dedupe</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">chunksize</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">merge_strategy</span><span class="o">=</span><span class="s1">&#39;replace&#39;</span><span class="p">,</span> <span class="n">quote_mode</span><span class="o">=</span><span class="s1">&#39;auto&#39;</span><span class="p">,</span> <span class="n">index_strategy</span><span class="o">=</span><span class="s1">&#39;auto&#39;</span><span class="p">,</span> <span class="n">merge_batch_size</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">staging_schema</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-classmethod"><code>classmethod</code></small>
@@ -1778,6 +1860,25 @@ the backend choose a sensible default.</p>
                   <code>&#39;auto&#39;</code>
             </td>
           </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>staging_schema</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Schema the staging table lives in. <code>None</code> means no schema
+qualification (backend-default behavior). Threaded through
+every internal step of the load lifecycle so they all resolve
+the same backend/schema.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
       </tbody>
     </table>
 
@@ -1907,7 +2008,7 @@ supported, falling back to an ORM-based loader if necessary.</p>
 
 
 <h2 id="orm_loader.tables.loadable_table.CSVLoadableTableInterface.manage_indices" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">manage_indices</span><span class="p">(</span><span class="n">session</span><span class="p">,</span> <span class="n">index_strategy</span><span class="o">=</span><span class="s1">&#39;auto&#39;</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">manage_indices</span><span class="p">(</span><span class="n">session</span><span class="p">,</span> <span class="n">index_strategy</span><span class="o">=</span><span class="s1">&#39;auto&#39;</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">staging_schema</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-classmethod"><code>classmethod</code></small>
@@ -1933,7 +2034,7 @@ and rebuilds them.</p>
 
 
 <h2 id="orm_loader.tables.loadable_table.CSVLoadableTableInterface.merge_from_staging" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">merge_from_staging</span><span class="p">(</span><span class="n">session</span><span class="p">,</span> <span class="n">merge_strategy</span><span class="o">=</span><span class="s1">&#39;replace&#39;</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">merge_batch_size</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">merge_from_staging</span><span class="p">(</span><span class="n">session</span><span class="p">,</span> <span class="n">merge_strategy</span><span class="o">=</span><span class="s1">&#39;replace&#39;</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">merge_batch_size</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">staging_schema</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-classmethod"><code>classmethod</code></small>
@@ -1989,6 +2090,23 @@ and rebuilds them.</p>
             </td>
             <td>
                   <code>&#39;replace&#39;</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>staging_schema</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Schema the staging table lives in. <code>None</code> means no schema
+qualification (backend-default behavior).</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
             </td>
           </tr>
       </tbody>
@@ -2060,9 +2178,6 @@ and rebuilds them.</p>
     <div class="doc doc-contents ">
 
         <p>Return the name of the staging table for this model.</p>
-<p>If a custom staging table name has been set on the class, it is
-used; otherwise a default name derived from <code>__tablename__</code>
-is returned.</p>
 
 
     <p><span class="doc-section-title">Returns:</span></p>
@@ -2080,7 +2195,7 @@ is returned.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The staging table name.</p>
+                <p>The staging table name, derived from <code>__tablename__</code>.</p>
               </div>
             </td>
           </tr>
