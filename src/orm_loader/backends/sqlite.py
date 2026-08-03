@@ -41,11 +41,12 @@ class SQLiteBackend(DatabaseBackend):
         defer_foreign_keys: bool = True,
     ) -> None:
         if staging_schema is not None:
-            raise ValueError(
+            logger.warning(
                 "SQLite does not support schema-qualified staging tables; "
-                f"got staging_schema={staging_schema!r}. Pass None (the default)."
+                f"got staging_schema={staging_schema!r}. Setting staging_schema=None."
             )
-        super().__init__(staging_schema=None)
+            staging_schema = None
+        super().__init__(staging_schema=staging_schema)
         self.busy_timeout_ms = busy_timeout_ms
         self.journal_mode = self._validate_journal_mode(journal_mode)
         self.defer_foreign_keys = defer_foreign_keys
