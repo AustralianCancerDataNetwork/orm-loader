@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from oa_configurator import DatabaseConfig, PackageConfigBase, ResourceSpec
+from oa_configurator import (
+    DatabaseConfig, 
+    PackageConfigBase, 
+    ResourceSpec,
+    ResourceKind
+)
 
 
 class OrmLoaderConfig(PackageConfigBase):
@@ -22,8 +27,7 @@ class OrmLoaderConfig(PackageConfigBase):
         display_name="ORM Loader Test Database",
         description="PostgreSQL database for running orm-loader integration tests.",
         connection_name_hint="pg_test_orm",
-        is_cdm_database=False,
-        cdm_schema_default="public",
+        resource_kind=ResourceKind.cdm,
         connection_defaults=DatabaseConfig(
             dialect="postgresql+psycopg",
             host="localhost",
