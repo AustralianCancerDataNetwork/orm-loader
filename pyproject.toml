@@ -9,7 +9,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "chardet>=5.2.0",
-    "oa-configurator==0.1.2",  # TODO: bump to >=1.0.0,<2.0.0
+    "oa-configurator>=1.0.0,<2.0.0",
     "pandas>=2.3.3",
     "pyarrow>=23.0.1",
     "sqlalchemy>=2.0.45",
@@ -17,7 +17,7 @@ dependencies = [
 
 
 classifiers = [
-  "Development Status :: 4 - Beta",
+  "Development Status :: 5 - Production/Stable",
   "Intended Audience :: Science/Research",
   "Intended Audience :: Developers",
   "Topic :: Scientific/Engineering :: Medical Science Apps.",
@@ -49,7 +49,7 @@ postgres = [
   "psycopg[binary]>=3.2",
 ]
 dev = [
-    "oa-configurator[postgres]==0.1.2",  # TODO: bump to >=1.0.0,<2.0.0
+    "oa-configurator[postgres]>=1.0.0,<2.0.0",
     "pytest>=9.0.3",
     "ty>=0.0.59",
     "ruff>=0.14.11",
