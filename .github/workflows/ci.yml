@@ -12,9 +12,12 @@ jobs:
       postgres-db: orm_loader_test
       setup-commands: |
         uv run omop-config configure orm_loader \
-          --test-dialect postgresql+psycopg \
-          --test-host localhost \
-          --test-port 5432 \
-          --test-user test \
-          --test-password test \
-          --test-database-name orm_loader_test
+          --set test_orm_db.kind=cdm \
+          --set test_orm_db.connection.dialect=postgresql+psycopg \
+          --set test_orm_db.connection.host=localhost \
+          --set test_orm_db.connection.port=5432 \
+          --set test_orm_db.connection.user=test \
+          --set test_orm_db.connection.password=test \
+          --set test_orm_db.connection.database_name=orm_loader_test \
+          --set test_orm_db.connection.test_only=true \
+          --set test_orm_db.schema_name=public
