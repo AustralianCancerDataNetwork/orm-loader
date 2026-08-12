@@ -67,18 +67,6 @@ class CSVLoadableTableInterface(ORMTableBase):
     __abstract__ = True
 
     @classmethod
-    def staging_tablename(cls: Type[CSVTableProtocol]) -> str:
-        """
-        Return the name of the staging table for this model.
-
-        Returns
-        -------
-        str
-            The staging table name, derived from ``__tablename__``.
-        """
-        return f"_staging_{cls.__tablename__}"
-    
-    @classmethod
     def create_staging_table(
         cls: Type[CSVTableProtocol],
         session: so.Session,
