@@ -58,11 +58,12 @@ class DatabaseBackend(ABC):
         staging_schema
             Schema in which staging tables are created. ``None`` means no
             schema qualification — staging tables land in whatever schema the
-            connection's search_path resolves to. Backends that support
-            schema-isolated staging (e.g. PostgreSQL, DuckDB) should declare
-            their own ``__init__`` that defaults this to ``STAGING_SCHEMA``
-            rather than relying on this base default. SQLite has no schema
-            concept and always passes ``None``.
+            connection's search_path resolves to. Callers that want
+            schema-isolated staging can pass an explicit schema; backends must
+            not enable it implicitly because the schema may not have been
+            provisioned. ``STAGING_SCHEMA`` provides a shared convention for
+            callers that opt in. SQLite has no schema concept and always uses
+            ``None``.
         """
         self.staging_schema = staging_schema
 

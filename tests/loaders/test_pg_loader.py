@@ -1,7 +1,7 @@
 import sqlalchemy as sa
 import pandas as pd
 import pytest
-from orm_loader.backends import STAGING_SCHEMA
+from orm_loader.backends import STAGING_SCHEMA, resolve_backend
 from orm_loader.loaders.loading_helpers import infer_encoding, infer_delim, check_line_ending, quick_load_pg
 
 from tests.models import SimpleTable
@@ -14,7 +14,7 @@ def test_copy_into_staging_with_extra_identity_column(pg_session, tmp_path):
     pd.DataFrame([{"id": 1, "name": "alpha"}, {"id": 2, "name": "beta"}]).to_csv(csv, index=False)
 
     SimpleTable.create_staging_table(pg_session, staging_schema=STAGING_SCHEMA)
-    staging_name = SimpleTable.staging_tablename()
+    staging_name = resolve_backend(pg_session).staging_name_for_table(SimpleTable.__tablename__)
 
     cols = pg_session.execute(sa.text(
         "SELECT column_name FROM information_schema.columns"
@@ -190,13 +190,14 @@ def test_staging_schema_matches_target(pg_session, tmp_path):
     pd.DataFrame([{"id": 1, "name": "alpha"}]).to_csv(csv, index=False)
 
     SimpleTable.create_staging_table(pg_session, staging_schema=STAGING_SCHEMA)
+    staging_name = resolve_backend(pg_session).staging_name_for_table(SimpleTable.__tablename__)
 
     cols = pg_session.execute(sa.text("""
         SELECT column_name, data_type
         FROM information_schema.columns
         WHERE table_schema = :s AND table_name = :table
         ORDER BY ordinal_position
-    """), {"s": STAGING_SCHEMA, "table": SimpleTable.staging_tablename()}).all()
+    """), {"s": STAGING_SCHEMA, "table": staging_name}).all()
 
     data_cols = [(name, dtype) for name, dtype in cols if name != "_rownum"]
     assert data_cols == [

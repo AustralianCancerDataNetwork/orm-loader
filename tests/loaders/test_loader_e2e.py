@@ -8,6 +8,7 @@ import sqlalchemy as sa
 import sqlalchemy.event as sae
 import sqlalchemy.orm as so
 
+from orm_loader.backends import resolve_backend
 from orm_loader.loaders.data_classes import _clean_nulls
 from orm_loader.loaders.loader_interface import PandasLoader
 from orm_loader.tables.loadable_table import CSVLoadableTableInterface
@@ -280,7 +281,8 @@ def test_insert_if_empty_raises_on_non_empty_target(session, engine, tmp_path):
         )
 
     inspector = sa.inspect(engine)
-    assert not inspector.has_table(SimpleTable.staging_tablename())
+    staging_name = resolve_backend(engine).staging_name_for_table(SimpleTable.__tablename__)
+    assert not inspector.has_table(staging_name)
 
 
 @pytest.mark.parametrize("merge_strategy", ["replace", "upsert"])
@@ -341,7 +343,8 @@ def test_staging_table_is_created_and_dropped(session, engine, tmp_path):
     session.commit()
 
     inspector = sa.inspect(engine)
-    assert not inspector.has_table(SimpleTable.staging_tablename())
+    staging_name = resolve_backend(engine).staging_name_for_table(SimpleTable.__tablename__)
+    assert not inspector.has_table(staging_name)
 
 
 def test_composite_pk_replace_merge(session, tmp_path):
