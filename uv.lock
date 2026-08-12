@@ -595,11 +595,6 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
-postgres = [
-    { name = "psycopg", extra = ["binary"] },
-]
-
-[package.dev-dependencies]
 dev = [
     { name = "mkdocs" },
     { name = "mkdocs-material" },
@@ -613,32 +608,31 @@ dev = [
     { name = "ruff" },
     { name = "ty" },
 ]
+postgres = [
+    { name = "psycopg", extra = ["binary"] },
+]
 
 [package.metadata]
 requires-dist = [
     { name = "chardet", specifier = ">=5.2.0" },
+    { name = "mkdocs", marker = "extra == 'dev'", specifier = ">=1.6.1" },
+    { name = "mkdocs-material", marker = "extra == 'dev'", specifier = ">=9.7.7" },
+    { name = "mkdocs-mermaid2-plugin", marker = "extra == 'dev'" },
+    { name = "mkdocstrings-python", marker = "extra == 'dev'", specifier = ">=2.0.1" },
     { name = "oa-configurator", specifier = ">=1.0.0,<2.0.0" },
+    { name = "oa-configurator", extras = ["postgres"], marker = "extra == 'dev'", specifier = ">=1.0.0,<2.0.0" },
     { name = "pandas", specifier = ">=2.3.3" },
     { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.2" },
     { name = "pyarrow", specifier = ">=23.0.1" },
+    { name = "pygments", marker = "extra == 'dev'", specifier = ">=2.20.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0.3" },
+    { name = "python-dotenv", marker = "extra == 'dev'" },
+    { name = "requests", marker = "extra == 'dev'", specifier = ">=2.33.0" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.14.11" },
     { name = "sqlalchemy", specifier = ">=2.0.45" },
+    { name = "ty", marker = "extra == 'dev'", specifier = ">=0.0.59" },
 ]
-provides-extras = ["postgres"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "mkdocs", specifier = ">=1.6.1" },
-    { name = "mkdocs-material", specifier = ">=9.7.7" },
-    { name = "mkdocs-mermaid2-plugin" },
-    { name = "mkdocstrings-python", specifier = ">=2.0.1" },
-    { name = "oa-configurator", extras = ["postgres"], specifier = ">=1.0.0,<2.0.0" },
-    { name = "pygments", specifier = ">=2.20.0" },
-    { name = "pytest", specifier = ">=9.0.3" },
-    { name = "python-dotenv" },
-    { name = "requests", specifier = ">=2.33.0" },
-    { name = "ruff", specifier = ">=0.14.11" },
-    { name = "ty", specifier = ">=0.0.59" },
-]
+provides-extras = ["dev", "postgres"]
 
 [[package]]
 name = "packaging"
