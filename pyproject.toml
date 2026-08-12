@@ -6,6 +6,7 @@ readme = "README.md"
 authors = [
     { name = "gkennos", email = "georgina.kennedy@unsw.edu.au" }
 ]
+license = { text = "Apache-2.0" }
 requires-python = ">=3.12"
 dependencies = [
     "chardet>=5.2.0",
