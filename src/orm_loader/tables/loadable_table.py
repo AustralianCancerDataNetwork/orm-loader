@@ -65,7 +65,7 @@ class CSVLoadableTableInterface(ORMTableBase):
     """
 
     __abstract__ = True
-    
+
     @classmethod
     def create_staging_table(
         cls: Type[CSVTableProtocol],
