@@ -48,20 +48,19 @@ packages = ["src/orm_loader"]
 postgres = [
   "psycopg[binary]>=3.2",
 ]
+
+[dependency-groups]
 dev = [
     "oa-configurator[postgres]>=1.0.0,<2.0.0",
     "pytest>=9.0.3",
     "ty>=0.0.59",
     "ruff>=0.14.11",
-    "mkdocs-material>=9.7.1",
+    "mkdocs-material>=9.7.7",
     "mkdocstrings-python>=2.0.1",
     "requests>=2.33.0",
     "mkdocs>=1.6.1",
     "mkdocs-mermaid2-plugin",
-    # Pinned below 2.20 (the current latest): 2.20.0's HtmlFormatter passes filename=None
-    # through to html.escape() and crashes `mkdocs build`. Fix is merged upstream for a
-    # future 2.20.1 but not yet released. https://github.com/pygments/pygments/issues/3076
-    "Pygments>=2.19.1,<2.20",
+    "Pygments>=2.20.0",
     "python-dotenv"
 ]
 
