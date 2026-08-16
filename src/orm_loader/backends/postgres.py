@@ -93,8 +93,8 @@ class PostgresBackend(DatabaseBackend):
         self,
         loader_context: "LoaderContext",
     ) -> int | None:
-        # Imported lazily, not at module scope: `orm_loader.backends` is
-        # reachable during `orm_loader.loaders`' own import chain
+        # Imported lazily: `orm_loader.backends` is reachable during 
+        # `orm_loader.loaders`' import chain
         # (loaders -> loading_helpers -> helpers.sql -> helpers.sqlite ->
         # backends.sqlite -> backends/__init__.py -> backends.postgres), so a
         # module-scope import back into `..loaders.loading_helpers` here
