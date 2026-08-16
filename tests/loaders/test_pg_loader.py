@@ -74,8 +74,8 @@ def test_postgres_copy_fast_path_is_used(pg_session, tmp_path, monkeypatch):
         called["copy"] = True
         return 1
 
-    import orm_loader.backends.postgres as pg_backend
-    monkeypatch.setattr(pg_backend, "quick_load_pg", fake_quick_load_pg)
+    import orm_loader.loaders.loading_helpers as loading_helpers
+    monkeypatch.setattr(loading_helpers, "quick_load_pg", fake_quick_load_pg)
 
     inserted = SimpleTable.load_csv(pg_session, csv, staging_schema=STAGING_SCHEMA)
     pg_session.commit()
@@ -88,12 +88,15 @@ def test_copy_failure_falls_back_to_orm(pg_session, tmp_path, monkeypatch):
     csv = tmp_path / "test_table.csv"
     pd.DataFrame([{"id": 1, "name": "alpha"}]).to_csv(csv, index=False)
 
-    import orm_loader.backends.postgres as pg_backend
+    # See test_postgres_copy_fast_path_is_used above: `quick_load_pg` is
+    # imported lazily from `loaders.loading_helpers`, so that's what needs
+    # patching, not `backends.postgres`.
+    import orm_loader.loaders.loading_helpers as loading_helpers
 
     def broken_copy(*args, **kwargs):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(pg_backend, "quick_load_pg", broken_copy)
+    monkeypatch.setattr(loading_helpers, "quick_load_pg", broken_copy)
 
     inserted = SimpleTable.load_csv(pg_session, csv, staging_schema=STAGING_SCHEMA)
     pg_session.commit()

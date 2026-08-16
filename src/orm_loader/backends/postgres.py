@@ -9,7 +9,6 @@ import sqlalchemy.orm as so
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.sql.compiler import IdentifierPreparer
 
-from ..loaders.loading_helpers import quick_load_pg
 from .base import BackendCapabilities, DatabaseBackend, Dialect
 
 if TYPE_CHECKING:
@@ -94,6 +93,8 @@ class PostgresBackend(DatabaseBackend):
         self,
         loader_context: "LoaderContext",
     ) -> int | None:
+        from ..loaders.loading_helpers import quick_load_pg
+
         tablename = loader_context.tableclass.__tablename__
         return quick_load_pg(
             path=loader_context.path,
