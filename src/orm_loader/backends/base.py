@@ -162,7 +162,7 @@ class DatabaseBackend(ABC):
     def _as_connection(
         self,
         bind: Engine | Connection,
-    ) -> Generator[Connection]:
+    ) -> Generator[Connection, None, None]:
         if isinstance(bind, Engine):
             with bind.begin() as conn:
                 yield conn

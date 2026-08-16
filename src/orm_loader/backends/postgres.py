@@ -93,14 +93,6 @@ class PostgresBackend(DatabaseBackend):
         self,
         loader_context: "LoaderContext",
     ) -> int | None:
-        # Imported lazily: `orm_loader.backends` is reachable during 
-        # `orm_loader.loaders`' import chain
-        # (loaders -> loading_helpers -> helpers.sql -> helpers.sqlite ->
-        # backends.sqlite -> backends/__init__.py -> backends.postgres), so a
-        # module-scope import back into `..loaders.loading_helpers` here
-        # created a circular import that broke `import orm_loader.loaders`
-        # entirely, for every consumer, regardless of whether Postgres was
-        # even in use.
         from ..loaders.loading_helpers import quick_load_pg
 
         tablename = loader_context.tableclass.__tablename__
