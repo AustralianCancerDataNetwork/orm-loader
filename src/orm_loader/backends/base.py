@@ -4,14 +4,13 @@ from abc import ABC, abstractmethod
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Type, Any, Iterator
+from collections.abc import Generator
+from typing import TYPE_CHECKING, Type, Any
 
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.sql.compiler import IdentifierPreparer
-
-from ..helpers.sql import qualify_identifier
 
 if TYPE_CHECKING:
     from ..loaders.data_classes import LoaderContext
@@ -98,6 +97,8 @@ class DatabaseBackend(ABC):
         str
             e.g. '"staging"."_staging_concept"' or '"_staging_concept"'.
         """
+        from ..helpers.sql import qualify_identifier
+
         return qualify_identifier(
             self.staging_name_for_table(tablename), self.staging_schema, self.identifier_preparer
         )
@@ -161,7 +162,7 @@ class DatabaseBackend(ABC):
     def _as_connection(
         self,
         bind: Engine | Connection,
-    ) -> Iterator[Connection]:
+    ) -> Generator[Connection]:
         if isinstance(bind, Engine):
             with bind.begin() as conn:
                 yield conn
