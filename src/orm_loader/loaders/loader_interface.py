@@ -90,11 +90,7 @@ class PandasLoader(LoaderInterface):
                 lambda v: perform_cast(v, sa_col.type, on_error=_on_cast_error)
             )
 
-        required_cols = [
-            name
-            for name, col in model_columns.items()
-            if not col.nullable and not col.default and not col.server_default
-        ]
+        required_cols = [c for c in ctx.tableclass.required_columns() if c in df.columns]
 
         if required_cols:
             null_mask = df[required_cols].isna()
@@ -195,11 +191,7 @@ class ParquetLoader(LoaderInterface):
             )
 
         out = pa.table(arrays)
-        required_cols = [
-            name
-            for name, col in model_columns.items()
-            if not col.nullable and not col.default and not col.server_default
-        ]
+        required_cols = [c for c in ctx.tableclass.required_columns() if c in out.schema.names]
 
         if required_cols:
             masks = [pc.is_valid(out[c]) for c in required_cols]            # type: ignore

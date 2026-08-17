@@ -8,6 +8,26 @@ from ..helpers import normalise_null
 
 logger = logging.getLogger(__name__)
 
+
+def _resolves_to_autoincrement(c: sa.Column) -> bool:
+    """Whether a column will actually autoincrement, resolving SQLAlchemy's
+    own default ``autoincrement="auto"`` sentinel the same way SQLAlchemy
+    itself does at DDL-emission time.
+
+    SQLAlchemy restricts real autoincrement behaviour to a single-column 
+    integer primary key (or an explicit ``autoincrement=True``). 
+    Treating every `"auto"` column as autoincrementing would wrongly 
+    exclude genuinely-required string PKs from `required_columns()`.
+    """
+    if c.autoincrement is False:
+        return False
+    if c.autoincrement is True:
+        return True
+    if not c.primary_key:
+        return False
+    pk_columns = list(c.table.primary_key.columns)
+    return len(pk_columns) == 1 and pk_columns[0] is c and isinstance(c.type, sa.Integer)
+
 """
 ORMTableBase
 ============
@@ -164,6 +184,8 @@ class ORMTableBase:
         - non-nullable
         - has no Python-side default
         - has no server-side default
+        - not an autoincrementing column (the database assigns its value;
+          it's never expected in inbound data at all)
 
         This method is intended for ingestion-time validation and does
         not attempt to enforce schema semantics beyond insert viability.
@@ -177,7 +199,10 @@ class ORMTableBase:
         return {
             c.key
             for c in mapper.columns
-            if not c.nullable and not c.default and not c.server_default
+            if not c.nullable
+            and not c.default
+            and not c.server_default
+            and not _resolves_to_autoincrement(c)
         }
 
     @classmethod
