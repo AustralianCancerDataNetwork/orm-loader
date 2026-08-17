@@ -65,6 +65,35 @@ def _normalise_null(value: Any) -> Any | None:
 
     return value
 
+# Vectorised mirror of _normalise_null, for the Arrow path. Kept alongside it
+# deliberately: the two must agree, or the same file loaded via PandasLoader and
+# ParquetLoader lands different values in staging. Only the sentinels are nulled
+# -- a non-sentinel is passed through untouched (" 42 " stays " 42 "), exactly as
+# the scalar version does, leaving whitespace for the per-type rules to strip.
+_ARROW_NULL_STRINGS = pa.array(sorted(_NULL_STRINGS | {""}), type=pa.string())
+
+
+def _normalise_null_arrow(arr: pa.Array | pa.ChunkedArray) -> pa.Array | pa.ChunkedArray:
+    arrow_type = arr.type
+
+    if pa.types.is_string(arrow_type) or pa.types.is_large_string(arrow_type):
+        probe = pc.utf8_lower(pc.utf8_trim_whitespace(arr))                 # type: ignore
+        return pc.if_else(                                                  # type: ignore
+            pc.is_in(probe, value_set=_ARROW_NULL_STRINGS),                 # type: ignore
+            pa.nulls(len(arr), arrow_type),
+            arr,
+        )
+
+    if pa.types.is_floating(arrow_type):
+        return pc.if_else(                                                  # type: ignore
+            pc.is_nan(arr),                                                 # type: ignore
+            pa.nulls(len(arr), arrow_type),
+            arr,
+        )
+
+    return arr
+
+
 def _to_numeric_string(value: str | None) -> str | None:
     if value is None:
         return None
@@ -179,18 +208,49 @@ _COLUMN_CAST_RULES: dict[tuple[str, str], Callable[[Any], Any]] = {}
 
 
 def _enum_member_scalar(enum_type: type[Enum]) -> Callable[[Any], Any]:
+    # Built once per registration rather than per row: every CSV load reads with
+    # dtype=str, so an int-valued member arrives as "1" -- which neither
+    # enum_type(value) nor enum_type(str(value)) can match.
+    _by_str_value = {str(member.value).strip(): member.name for member in enum_type}
+
     def _scalar(value: Any) -> Any:
         if value is None:
             return None
-        s = str(value).strip()
-        if s == "":
-            return None
+
         # Match by .value (the raw display text a real data source uses),
         # store by .name -- sa.Enum's own default column-storage convention.
         # The staging-to-target merge is a plain SQL copy with no Python-level
         # type translation, so this must already be exactly what the column
         # expects to find; .name is that default for an unmodified sa.Enum.
-        return enum_type(s).name  # raises ValueError on no matching member
+
+        # Already the right member: only reachable via direct cast_scalar use,
+        # since file sources yield raw scalars. Handled ahead of the str()
+        # fallback, which would mangle it to "SomeEnum.MEMBER".
+        if isinstance(value, enum_type):
+            return value.name
+
+        # Raw value first, so enums whose member values aren't strings
+        # (IntEnum and friends -- sa.Enum still persists .name for those) match
+        # without a lossy str() round-trip.
+        try:
+            return enum_type(value).name
+        except (ValueError, KeyError, TypeError):
+            pass
+
+        s = str(value).strip()
+        if s == "":
+            return None
+        try:
+            return enum_type(s).name
+        except (ValueError, KeyError, TypeError):
+            pass
+
+        try:
+            return _by_str_value[s]
+        except KeyError:
+            # Raise rather than return None, so an unmatched value goes through
+            # the on_error/TableCastingStats path like every other cast failure.
+            raise ValueError(f"{value!r} matches no {enum_type.__name__} member value")
     return _scalar
 
 
@@ -205,7 +265,9 @@ def register_column_cast_rule(
     Register custom cast/validation logic for one specific column.
 
     If `enum_type` is given, the raw value is matched against its members
-    by `.value` and coerced to the matching member's `.name`. 
+    by `.value` and coerced to the matching member's `.name`. Member values
+    need not be strings -- an `IntEnum` matches both `1` (a parquet int64
+    column) and `"1"` (any CSV column, since those are read with dtype=str).
     
     This is `sa.Enum`'s default column-storage convention, and covers genuine
     `sa.Enum(enum_type)` columns with no further setup. An unmatched value
@@ -342,6 +404,13 @@ def perform_cast(
 
 
 def cast_arrow_column(arr: pa.Array, sa_col: ColumnElement[Any], stats: TableCastingStats | None = None) -> pa.Array:
+    # Ahead of every branch below, and ahead of the per-column override in
+    # particular: cast_scalar normalises nulls before it dispatches, so this
+    # path has to as well. Without it, text sentinels ("NULL", "n/a") survive
+    # into staging on the plain String branch, and get counted as genuine cast
+    # failures on the override branch -- warning about rows that are just null.
+    arr = _normalise_null_arrow(arr)
+
     column_rule = _COLUMN_CAST_RULES.get((sa_col.table.name, sa_col.name))
     if column_rule is not None:
         values: list[Any] = []
