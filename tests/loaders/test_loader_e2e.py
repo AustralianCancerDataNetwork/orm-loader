@@ -9,6 +9,7 @@ import sqlalchemy.event as sae
 import sqlalchemy.orm as so
 
 from orm_loader.backends import resolve_backend
+from orm_loader.helpers import IngestError
 from orm_loader.loaders.data_classes import _clean_nulls
 from orm_loader.loaders.loader_interface import PandasLoader
 from orm_loader.tables.loadable_table import CSVLoadableTableInterface
@@ -142,6 +143,24 @@ def test_required_column_violation_drops_rows(session, tmp_path):
     session.commit()
 
     assert inserted == 1
+
+
+def test_required_column_entirely_missing_raises(session, tmp_path):
+    # Distinct from test_required_column_violation_drops_rows above: here
+    # the required column isn't present with a bad value, it's absent from
+    # the source file entirely. No merge strategy supports a partial-column
+    # load, so this must raise up front rather than silently proceed to a
+    # less diagnosable NOT NULL failure at insert time.
+    csv = tmp_path / "required_table.csv"
+    pd.DataFrame([{"id": 1}, {"id": 2}]).to_csv(csv, index=False)
+
+    with pytest.raises(IngestError, match="required_table.*name"):
+        _RequiredTable.load_csv(
+            session,
+            csv,
+            loader=PandasLoader(),
+            dedupe=False,
+        )
 
 
 def test_composite_pk_dedup(session, tmp_path):

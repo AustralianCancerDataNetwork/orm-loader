@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any
+from typing import Any, Iterable, Type, TYPE_CHECKING
 import csv as _csv
 import pandas as pd
 import logging
@@ -10,6 +10,10 @@ from functools import reduce
 from .data_classes import LoaderContext, TableCastingStats, LoaderInterface
 from .loading_helpers import infer_delim, infer_encoding, conservative_load_parquet, arrow_drop_duplicates, resolve_quote_mode
 from .data import perform_cast, cast_arrow_column
+from ..helpers import IngestError
+
+if TYPE_CHECKING:
+    from ..tables.typing import CSVTableProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +38,21 @@ These loader interfaces implement a very conservative loading strategy for handl
 from untrusted sources and accommodating updates and deletes for incremental loads.
 
 """
+
+def _require_columns_present(tableclass: Type["CSVTableProtocol"], present_columns: Iterable[str]) -> None:
+    """
+    Raise before staging if a genuinely required column is entirely
+    absent from the incoming data.
+
+    No support for partial-column load, which means every merge strategy
+    (including upsert) requires a complete row shape, so a required column's
+    absence is always a real data problem, not a legitimate partial update.
+    """
+    missing = sorted(c for c in tableclass.required_columns() if c not in present_columns)
+    if missing:
+        raise IngestError(
+            f"{tableclass.__tablename__}: source data is missing required column(s) {missing} (non-nullable, no default)"
+        )
 
 @staticmethod
 def _normalise_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -90,7 +109,8 @@ class PandasLoader(LoaderInterface):
                 lambda v: perform_cast(v, sa_col.type, on_error=_on_cast_error)
             )
 
-        required_cols = [c for c in ctx.tableclass.required_columns() if c in df.columns]
+        _require_columns_present(ctx.tableclass, df.columns)
+        required_cols = list(ctx.tableclass.required_columns())
 
         if required_cols:
             null_mask = df[required_cols].isna()
@@ -191,7 +211,8 @@ class ParquetLoader(LoaderInterface):
             )
 
         out = pa.table(arrays)
-        required_cols = [c for c in ctx.tableclass.required_columns() if c in out.schema.names]
+        _require_columns_present(ctx.tableclass, out.schema.names)
+        required_cols = list(ctx.tableclass.required_columns())
 
         if required_cols:
             masks = [pc.is_valid(out[c]) for c in required_cols]            # type: ignore

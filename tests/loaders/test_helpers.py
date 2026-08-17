@@ -2,13 +2,25 @@ from pathlib import Path
 
 import pytest
 
+import io
+
 from orm_loader.loaders.data_classes import ColumnCastingStats, TableCastingStats
 from orm_loader.loaders.loading_helpers import (
+    NormalisedCSVStream,
     infer_delim,
     infer_encoding,
     infer_quote_mode,
     resolve_quote_mode,
 )
+
+
+def test_normalised_csv_stream_strips_quoted_header_with_leading_whitespace():
+    # A space after the delimiter is ordinary, valid CSV ('"id", "name"') --
+    # stripping the quote before trimming whitespace leaves a stray leading
+    # quote on any token but the first.
+    raw = b'"id", "name"\n1,alpha\n'
+    stream = NormalisedCSVStream(io.BytesIO(raw), encoding="utf-8", delimiter=",")
+    assert stream.read() == b"id,name\n1,alpha\n"
 
 def test_column_casting_stats_records_examples():
     stats = ColumnCastingStats()

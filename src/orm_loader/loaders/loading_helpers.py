@@ -56,7 +56,7 @@ class NormalisedCSVStream(io.RawIOBase):
             header = self._f.readline().decode(self._encoding)
             newline = check_line_ending(header)
             cols = header.rstrip(newline).split(self._delimiter)
-            lowered = [c.strip('"').lower().replace('_hash', '') for c in cols]
+            lowered = [c.strip().strip('"').lower().replace('_hash', '') for c in cols]
             new_header = (self._delimiter.join(lowered) + "\n").encode(self._encoding)
             out.extend(new_header)
             self._sent_header = True
