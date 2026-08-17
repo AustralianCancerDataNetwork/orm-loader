@@ -2,9 +2,10 @@ import sqlalchemy as sa
 import pandas as pd
 import pytest
 from orm_loader.backends import STAGING_SCHEMA, resolve_backend
+from orm_loader.loaders.data.converters import _COLUMN_CAST_RULES, register_column_cast_rule
 from orm_loader.loaders.loading_helpers import infer_encoding, infer_delim, check_line_ending, quick_load_pg
 
-from tests.models import SimpleTable
+from tests.models import EnumTable, Role, SimpleTable
 
 
 @pytest.mark.requires_database("test_orm_db")
@@ -414,3 +415,32 @@ def test_copy_fails_with_raw_carriage_returns_but_succeeds_after_normalisation(p
     # On systems where it "works natively", you may see failed == False,
     # which proves the environment difference.
     print("Raw COPY failed:", failed)
+
+
+@pytest.fixture(autouse=True)
+def _clear_column_cast_rules():
+    _COLUMN_CAST_RULES.clear()
+    yield
+    _COLUMN_CAST_RULES.clear()
+
+
+@pytest.mark.requires_database("test_orm_db")
+def test_enum_column_cast_rule_round_trips_on_real_postgres(pg_session, tmp_path):
+    # The merge step that moves rows from staging to the target table is a
+    # plain SQL copy with no Python-level type translation, so whatever text
+    # a cast rule produces is exactly what lands in the target column.
+    # enum_type matches by .value but stores by .name -- sa.Enum's own
+    # default column-storage convention -- so EnumTable needs no
+    # customisation at all. Worth proving against a real native Postgres
+    # enum type specifically, not just SQLite (which has none).
+    register_column_cast_rule("enum_table", "role", enum_type=Role)
+
+    csv = tmp_path / "enum_table.csv"
+    csv.write_text("id,role\n1,first author\n2,BOGUS\n3,last author\n")
+
+    total = EnumTable.load_csv(pg_session, csv, quote_mode="csv")
+    pg_session.commit()
+
+    assert total == 3
+    rows = dict(pg_session.execute(sa.select(EnumTable.id, EnumTable.role)).all())
+    assert rows == {1: Role.FIRST_AUTHOR, 2: None, 3: Role.LAST_AUTHOR}
