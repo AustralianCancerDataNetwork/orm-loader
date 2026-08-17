@@ -65,11 +65,7 @@ def _normalise_null(value: Any) -> Any | None:
 
     return value
 
-# Vectorised mirror of _normalise_null, for the Arrow path. Kept alongside it
-# deliberately: the two must agree, or the same file loaded via PandasLoader and
-# ParquetLoader lands different values in staging. Only the sentinels are nulled
-# -- a non-sentinel is passed through untouched (" 42 " stays " 42 "), exactly as
-# the scalar version does, leaving whitespace for the per-type rules to strip.
+
 _ARROW_NULL_STRINGS = pa.array(sorted(_NULL_STRINGS | {""}), type=pa.string())
 
 
@@ -404,11 +400,6 @@ def perform_cast(
 
 
 def cast_arrow_column(arr: pa.Array, sa_col: ColumnElement[Any], stats: TableCastingStats | None = None) -> pa.Array:
-    # Ahead of every branch below, and ahead of the per-column override in
-    # particular: cast_scalar normalises nulls before it dispatches, so this
-    # path has to as well. Without it, text sentinels ("NULL", "n/a") survive
-    # into staging on the plain String branch, and get counted as genuine cast
-    # failures on the override branch -- warning about rows that are just null.
     arr = _normalise_null_arrow(arr)
 
     column_rule = _COLUMN_CAST_RULES.get((sa_col.table.name, sa_col.name))
