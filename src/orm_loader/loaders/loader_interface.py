@@ -106,7 +106,9 @@ class PandasLoader(LoaderInterface):
                 stats.record(column=_col, value=value)
 
             df[col_name] = df[col_name].map(
-                lambda v: perform_cast(v, sa_col.type, on_error=_on_cast_error)
+                lambda v: perform_cast(
+                    v, sa_col.type, on_error=_on_cast_error, table_name=table_name, column_name=col_name
+                )
             )
 
         _require_columns_present(ctx.tableclass, df.columns)

@@ -10,17 +10,27 @@ import sqlalchemy.orm as so
 
 from orm_loader.backends import resolve_backend
 from orm_loader.helpers import IngestError
+from orm_loader.loaders.data.converters import _COLUMN_CAST_RULES, register_column_cast_rule
 from orm_loader.loaders.data_classes import _clean_nulls
 from orm_loader.loaders.loader_interface import PandasLoader
 from orm_loader.tables.loadable_table import CSVLoadableTableInterface
 from orm_loader.tables.typing import CSVTableProtocol
-from tests.models import Base, CompositeTable, RequiredTable, SimpleTable
+from tests.models import Base, CompositeTable, EnumTable, Flag, ImpliedEnumTable, RequiredTable, Role, SimpleTable
 
 # Typed aliases: Pylance cannot verify SQLAlchemy metaclass-generated attrs
 # satisfy CSVTableProtocol structurally, so we cast once per class here.
 _SimpleTable = cast(Type[CSVTableProtocol], SimpleTable)
 _RequiredTable = cast(Type[CSVTableProtocol], RequiredTable)
 _CompositeTable = cast(Type[CSVTableProtocol], CompositeTable)
+_EnumTable = cast(Type[CSVTableProtocol], EnumTable)
+_ImpliedEnumTable = cast(Type[CSVTableProtocol], ImpliedEnumTable)
+
+
+@pytest.fixture(autouse=True)
+def _clear_column_cast_rules():
+    _COLUMN_CAST_RULES.clear()
+    yield
+    _COLUMN_CAST_RULES.clear()
 
 
 def test_initial_csv_load(session, tmp_path):
@@ -161,6 +171,63 @@ def test_required_column_entirely_missing_raises(session, tmp_path):
             loader=PandasLoader(),
             dedupe=False,
         )
+
+
+def test_enum_column_cast_rule_resolves_known_and_drops_unknown(session, tmp_path):
+    # sa.Enum is itself a subclass of sa.String, so without a registered
+    # column-specific rule this would just pass every raw value through
+    # untouched via the existing String rule -- no membership check at all.
+    register_column_cast_rule("enum_table", "role", enum_type=Role)
+
+    csv = tmp_path / "enum_table.csv"
+    pd.DataFrame(
+        [
+            {"id": 1, "role": "first author"},
+            {"id": 2, "role": "BOGUS"},
+            {"id": 3, "role": "last author"},
+        ]
+    ).to_csv(csv, index=False)
+
+    total = _EnumTable.load_csv(session, csv, loader=PandasLoader(), dedupe=False)
+    session.commit()
+
+    assert total == 3
+    rows = dict(session.execute(sa.select(EnumTable.id, EnumTable.role)).all())
+    assert rows == {1: Role.FIRST_AUTHOR, 2: None, 3: Role.LAST_AUTHOR}
+
+
+def test_implied_enum_on_plain_string_column(session, tmp_path):
+    # The OMOP CDM concept.standard_concept/invalid_reason shape: a plain
+    # String(1) column with no type-level enum signal at all -- sa.Enum-keyed
+    # dispatch could never reach this, only a per-column rule can. This column
+    # expects the raw code itself ('S'), not enum_type='s default .name output
+    # ('STANDARD', which wouldn't even fit in String(1)) -- a genuinely custom
+    # case, so `scalar` is used directly rather than the `enum_type` shortcut.
+    def _to_flag_value(raw):
+        if raw is None:
+            return None
+        s = str(raw).strip()
+        if not s:
+            return None
+        return Flag(s).value
+
+    register_column_cast_rule("implied_enum_table", "flag", scalar=_to_flag_value)
+
+    csv = tmp_path / "implied_enum_table.csv"
+    pd.DataFrame(
+        [
+            {"id": 1, "flag": "S"},
+            {"id": 2, "flag": "BOGUS"},
+            {"id": 3, "flag": "C"},
+        ]
+    ).to_csv(csv, index=False)
+
+    total = _ImpliedEnumTable.load_csv(session, csv, loader=PandasLoader(), dedupe=False)
+    session.commit()
+
+    assert total == 3
+    rows = dict(session.execute(sa.select(ImpliedEnumTable.id, ImpliedEnumTable.flag)).all())
+    assert rows == {1: "S", 2: None, 3: "C"}
 
 
 def test_composite_pk_dedup(session, tmp_path):
