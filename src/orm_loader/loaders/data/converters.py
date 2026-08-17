@@ -361,7 +361,7 @@ def cast_arrow_column(arr: pa.Array, sa_col: ColumnElement[Any], stats: TableCas
             arrow_type = _ARROW_TYPE_MAP.get(rule.sa_type)
             if arrow_type:
                 try:
-                    return pc.cast(arr, arrow_type)                 # type: ignore
+                    return pc.cast(arr, arrow_type)                 
                 except pa.ArrowInvalid:
                     validity = pc.is_valid(arr)                     # type: ignore
                     invalid_mask = pc.invert(validity)              # type: ignore
