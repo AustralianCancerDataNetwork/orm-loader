@@ -44,6 +44,9 @@ class ORMTableProtocol(Protocol):
     @classmethod
     def model_columns(cls) -> dict[str, sa.ColumnElement[Any]]: ...
 
+    @classmethod
+    def required_columns(cls) -> set[str]: ...
+
 @runtime_checkable
 class CSVTableProtocol(ORMTableProtocol, Protocol):
     """

@@ -287,6 +287,22 @@ def test_quick_load_pg_lowercases_header(pg_session, tmp_path):
 
 
 @pytest.mark.requires_database("test_orm_db")
+def test_quick_load_pg_strips_literally_quoted_header(pg_session, tmp_path):
+    """A header row with literal quote characters around each column name
+    (a common CSV-export convention) used to round-trip into an invalid
+    quadruple-quoted COPY column list (`""id""`), failing with
+    'zero-length delimited identifier'."""
+    csv = tmp_path / "test_table.csv"
+    csv.write_text('"id","name"\n1,alpha\n2,beta\n')
+
+    total = quick_load_pg(path=csv, session=pg_session, tablename="test_table")
+    rows = pg_session.execute(sa.text("SELECT id, name FROM test_table ORDER BY id")).all()
+
+    assert total == 2
+    assert rows == [(1, "alpha"), (2, "beta")]
+
+
+@pytest.mark.requires_database("test_orm_db")
 def test_quick_load_pg_tab_delimiter(pg_session, tmp_path):
     csv = tmp_path / "test_table.csv"
     csv.write_text("id\tname\n1\talpha\n2\tbeta\n")

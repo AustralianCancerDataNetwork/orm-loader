@@ -56,7 +56,7 @@ class NormalisedCSVStream(io.RawIOBase):
             header = self._f.readline().decode(self._encoding)
             newline = check_line_ending(header)
             cols = header.rstrip(newline).split(self._delimiter)
-            lowered = [c.lower().replace('_hash', '') for c in cols]
+            lowered = [c.strip().strip('"').lower().replace('_hash', '') for c in cols]
             new_header = (self._delimiter.join(lowered) + "\n").encode(self._encoding)
             out.extend(new_header)
             self._sent_header = True
@@ -309,7 +309,8 @@ def quick_load_pg(
     _nl = check_line_ending(_raw_hdr)
     # _hash is an internal convention for encrypted/hashed columns; strip it so
     # CSV headers map to the base column names that PostgreSQL COPY expects.
-    _csv_cols = [c.strip().lower().replace('_hash', '') for c in _raw_hdr.rstrip(_nl).split(delimiter)]
+    # also strip quotes and lowercase
+    _csv_cols = [c.strip().strip('"').lower().replace('_hash', '') for c in _raw_hdr.rstrip(_nl).split(delimiter)]
     _cols_sql = ", ".join(f'"{c}"' for c in _csv_cols)
 
     logger.info(f"Bulk loading {table_ref} via COPY (encoding={encoding}, delimiter={delimiter})")
