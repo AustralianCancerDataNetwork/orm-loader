@@ -371,7 +371,7 @@ def cast_arrow_column(arr: pa.Array, sa_col: ColumnElement[Any], stats: TableCas
 
                     bad_values = [
                         v.as_py()
-                        for v, bad in zip(arr, invalid_mask)        # type: ignore
+                        for v, bad in zip(arr, invalid_mask)      
                         if bad
                     ][:3]
                     if stats:
