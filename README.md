@@ -1,8 +1,6 @@
 ## orm-loader
 
-[![Tests](https://github.com/AustralianCancerDataNetwork/orm-loader/actions/workflows/tests.yml/badge.svg)](
-https://github.com/AustralianCancerDataNetwork/orm-loader/actions/workflows/tests.yml
-)
+[![CI](https://github.com/AustralianCancerDataNetwork/orm-loader/actions/workflows/ci.yml/badge.svg)](https://github.com/AustralianCancerDataNetwork/orm-loader/actions/workflows/ci.yml)
 
 A lightweight foundation for building and validating SQLAlchemy-based data models.
 
