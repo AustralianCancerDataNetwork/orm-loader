@@ -1971,7 +1971,9 @@ a single, explicit access point for mapper inspection.</p>
 <p>A column is considered required if it is:
 - non-nullable
 - has no Python-side default
-- has no server-side default</p>
+- has no server-side default
+- not an autoincrementing column (the database assigns its value;
+  it's never expected in inbound data at all)</p>
 <p>This method is intended for ingestion-time validation and does
 not attempt to enforce schema semantics beyond insert viability.</p>
 
