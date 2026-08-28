@@ -151,93 +151,122 @@ class SQLiteBackend(DatabaseBackend):
         safe_state = self._normalize_fk_check_state(previous_state)
         session.execute(text(f"PRAGMA foreign_keys = {safe_state}"))
 
+    @staticmethod
+    def _staging_rowid() -> sa.ColumnElement[int]:
+        """SQLite's implicit rowid: already gapless and indexed, so it needs
+        no added column or index the way Postgres's _rownum does."""
+        return sa.literal_column("rowid")
+
     def merge_replace(
         self,
         table_cls: type["CSVTableProtocol"],
         session: so.Session,
-        target_name: str,
         pk_cols: list[str],
         *,
         merge_batch_size: int | None = None,
     ) -> None:
-        preparer = self.identifier_preparer
-        staging_name = self.staging_name_for_table(table_cls.__tablename__)
-        target_ref = preparer.quote_identifier(target_name)
-        staging_ref = preparer.quote_identifier(staging_name)
-        if len(pk_cols) == 1:
-            pk_ref = preparer.quote_identifier(pk_cols[0])
-            session.execute(
-                sa.text(
-                    f"""
-                    DELETE FROM {target_ref}
-                    WHERE {pk_ref} IN (
-                        SELECT {pk_ref} FROM {staging_ref}
-                    );
-                    """
-                )
-            )
+        target = table_cls.__table__
+        staging = table_cls.get_staging_table(session, staging_schema=self.staging_schema)
+        pk_match = sa.and_(*(target.c[c] == staging.c[c] for c in pk_cols))
+
+        # SQLite's DELETE has no USING/multi-table support (confirmed
+        # empirically: NotImplementedError on a plain multi-table WHERE), so
+        # this needs an EXISTS correlated subquery instead of Postgres's
+        # DELETE ... USING.
+        def _delete(extra: sa.ColumnElement[bool] | None = None) -> sa.Delete:
+            conditions = (pk_match,) if extra is None else (pk_match, extra)
+            return sa.delete(target).where(sa.exists().where(*conditions))
+
+        if merge_batch_size is None:
+            session.execute(_delete())
             return
 
-        pk_match = " AND ".join(
-            f'{target_ref}.{preparer.quote_identifier(c)} = {staging_ref}.{preparer.quote_identifier(c)}'
-            for c in pk_cols
-        )
-        session.execute(
-            sa.text(
-                f"""
-                DELETE FROM {target_ref}
-                WHERE EXISTS (
-                    SELECT 1 FROM {staging_ref}
-                    WHERE {pk_match}
-                );
-                """
-            )
-        )
+        total = session.execute(sa.select(sa.func.count()).select_from(staging)).scalar_one()
+        if total <= merge_batch_size:
+            session.execute(_delete())
+            return
+
+        rowid = self._staging_rowid()
+        start = 0
+        while start < total:
+            end = start + merge_batch_size
+            session.execute(_delete(sa.and_(rowid > start, rowid <= end)))
+            session.commit()
+            start = end
 
     def merge_upsert(
         self,
         table_cls: type["CSVTableProtocol"],
         session: so.Session,
-        target_name: str,
         pk_cols: list[str],
         *,
         merge_batch_size: int | None = None,
     ) -> None:
-        preparer = self.identifier_preparer
-        staging_ref = preparer.quote_identifier(self.staging_name_for_table(table_cls.__tablename__))
-        target_ref = preparer.quote_identifier(target_name)
+        target = table_cls.__table__
+        staging = table_cls.get_staging_table(session, staging_schema=self.staging_schema)
         insertable_cols = self._insertable_column_names(table_cls)
-        cols_str = ", ".join(preparer.quote_identifier(c) for c in insertable_cols)
-        session.execute(
-            sa.text(
-                f"""
-                INSERT OR IGNORE INTO {target_ref} ({cols_str})
-                SELECT {cols_str} FROM {staging_ref};
-                """
+
+        def _upsert(select_: sa.Select[Any]) -> sa.Insert:
+            return (
+                sqlite_dialect.insert(target)
+                .from_select(insertable_cols, select_)
+                .on_conflict_do_nothing(index_elements=pk_cols)
             )
-        )
+
+        non_paginated_select = sa.select(*(staging.c[c] for c in insertable_cols))
+
+        if merge_batch_size is None:
+            # SQLite's grammar rejects INSERT...SELECT...ON CONFLICT with no
+            # WHERE on the SELECT (confirmed empirically); sa.true() supplies one.
+            session.execute(_upsert(non_paginated_select.where(sa.true())))
+            return
+
+        total = session.execute(sa.select(sa.func.count()).select_from(staging)).scalar_one()
+        if total <= merge_batch_size:
+            session.execute(_upsert(non_paginated_select.where(sa.true())))
+            return
+
+        rowid = self._staging_rowid()
+        start = 0
+        while start < total:
+            end = start + merge_batch_size
+            batch_select = non_paginated_select.where(rowid > start, rowid <= end)
+            session.execute(_upsert(batch_select))
+            session.commit()
+            start = end
 
     def merge_insert(
         self,
         table_cls: type["CSVTableProtocol"],
         session: so.Session,
-        target_name: str,
         *,
         merge_batch_size: int | None = None,
     ) -> None:
-        preparer = self.identifier_preparer
-        staging_ref = preparer.quote_identifier(self.staging_name_for_table(table_cls.__tablename__))
-        target_ref = preparer.quote_identifier(target_name)
+        target = table_cls.__table__
+        staging = table_cls.get_staging_table(session, staging_schema=self.staging_schema)
         insertable_cols = self._insertable_column_names(table_cls)
-        cols_str = ", ".join(preparer.quote_identifier(c) for c in insertable_cols)
-        session.execute(
-            sa.text(
-                f"""
-                INSERT INTO {target_ref} ({cols_str})
-                SELECT {cols_str} FROM {staging_ref};
-                """
-            )
-        )
+        non_paginated_select = sa.select(*(staging.c[c] for c in insertable_cols))
+
+        def _insert(select_: sa.Select[Any]) -> sa.Insert:
+            return sa.insert(target).from_select(insertable_cols, select_)
+
+        if merge_batch_size is None:
+            session.execute(_insert(non_paginated_select))
+            return
+
+        total = session.execute(sa.select(sa.func.count()).select_from(staging)).scalar_one()
+        if total <= merge_batch_size:
+            session.execute(_insert(non_paginated_select))
+            return
+
+        rowid = self._staging_rowid()
+        start = 0
+        while start < total:
+            end = start + merge_batch_size
+            batch_select = non_paginated_select.where(rowid > start, rowid <= end)
+            session.execute(_insert(batch_select))
+            session.commit()
+            start = end
 
     def merge_context(
         self,
@@ -251,6 +280,8 @@ class SQLiteBackend(DatabaseBackend):
         bind: "Engine | Connection",
         name: str,
         selectable: sa.sql.Select[Any],
+        *,
+        schema: str | None = None,
     ) -> None:
         self._require_capability("supports_materialized_views", "materialized views")
 
@@ -258,6 +289,8 @@ class SQLiteBackend(DatabaseBackend):
         self,
         bind: "Engine | Connection",
         name: str,
+        *,
+        schema: str | None = None,
     ) -> None:
         self._require_capability("supports_materialized_views", "materialized views")
 

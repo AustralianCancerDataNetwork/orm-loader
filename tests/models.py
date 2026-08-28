@@ -63,6 +63,19 @@ class EnumTable(Base, CSVLoadableTableInterface):
     role: so.Mapped[Role | None] = so.mapped_column(sa.Enum(Role), nullable=True)
 
 
+class ComputedColumnTable(Base, CSVLoadableTableInterface):
+    """A real, registered table with a computed column, for merge-method
+    tests that need get_staging_table() to work. Unlike a bare
+    __tablename__/__table__ pair, this actually implements
+    CSVLoadableTableInterface."""
+
+    __tablename__ = "computed_column_table"
+
+    id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
+    name: so.Mapped[str] = so.mapped_column(sa.String)
+    slug: so.Mapped[str] = so.mapped_column(sa.String, sa.Computed("lower(name)"))
+
+
 class ImpliedEnumTable(Base, CSVLoadableTableInterface):
     """A plain String column with no type-level enum signal at all -- the
     OMOP CDM concept.standard_concept/invalid_reason shape register_column_cast_rule

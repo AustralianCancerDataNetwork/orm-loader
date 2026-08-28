@@ -19,7 +19,9 @@ class CreateMaterializedView(DDLElement):
     Parameters
     ----------
     name
-        Name of the materialized view to be created.
+        Fully qualified, quoted name of the materialized view to be created
+        (see oa_configurator.qualified). The compiler has no live bindable
+        to qualify a bare name itself, so callers must qualify it first.
     selectable
         A SQLAlchemy Select construct defining the query backing the
         materialized view.
@@ -31,8 +33,8 @@ class CreateMaterializedView(DDLElement):
 
 @compiler.compiles(CreateMaterializedView)
 def _create_view(
-    element: CreateMaterializedView, 
-    compiler: sa.sql.compiler.SQLCompiler, 
+    element: CreateMaterializedView,
+    compiler: sa.sql.compiler.SQLCompiler,
     **kwargs: Any
 ) -> str:
 
