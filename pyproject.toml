@@ -69,6 +69,14 @@ orm_loader = "orm_loader.config:OrmLoaderConfig"
 [tool.uv]
 cache-keys = [{ file = "pyproject.toml" }, { git = { commit = true, tags = true } }]
 
+# TEMPORARY dev-only override: oa-configurator's schema-resolution primitives
+# (qualified/schema_of/register_reserved_schema/testing.isolated_test_database)
+# this branch depends on aren't published yet. Points at the sibling checkout
+# on feat/schema-resolution. Remove once oa-configurator releases a version
+# containing that branch and bump the floor above accordingly.
+[tool.uv.sources]
+oa-configurator = { path = "../oa-configurator", editable = true }
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"

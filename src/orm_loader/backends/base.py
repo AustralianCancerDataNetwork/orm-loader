@@ -15,6 +15,7 @@ from sqlalchemy.sql.compiler import IdentifierPreparer
 
 if TYPE_CHECKING:
     from ..loaders.data_classes import LoaderContext
+    from ..mappers.materialised_view_contracts import MaterializedViewIndex
     from ..tables.typing import CSVTableProtocol
 
 
@@ -317,6 +318,8 @@ class DatabaseBackend(ABC):
         selectable: sa.sql.Select[Any],
         *,
         schema: str | None = None,
+        with_data: bool = True,
+        if_not_exists: bool = True,
     ) -> None:
         """Create a materialized view for the supplied selectable.
 
@@ -331,9 +334,52 @@ class DatabaseBackend(ABC):
         name: str,
         *,
         schema: str | None = None,
+        concurrently: bool = False,
+        declared_indexes: tuple["MaterializedViewIndex", ...] = (),
     ) -> None:
         """Refresh a materialized view.
 
         *schema* defaults to the bind's own ``schema_translate_map`` (via
         ``oa_configurator.schema_of``) when not given explicitly.
+
+        *declared_indexes* lets ``concurrently=True`` be requested safely:
+        backends that support concurrent refresh must reject the request
+        with ``ConcurrentRefreshNotEligibleError`` when no unique index is
+        even declared here, and otherwise translate the database's own
+        rejection (if the declared index doesn't genuinely exist yet) into
+        the same exception rather than defining a second, independent
+        notion of eligibility. Backends that don't support ``concurrently``
+        may ignore this parameter.
         """
+
+    def drop_materialized_view(
+        self,
+        bind: "Engine | Connection",
+        name: str,
+        *,
+        schema: str | None = None,
+        if_exists: bool = True,
+        cascade: bool = False,
+    ) -> None:
+        """Drop a materialized view.
+
+        Not ``@abstractmethod``: the base implementation requires backend
+        opt-in via ``supports_materialized_views``, so an unsupporting
+        backend (or an unrelated third-party ``DatabaseBackend`` subclass
+        predating this method) needs no override to get the same clean
+        ``NotImplementedError`` the two methods above already raise.
+        """
+        self._require_capability("supports_materialized_views", "materialized views")
+
+    def create_materialized_view_index(
+        self,
+        bind: "Engine | Connection",
+        name: str,
+        index: "MaterializedViewIndex",
+        *,
+        schema: str | None = None,
+        if_not_exists: bool = True,
+    ) -> None:
+        """Create one declared index on a materialized view. See
+        ``drop_materialized_view`` for why this isn't ``@abstractmethod``."""
+        self._require_capability("supports_materialized_views", "materialized views")

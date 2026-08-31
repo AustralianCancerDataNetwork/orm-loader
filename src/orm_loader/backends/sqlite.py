@@ -18,6 +18,7 @@ from .base import BackendCapabilities, DatabaseBackend, Dialect
 if TYPE_CHECKING:
     from sqlalchemy.engine import Connection, Engine
 
+    from ..mappers.materialised_view_contracts import MaterializedViewIndex
     from ..tables.typing import CSVTableProtocol
 
 
@@ -282,6 +283,8 @@ class SQLiteBackend(DatabaseBackend):
         selectable: sa.sql.Select[Any],
         *,
         schema: str | None = None,
+        with_data: bool = True,
+        if_not_exists: bool = True,
     ) -> None:
         self._require_capability("supports_materialized_views", "materialized views")
 
@@ -291,6 +294,30 @@ class SQLiteBackend(DatabaseBackend):
         name: str,
         *,
         schema: str | None = None,
+        concurrently: bool = False,
+        declared_indexes: tuple["MaterializedViewIndex", ...] = (),
+    ) -> None:
+        self._require_capability("supports_materialized_views", "materialized views")
+
+    def drop_materialized_view(
+        self,
+        bind: "Engine | Connection",
+        name: str,
+        *,
+        schema: str | None = None,
+        if_exists: bool = True,
+        cascade: bool = False,
+    ) -> None:
+        self._require_capability("supports_materialized_views", "materialized views")
+
+    def create_materialized_view_index(
+        self,
+        bind: "Engine | Connection",
+        name: str,
+        index: "MaterializedViewIndex",
+        *,
+        schema: str | None = None,
+        if_not_exists: bool = True,
     ) -> None:
         self._require_capability("supports_materialized_views", "materialized views")
 

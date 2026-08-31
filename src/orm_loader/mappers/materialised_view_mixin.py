@@ -4,6 +4,7 @@ import sqlalchemy as sa
 from typing import Any
 from collections import defaultdict, deque
 from ..backends.resolve import resolve_backend
+from .materialised_view_contracts import MaterializedViewIndex
 
 class CreateMaterializedView(DDLElement):
     """
@@ -25,11 +26,26 @@ class CreateMaterializedView(DDLElement):
     selectable
         A SQLAlchemy Select construct defining the query backing the
         materialized view.
+    with_data
+        When False, emits ``WITH NO DATA`` so the view is created empty
+        (uninitialised, and not queryable until refreshed).
+    if_not_exists
+        When True (the default), emit ``IF NOT EXISTS`` so creating an
+        already-present view is a no-op rather than an error.
     """
 
-    def __init__(self, name: str, selectable: sa.sql.Select[Any]):
+    def __init__(
+        self,
+        name: str,
+        selectable: sa.sql.Select[Any],
+        *,
+        with_data: bool = True,
+        if_not_exists: bool = True,
+    ):
         self.name = name
         self.selectable = selectable
+        self.with_data = with_data
+        self.if_not_exists = if_not_exists
 
 @compiler.compiles(CreateMaterializedView)
 def _create_view(
@@ -53,7 +69,9 @@ def _create_view(
     CREATE MATERIALIZED VIEW IF NOT EXISTS syntax (e.g. PostgreSQL).
     """
     compiled = compiler.sql_compiler.process(element.selectable, literal_binds=True)
-    return f"CREATE MATERIALIZED VIEW IF NOT EXISTS {element.name} as {compiled}"
+    existence = "IF NOT EXISTS " if element.if_not_exists else ""
+    population = "" if element.with_data else " WITH NO DATA"
+    return f"CREATE MATERIALIZED VIEW {existence}{element.name} as {compiled}{population}"
 
 class MaterializedViewMixin:
 
@@ -160,9 +178,18 @@ class MaterializedViewMixin:
     __mv_name__: str
     __mv_select__: sa.sql.Select[Any]
     __mv_dependencies__: set[str] = set()
+    __mv_indexes__: tuple[MaterializedViewIndex, ...] = ()
 
     @classmethod
-    def create_mv(cls, bind: "sa.engine.Connection | sa.engine.Engine") -> None:
+    def create_mv(
+        cls,
+        bind: "sa.engine.Connection | sa.engine.Engine",
+        *,
+        schema: str | None = None,
+        with_data: bool = True,
+        if_not_exists: bool = True,
+        create_indexes: bool = True,
+    ) -> None:
         """
         Create the materialized view if it does not already exist.
 
@@ -170,6 +197,13 @@ class MaterializedViewMixin:
         ----------
         bind
             A SQLAlchemy Engine or Connection used to execute the DDL.
+        schema
+            Overrides the bind's own default schema (via
+            ``oa_configurator.schema_of``) for this call only.
+        create_indexes
+            When True (the default), also create every index declared in
+            ``__mv_indexes__`` immediately after the view. Classes that
+            never declare indexes are unaffected: this is then a no-op.
 
         Notes
         -----
@@ -185,7 +219,7 @@ class MaterializedViewMixin:
 
         with engine.begin() as conn:
             RecentObservationMV.create_mv(conn)
-        
+
         ```
 
         This emits SQL equivalent to:
@@ -202,10 +236,28 @@ class MaterializedViewMixin:
         ```
         """
         backend = resolve_backend(bind)
-        backend.create_materialized_view(bind, cls.__mv_name__, cls.__mv_select__)
+        backend.create_materialized_view(
+            bind,
+            cls.__mv_name__,
+            cls.__mv_select__,
+            schema=schema,
+            with_data=with_data,
+            if_not_exists=if_not_exists,
+        )
+        if create_indexes:
+            for index in cls.__mv_indexes__:
+                backend.create_materialized_view_index(
+                    bind, cls.__mv_name__, index, schema=schema
+                )
 
     @classmethod
-    def refresh_mv(cls, bind: "sa.engine.Connection | sa.engine.Engine") -> None:
+    def refresh_mv(
+        cls,
+        bind: "sa.engine.Connection | sa.engine.Engine",
+        *,
+        schema: str | None = None,
+        concurrently: bool = False,
+    ) -> None:
         """
         Refresh the contents of the materialized view.
 
@@ -213,23 +265,74 @@ class MaterializedViewMixin:
         ----------
         bind
             A SQLAlchemy Engine or Connection used to execute the refresh.
+        schema
+            Overrides the bind's own default schema (via
+            ``oa_configurator.schema_of``) for this call only.
+        concurrently
+            Request ``REFRESH MATERIALIZED VIEW CONCURRENTLY``. Requires at
+            least one ``unique=True`` entry in ``__mv_indexes__`` that the
+            backend can also confirm is actually valid in the live catalog;
+            otherwise raises ``ConcurrentRefreshNotEligibleError`` before
+            issuing any refresh SQL.
 
         Notes
         -----
         This method issues a backend-specific refresh statement. With the
         built-in backends, materialized views are PostgreSQL-only.
-        Concurrent refresh semantics are not handled here.
 
         Examples
         --------
-        ```python        
+        ```python
         with engine.begin() as conn:
             RecentObservationMV.refresh_mv(conn)
         ```
         """
         backend = resolve_backend(bind)
-        backend.refresh_materialized_view(bind, cls.__mv_name__)
-        
+        backend.refresh_materialized_view(
+            bind,
+            cls.__mv_name__,
+            schema=schema,
+            concurrently=concurrently,
+            declared_indexes=cls.__mv_indexes__,
+        )
+
+    @classmethod
+    def drop_mv(
+        cls,
+        bind: "sa.engine.Connection | sa.engine.Engine",
+        *,
+        schema: str | None = None,
+        if_exists: bool = True,
+        cascade: bool = False,
+    ) -> None:
+        """
+        Drop the materialized view.
+
+        Parameters
+        ----------
+        bind
+            A SQLAlchemy Engine or Connection used to execute the DDL.
+        schema
+            Overrides the bind's own default schema (via
+            ``oa_configurator.schema_of``) for this call only.
+        if_exists
+            When True (the default), dropping an already-absent view is a
+            no-op rather than an error.
+        cascade
+            Also drop objects that depend on this view.
+
+        Examples
+        --------
+        ```python
+        with engine.begin() as conn:
+            RecentObservationMV.drop_mv(conn)
+        ```
+        """
+        backend = resolve_backend(bind)
+        backend.drop_materialized_view(
+            bind, cls.__mv_name__, schema=schema, if_exists=if_exists, cascade=cascade
+        )
+
 
 def resolve_mv_refresh_order(mv_classes: list[type[MaterializedViewMixin]]) -> list[type]:
     """
