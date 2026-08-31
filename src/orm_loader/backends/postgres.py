@@ -10,6 +10,7 @@ from oa_configurator import qualified, schema_of
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.sql.compiler import IdentifierPreparer
+from sqlalchemy.sql.selectable import SelectBase
 
 from .base import BackendCapabilities, DatabaseBackend, Dialect
 from .materialized_view_errors import (
@@ -17,6 +18,7 @@ from .materialized_view_errors import (
     MaterializationError,
     MaterializationFailure,
     MaterializationOperation,
+    MaterializationOutcome,
     UnsupportedMaterializationDialectError,
 )
 
@@ -46,6 +48,41 @@ def _require_postgres_dialect(
             schema=schema,
             name=name,
             reason=f"received dialect {getattr(dialect, 'name', dialect)!r}",
+        )
+    )
+
+
+def _outcome(
+    operation: MaterializationOperation,
+    *,
+    schema: str | None,
+    name: str,
+    index_name: str | None = None,
+) -> MaterializationOutcome:
+    return MaterializationOutcome(
+        operation=operation,
+        schema=schema,
+        name=name,
+        index_name=index_name,
+    )
+
+
+def _error(
+    error: Exception,
+    operation: MaterializationOperation,
+    *,
+    schema: str | None,
+    name: str,
+    index_name: str | None = None,
+) -> MaterializationError:
+    return MaterializationError(
+        MaterializationFailure(
+            operation=operation,
+            schema=schema,
+            name=name,
+            index_name=index_name,
+            reason=str(error),
+            cause=error,
         )
     )
 
@@ -311,24 +348,43 @@ class PostgresBackend(DatabaseBackend):
         self,
         bind: Engine | Connection,
         name: str,
-        selectable: sa.sql.Select[Any],
+        selectable: SelectBase,
         *,
         schema: str | None = None,
         with_data: bool = True,
-        if_not_exists: bool = True,
-    ) -> None:
+        if_not_exists: bool = False,
+    ) -> MaterializationOutcome:
         from ..mappers.materialised_view_mixin import CreateMaterializedView
 
         with self._as_connection(bind) as conn:
             effective_schema = schema if schema is not None else schema_of(conn)
-            qualified_name = qualified(conn, name, schema=effective_schema)
-            conn.execute(
-                CreateMaterializedView(
-                    qualified_name,
-                    selectable,
-                    with_data=with_data,
-                    if_not_exists=if_not_exists,
+            _require_postgres_dialect(
+                conn,
+                operation=MaterializationOperation.CREATE,
+                schema=effective_schema,
+                name=name,
+            )
+            try:
+                conn.execute(
+                    CreateMaterializedView(
+                        name,
+                        selectable,
+                        schema=effective_schema,
+                        with_data=with_data,
+                        if_not_exists=if_not_exists,
+                    )
                 )
+            except Exception as error:
+                raise _error(
+                    error,
+                    MaterializationOperation.CREATE,
+                    schema=effective_schema,
+                    name=name,
+                ) from error
+            return _outcome(
+                MaterializationOperation.CREATE,
+                schema=effective_schema,
+                name=name,
             )
 
     def refresh_materialized_view(
@@ -339,17 +395,17 @@ class PostgresBackend(DatabaseBackend):
         schema: str | None = None,
         concurrently: bool = False,
         declared_indexes: tuple["MaterializedViewIndex", ...] = (),
-    ) -> None:
+    ) -> MaterializationOutcome:
         with self._as_connection(bind) as conn:
             effective_schema = schema if schema is not None else schema_of(conn)
+            _require_postgres_dialect(
+                conn,
+                operation=MaterializationOperation.REFRESH,
+                schema=effective_schema,
+                name=name,
+            )
 
             if concurrently:
-                _require_postgres_dialect(
-                    conn,
-                    operation=MaterializationOperation.REFRESH,
-                    schema=effective_schema,
-                    name=name,
-                )
                 # Cheap, in-memory check only: did the caller declare a unique
                 # index at all. Whether that index genuinely exists and is
                 # valid in this database is PostgreSQL's own prerequisite for
@@ -377,19 +433,34 @@ class PostgresBackend(DatabaseBackend):
                 # in use as this project's one supported Postgres driver).
                 from psycopg.errors import ObjectNotInPrerequisiteState
 
-                if not concurrently or not isinstance(
-                    error.orig, ObjectNotInPrerequisiteState
-                ):
-                    raise
-                raise ConcurrentRefreshNotEligibleError(
-                    MaterializationFailure(
-                        operation=MaterializationOperation.REFRESH,
-                        schema=effective_schema,
-                        name=name,
-                        reason=str(error.orig).strip(),
-                        cause=error,
-                    )
+                if concurrently and isinstance(error.orig, ObjectNotInPrerequisiteState):
+                    raise ConcurrentRefreshNotEligibleError(
+                        MaterializationFailure(
+                            operation=MaterializationOperation.REFRESH,
+                            schema=effective_schema,
+                            name=name,
+                            reason=str(error.orig).strip(),
+                            cause=error,
+                        )
+                    ) from error
+                raise _error(
+                    error,
+                    MaterializationOperation.REFRESH,
+                    schema=effective_schema,
+                    name=name,
                 ) from error
+            except Exception as error:
+                raise _error(
+                    error,
+                    MaterializationOperation.REFRESH,
+                    schema=effective_schema,
+                    name=name,
+                ) from error
+            return _outcome(
+                MaterializationOperation.REFRESH,
+                schema=effective_schema,
+                name=name,
+            )
 
     def drop_materialized_view(
         self,
@@ -399,7 +470,7 @@ class PostgresBackend(DatabaseBackend):
         schema: str | None = None,
         if_exists: bool = True,
         cascade: bool = False,
-    ) -> None:
+    ) -> MaterializationOutcome:
         from ..mappers.materialised_view_contracts import DropMaterializedView
 
         with self._as_connection(bind) as conn:
@@ -410,21 +481,27 @@ class PostgresBackend(DatabaseBackend):
                 schema=effective_schema,
                 name=name,
             )
-            qualified_name = qualified(conn, name, schema=effective_schema)
             try:
                 conn.execute(
-                    DropMaterializedView(qualified_name, if_exists=if_exists, cascade=cascade)
+                    DropMaterializedView(
+                        name,
+                        schema=effective_schema,
+                        if_exists=if_exists,
+                        cascade=cascade,
+                    )
                 )
             except Exception as error:
-                raise MaterializationError(
-                    MaterializationFailure(
-                        operation=MaterializationOperation.DROP,
-                        schema=effective_schema,
-                        name=name,
-                        reason=str(error),
-                        cause=error,
-                    )
+                raise _error(
+                    error,
+                    MaterializationOperation.DROP,
+                    schema=effective_schema,
+                    name=name,
                 ) from error
+            return _outcome(
+                MaterializationOperation.DROP,
+                schema=effective_schema,
+                name=name,
+            )
 
     def create_materialized_view_index(
         self,
@@ -433,8 +510,8 @@ class PostgresBackend(DatabaseBackend):
         index: "MaterializedViewIndex",
         *,
         schema: str | None = None,
-        if_not_exists: bool = True,
-    ) -> None:
+        if_not_exists: bool = False,
+    ) -> MaterializationOutcome:
         from ..mappers.materialised_view_contracts import CreateMaterializedViewIndex
 
         with self._as_connection(bind) as conn:
@@ -445,24 +522,29 @@ class PostgresBackend(DatabaseBackend):
                 schema=effective_schema,
                 name=name,
             )
-            qualified_target = qualified(conn, name, schema=effective_schema)
             try:
                 conn.execute(
                     CreateMaterializedViewIndex(
-                        qualified_target, index, if_not_exists=if_not_exists
+                        name,
+                        index,
+                        schema=effective_schema,
+                        if_not_exists=if_not_exists,
                     )
                 )
             except Exception as error:
-                raise MaterializationError(
-                    MaterializationFailure(
-                        operation=MaterializationOperation.CREATE_INDEX,
-                        schema=effective_schema,
-                        name=name,
-                        index_name=index.name,
-                        reason=str(error),
-                        cause=error,
-                    )
+                raise _error(
+                    error,
+                    MaterializationOperation.CREATE_INDEX,
+                    schema=effective_schema,
+                    name=name,
+                    index_name=index.name,
                 ) from error
+            return _outcome(
+                MaterializationOperation.CREATE_INDEX,
+                schema=effective_schema,
+                name=name,
+                index_name=index.name,
+            )
 
     @contextmanager
     def engine_with_replica_role(self, engine: "Engine"):

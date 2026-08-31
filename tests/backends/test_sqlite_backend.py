@@ -8,7 +8,11 @@ import pytest
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 
-from orm_loader.backends import Dialect, SQLiteBackend
+from orm_loader.backends import (
+    Dialect,
+    SQLiteBackend,
+    UnsupportedMaterializationDialectError,
+)
 from orm_loader.helpers.sqlite import attach_sqlite_bulk_load_pragmas
 from tests.models import ComputedColumnTable
 
@@ -151,33 +155,33 @@ def test_sqlite_backend_materialized_view_methods_raise(engine):
 
     try:
         backend.create_materialized_view(engine, "mv_test", selectable)
-    except NotImplementedError as exc:
-        assert "does not support materialized views" in str(exc)
+    except UnsupportedMaterializationDialectError as exc:
+        assert "require PostgreSQL" in str(exc)
     else:
-        raise AssertionError("Expected create_materialized_view() to raise NotImplementedError")
+        raise AssertionError("Expected PostgreSQL-only materialization error")
 
     try:
         backend.refresh_materialized_view(engine, "mv_test")
-    except NotImplementedError as exc:
-        assert "does not support materialized views" in str(exc)
+    except UnsupportedMaterializationDialectError as exc:
+        assert "require PostgreSQL" in str(exc)
     else:
-        raise AssertionError("Expected refresh_materialized_view() to raise NotImplementedError")
+        raise AssertionError("Expected PostgreSQL-only materialization error")
 
 
 def test_sqlite_backend_drop_materialized_view_raises(engine):
     backend = SQLiteBackend()
 
-    with pytest.raises(NotImplementedError, match="does not support materialized views"):
+    with pytest.raises(UnsupportedMaterializationDialectError, match="require PostgreSQL"):
         backend.drop_materialized_view(engine, "mv_test")
 
 
 def test_sqlite_backend_create_materialized_view_index_raises(engine):
-    from orm_loader.mappers.materialised_view_contracts import MaterializedViewIndex
+    from orm_loader.materialized_views import MaterializedViewIndex
 
     backend = SQLiteBackend()
     index = MaterializedViewIndex(name="mv_test_uq", columns=("id",), unique=True)
 
-    with pytest.raises(NotImplementedError, match="does not support materialized views"):
+    with pytest.raises(UnsupportedMaterializationDialectError, match="require PostgreSQL"):
         backend.create_materialized_view_index(engine, "mv_test", index)
 
 

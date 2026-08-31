@@ -11,11 +11,14 @@ import pytest
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.sql.selectable import SelectBase
 
 from orm_loader.backends import (
     BackendCapabilities,
     DatabaseBackend,
     Dialect,
+    MaterializationOperation,
+    MaterializationOutcome,
     resolve_backend,
 )
 
@@ -66,44 +69,41 @@ class FakeBackend(DatabaseBackend):
         return f"_staging_{tablename}"
 
     def create_staging_table(
-        self, _table_cls: Type[CSVTableProtocol], _session: so.Session
+        self, table_cls: Type[CSVTableProtocol], session: so.Session
     ) -> None:
         return None
 
     def drop_staging_table(
-        self, _table_cls: Type[CSVTableProtocol], _session: so.Session
+        self, table_cls: Type[CSVTableProtocol], session: so.Session
     ) -> None:
         return None
 
     def merge_replace(
         self,
-        _table_cls: Type[CSVTableProtocol],
-        _session: so.Session,
-        _target_name: str,
-        _pk_cols: list[str],
+        table_cls: Type[CSVTableProtocol],
+        session: so.Session,
+        pk_cols: list[str],
         *,
-        _merge_batch_size: int | None = None,
+        merge_batch_size: int | None = None,
     ) -> None:
         return None
 
     def merge_upsert(
         self,
-        _table_cls: Type[CSVTableProtocol],
-        _session: so.Session,
-        _target_name: str,
-        _pk_cols: list[str],
+        table_cls: Type[CSVTableProtocol],
+        session: so.Session,
+        pk_cols: list[str],
         *,
-        _merge_batch_size: int | None = None,
+        merge_batch_size: int | None = None,
     ) -> None:
         return None
 
     def merge_insert(
         self,
-        _table_cls: Type[CSVTableProtocol],
-        _session: so.Session,
-        _target_name: str,
+        table_cls: Type[CSVTableProtocol],
+        session: so.Session,
         *,
-        _merge_batch_size: int | None = None,
+        merge_batch_size: int | None = None,
     ) -> None:
         return None
 
@@ -126,13 +126,13 @@ class FakeBackend(DatabaseBackend):
         self,
         bind: Engine | Connection,
         name: str,
-        selectable: sa.sql.Select[Any],
+        selectable: SelectBase,
         *,
         schema: str | None = None,
         with_data: bool = True,
-        if_not_exists: bool = True,
-    ) -> None:
-        return None
+        if_not_exists: bool = False,
+    ) -> MaterializationOutcome:
+        return MaterializationOutcome(MaterializationOperation.CREATE, schema, name)
 
     def refresh_materialized_view(
         self,
@@ -142,8 +142,8 @@ class FakeBackend(DatabaseBackend):
         schema: str | None = None,
         concurrently: bool = False,
         declared_indexes: tuple = (),
-    ) -> None:
-        return None
+    ) -> MaterializationOutcome:
+        return MaterializationOutcome(MaterializationOperation.REFRESH, schema, name)
 
 
 class _ComputedTable:
@@ -170,7 +170,7 @@ def test_backend_capabilities_defaults():
 
 def test_database_backend_is_abstract():
     with pytest.raises(TypeError):
-        DatabaseBackend() # type: ignore
+        DatabaseBackend()
 
 
 def test_fake_backend_can_implement_contract():

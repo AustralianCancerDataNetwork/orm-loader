@@ -1,14 +1,19 @@
 from pathlib import Path
+from typing import cast
+
 import sqlalchemy as sa
 from orm_loader.loaders.data_classes import LoaderContext
 import pandas as pd
 from orm_loader.loaders.loader_interface import PandasLoader
+from orm_loader.tables.typing import CSVTableProtocol
 from tests.models import PandasLoaderTable
+
+_PANDAS_LOADER_TABLE = cast(type[CSVTableProtocol], PandasLoaderTable)
 
 def test_loader_context_fields(session):
 
     ctx = LoaderContext(
-        tableclass=PandasLoaderTable,
+        tableclass=_PANDAS_LOADER_TABLE,
         session=session,
         path=Path("file.csv"),
         staging_table=PandasLoaderTable.__table__,
@@ -35,7 +40,7 @@ def test_pandas_loader_case_insensitive_headers(tmp_path, session):
     )
 
     ctx = LoaderContext(
-        tableclass=PandasLoaderTable,
+        tableclass=_PANDAS_LOADER_TABLE,
         session=session,
         path=csv,
         staging_table=PandasLoaderTable.__table__,
@@ -69,7 +74,7 @@ def test_pandas_loader_literal_mode_preserves_quotes(tmp_path, session):
     )
 
     ctx = LoaderContext(
-        tableclass=PandasLoaderTable,
+        tableclass=_PANDAS_LOADER_TABLE,
         session=session,
         path=csv,
         staging_table=PandasLoaderTable.__table__,
@@ -104,7 +109,7 @@ def test_pandas_loader_csv_mode_strips_quotes(tmp_path, session):
     )
 
     ctx = LoaderContext(
-        tableclass=PandasLoaderTable,
+        tableclass=_PANDAS_LOADER_TABLE,
         session=session,
         path=csv,
         staging_table=PandasLoaderTable.__table__,
@@ -138,7 +143,7 @@ def test_pandas_loader_by_delimiter_tab_preserves_quotes(tmp_path, session):
     )
 
     ctx = LoaderContext(
-        tableclass=PandasLoaderTable,
+        tableclass=_PANDAS_LOADER_TABLE,
         session=session,
         path=tsv,
         staging_table=PandasLoaderTable.__table__,
@@ -165,7 +170,7 @@ def test_pandas_dedupe_internal(session, tmp_path):
     })
 
     ctx = LoaderContext(
-        tableclass=PandasLoaderTable,
+        tableclass=_PANDAS_LOADER_TABLE,
         session=session,
         path=Path("file.csv"),
         staging_table=PandasLoaderTable.__table__,

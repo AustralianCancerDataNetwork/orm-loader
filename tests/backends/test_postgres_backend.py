@@ -8,6 +8,7 @@ import sqlalchemy as sa
 import sqlalchemy.orm as so
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import OperationalError, ProgrammingError
 
 from orm_loader.backends import STAGING_SCHEMA, Dialect, PostgresBackend
 from orm_loader.helpers.sql import qualify_identifier
@@ -66,6 +67,10 @@ class _FakeSession:
 
 def _sess(s: _FakeSession) -> so.Session:
     return cast(so.Session, s)
+
+
+def _conn(s: _FakeSession) -> sa.Connection:
+    return cast(sa.Connection, s)
 
 
 def test_postgres_backend_identity_and_capabilities():
@@ -137,10 +142,12 @@ def test_postgres_backend_materialized_view_methods_work_end_to_end(pg_db):
     conn = pg_db.connection
     selectable = sa.select(sa.literal(1).label("n"))
 
-    backend.create_materialized_view(conn, "mv_test", selectable)
-    backend.refresh_materialized_view(conn, "mv_test")
+    created = backend.create_materialized_view(conn, "mv_test", selectable)
+    refreshed = backend.refresh_materialized_view(conn, "mv_test")
 
     assert conn.execute(sa.text("SELECT n FROM mv_test")).scalar() == 1
+    assert created.operation.value == "create"
+    assert refreshed.operation.value == "refresh"
 
 
 def test_postgres_backend_create_materialized_view_index_emits_expected_sql():
@@ -150,10 +157,11 @@ def test_postgres_backend_create_materialized_view_index_emits_expected_sql():
     session = _FakeSession()
     index = MaterializedViewIndex(name="mv_test_row_id_uq", columns=("row_id",), unique=True)
 
-    backend.create_materialized_view_index(_sess(session), "mv_test", index, schema="reporting")
+    backend.create_materialized_view_index(_conn(session), "mv_test", index, schema="reporting")
 
     assert session.statements == [
-        'CREATE UNIQUE INDEX IF NOT EXISTS "mv_test_row_id_uq" ON reporting.mv_test ("row_id")'
+        'CREATE UNIQUE INDEX "mv_test_row_id_uq" '
+        'ON "reporting"."mv_test" ("row_id")'
     ]
 
 
@@ -161,9 +169,11 @@ def test_postgres_backend_drop_materialized_view_default_args():
     backend = PostgresBackend()
     session = _FakeSession()
 
-    backend.drop_materialized_view(_sess(session), "mv_test", schema="reporting")
+    backend.drop_materialized_view(_conn(session), "mv_test", schema="reporting")
 
-    assert session.statements == ["DROP MATERIALIZED VIEW IF EXISTS reporting.mv_test"]
+    assert session.statements == [
+        'DROP MATERIALIZED VIEW IF EXISTS "reporting"."mv_test"'
+    ]
 
 
 def test_postgres_backend_drop_materialized_view_cascade_and_if_exists_false():
@@ -171,10 +181,34 @@ def test_postgres_backend_drop_materialized_view_cascade_and_if_exists_false():
     session = _FakeSession()
 
     backend.drop_materialized_view(
-        _sess(session), "mv_test", schema="reporting", if_exists=False, cascade=True
+        _conn(session), "mv_test", schema="reporting", if_exists=False, cascade=True
     )
 
-    assert session.statements == ["DROP MATERIALIZED VIEW reporting.mv_test CASCADE"]
+    assert session.statements == [
+        'DROP MATERIALIZED VIEW "reporting"."mv_test" CASCADE'
+    ]
+
+
+def test_postgres_backend_create_failure_preserves_cause():
+    from orm_loader.backends.materialized_view_errors import (
+        MaterializationError,
+        MaterializationOperation,
+    )
+
+    original = RuntimeError("boom")
+    backend = PostgresBackend()
+    session = _FakeSession(raise_on_execute=original)
+
+    with pytest.raises(MaterializationError) as exc_info:
+        backend.create_materialized_view(
+            _conn(session),
+            "mv_test",
+            sa.select(sa.literal(1).label("row_id")),
+            schema="reporting",
+        )
+
+    assert exc_info.value.__cause__ is original
+    assert exc_info.value.failure.operation is MaterializationOperation.CREATE
 
 
 def test_postgres_backend_drop_materialized_view_failure_preserves_cause():
@@ -188,11 +222,52 @@ def test_postgres_backend_drop_materialized_view_failure_preserves_cause():
     session = _FakeSession(raise_on_execute=original)
 
     with pytest.raises(MaterializationError) as exc_info:
-        backend.drop_materialized_view(_sess(session), "mv_test", schema="reporting")
+        backend.drop_materialized_view(_conn(session), "mv_test", schema="reporting")
 
     assert exc_info.value.__cause__ is original
     assert exc_info.value.failure.cause is original
     assert exc_info.value.failure.operation is MaterializationOperation.DROP
+
+
+def test_postgres_backend_index_failure_preserves_cause_and_index_name():
+    from orm_loader.backends.materialized_view_errors import (
+        MaterializationError,
+        MaterializationOperation,
+    )
+    from orm_loader.materialized_views import MaterializedViewIndex
+
+    original = RuntimeError("boom")
+    backend = PostgresBackend()
+    session = _FakeSession(raise_on_execute=original)
+    index = MaterializedViewIndex(name="mv_test_uq", columns=("row_id",), unique=True)
+
+    with pytest.raises(MaterializationError) as exc_info:
+        backend.create_materialized_view_index(
+            _conn(session), "mv_test", index, schema="reporting"
+        )
+
+    assert exc_info.value.__cause__ is original
+    assert exc_info.value.failure.operation is MaterializationOperation.CREATE_INDEX
+    assert exc_info.value.failure.index_name == "mv_test_uq"
+
+
+def test_postgres_backend_ordinary_refresh_failure_is_structured():
+    from orm_loader.backends.materialized_view_errors import (
+        MaterializationError,
+        MaterializationOperation,
+    )
+
+    original = RuntimeError("boom")
+    backend = PostgresBackend()
+    session = _FakeSession(raise_on_execute=original)
+
+    with pytest.raises(MaterializationError) as exc_info:
+        backend.refresh_materialized_view(
+            _conn(session), "mv_test", schema="reporting"
+        )
+
+    assert exc_info.value.__cause__ is original
+    assert exc_info.value.failure.operation is MaterializationOperation.REFRESH
 
 
 def test_postgres_backend_refresh_concurrently_without_declared_unique_index_raises_before_executing():
@@ -203,7 +278,7 @@ def test_postgres_backend_refresh_concurrently_without_declared_unique_index_rai
 
     with pytest.raises(ConcurrentRefreshNotEligibleError, match="no simple unique index"):
         backend.refresh_materialized_view(
-            _sess(session), "mv_test", schema="reporting", concurrently=True
+            _conn(session), "mv_test", schema="reporting", concurrently=True
         )
 
     assert session.statements == []
@@ -226,48 +301,54 @@ def test_postgres_backend_refresh_concurrently_declared_but_database_rejects_it_
     )
     backend = PostgresBackend()
     session = _FakeSession(
-        raise_on_execute=sa.exc.OperationalError("REFRESH ...", {}, orig)
+        raise_on_execute=OperationalError("REFRESH ...", {}, orig)
     )
     index = MaterializedViewIndex(name="mv_test_row_id_uq", columns=("row_id",), unique=True)
 
     with pytest.raises(ConcurrentRefreshNotEligibleError, match="cannot refresh") as exc_info:
         backend.refresh_materialized_view(
-            _sess(session),
+            _conn(session),
             "mv_test",
             schema="reporting",
             concurrently=True,
             declared_indexes=(index,),
         )
 
-    assert exc_info.value.failure.cause.orig is orig
+    cause = exc_info.value.failure.cause
+    assert isinstance(cause, OperationalError)
+    assert cause.orig is orig
     assert session.statements == ["REFRESH MATERIALIZED VIEW CONCURRENTLY reporting.mv_test;"]
 
 
-def test_postgres_backend_refresh_concurrently_unrelated_operational_error_propagates_unchanged():
+def test_postgres_backend_refresh_concurrently_unrelated_operational_error_is_structured():
     """A different psycopg error (a lock timeout, a dropped connection, ...)
     is not a concurrent-refresh-eligibility problem and must not be
     misclassified as one."""
     import psycopg.errors
 
+    from orm_loader.backends.materialized_view_errors import MaterializationError
     from orm_loader.mappers.materialised_view_contracts import MaterializedViewIndex
 
     orig = psycopg.errors.QueryCanceled("canceling statement due to statement timeout")
     backend = PostgresBackend()
     session = _FakeSession(
-        raise_on_execute=sa.exc.OperationalError("REFRESH ...", {}, orig)
+        raise_on_execute=OperationalError("REFRESH ...", {}, orig)
     )
     index = MaterializedViewIndex(name="mv_test_row_id_uq", columns=("row_id",), unique=True)
 
-    with pytest.raises(sa.exc.OperationalError) as exc_info:
+    with pytest.raises(MaterializationError) as exc_info:
         backend.refresh_materialized_view(
-            _sess(session),
+            _conn(session),
             "mv_test",
             schema="reporting",
             concurrently=True,
             declared_indexes=(index,),
         )
 
-    assert exc_info.value.orig is orig
+    cause = exc_info.value.__cause__
+    assert isinstance(cause, OperationalError)
+    assert cause.orig is orig
+    assert exc_info.value.failure.cause is cause
 
 
 def test_postgres_backend_refresh_concurrently_with_declared_index_emits_concurrently():
@@ -278,7 +359,7 @@ def test_postgres_backend_refresh_concurrently_with_declared_index_emits_concurr
     index = MaterializedViewIndex(name="mv_test_row_id_uq", columns=("row_id",), unique=True)
 
     backend.refresh_materialized_view(
-        _sess(session),
+        _conn(session),
         "mv_test",
         schema="reporting",
         concurrently=True,
@@ -364,7 +445,7 @@ def test_postgres_backend_refresh_concurrently_raises_when_declared_index_was_ne
         )
 
     assert "concurrently" in str(exc_info.value).lower()
-    assert isinstance(exc_info.value.__cause__, sa.exc.OperationalError)
+    assert isinstance(exc_info.value.__cause__, OperationalError)
 
 
 def test_postgres_backend_materialized_view_legacy_unqualified_path_still_round_trips(pg_db):
@@ -379,7 +460,7 @@ def test_postgres_backend_materialized_view_legacy_unqualified_path_still_round_
     assert conn.execute(sa.text("SELECT n FROM mv_legacy_test")).scalar() == 1
 
     backend.drop_materialized_view(conn, "mv_legacy_test")
-    with pytest.raises(sa.exc.ProgrammingError):
+    with pytest.raises(ProgrammingError):
         conn.execute(sa.text("SELECT n FROM mv_legacy_test"))
 
 

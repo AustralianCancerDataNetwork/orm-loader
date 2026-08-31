@@ -12,6 +12,7 @@ from .materialized_view_errors import (
     MaterializationError,
     MaterializationFailure,
     MaterializationOperation,
+    MaterializationOutcome,
     UnsupportedMaterializationDialectError,
 )
 
@@ -23,6 +24,7 @@ __all__ = [
     "MaterializationError",
     "MaterializationFailure",
     "MaterializationOperation",
+    "MaterializationOutcome",
     "PostgresBackend",
     "STAGING_SCHEMA",
     "SQLiteBackend",

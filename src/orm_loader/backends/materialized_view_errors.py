@@ -15,7 +15,17 @@ class MaterializationOperation(str, Enum):
     DROP = "drop"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
+class MaterializationOutcome:
+    """Structured context for a successful lifecycle operation."""
+
+    operation: MaterializationOperation
+    schema: str | None
+    name: str
+    index_name: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class MaterializationFailure:
     """Structured context for a failed materialized-view operation."""
 
@@ -49,6 +59,8 @@ class UnsupportedMaterializationDialectError(MaterializationError):
 
 
 class ConcurrentRefreshNotEligibleError(MaterializationError):
-    """Raised before ``REFRESH MATERIALIZED VIEW CONCURRENTLY`` executes,
-    when no eligible unique index is declared or found live in the
-    catalog."""
+    """Raised when concurrent refresh has no declared or live eligible index.
+
+    Declaration errors are detected before execution. Live eligibility is
+    owned by PostgreSQL and its rejection is translated into this error.
+    """

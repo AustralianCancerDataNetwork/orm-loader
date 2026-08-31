@@ -5,15 +5,16 @@ from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass
 from enum import Enum
 from collections.abc import Generator
-from typing import TYPE_CHECKING, Type, Any
+from typing import TYPE_CHECKING, Type
 
-import sqlalchemy as sa
 import sqlalchemy.orm as so
 from oa_configurator import register_reserved_schema
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.sql.compiler import IdentifierPreparer
+from sqlalchemy.sql.selectable import SelectBase
 
 if TYPE_CHECKING:
+    from .materialized_view_errors import MaterializationOutcome
     from ..loaders.data_classes import LoaderContext
     from ..mappers.materialised_view_contracts import MaterializedViewIndex
     from ..tables.typing import CSVTableProtocol
@@ -315,16 +316,16 @@ class DatabaseBackend(ABC):
         self,
         bind: "Engine | Connection",
         name: str,
-        selectable: sa.sql.Select[Any],
+        selectable: SelectBase,
         *,
         schema: str | None = None,
         with_data: bool = True,
-        if_not_exists: bool = True,
-    ) -> None:
+        if_not_exists: bool = False,
+    ) -> "MaterializationOutcome":
         """Create a materialized view for the supplied selectable.
 
-        *schema* defaults to the bind's own ``schema_translate_map`` (via
-        ``oa_configurator.schema_of``) when not given explicitly.
+        The supported release contract uses an unqualified name in ``public``.
+        The *schema* hook is reserved for the schema-generalisation line.
         """
 
     @abstractmethod
@@ -336,11 +337,11 @@ class DatabaseBackend(ABC):
         schema: str | None = None,
         concurrently: bool = False,
         declared_indexes: tuple["MaterializedViewIndex", ...] = (),
-    ) -> None:
+    ) -> "MaterializationOutcome":
         """Refresh a materialized view.
 
-        *schema* defaults to the bind's own ``schema_translate_map`` (via
-        ``oa_configurator.schema_of``) when not given explicitly.
+        The supported release contract uses an unqualified name in ``public``.
+        The *schema* hook is reserved for the schema-generalisation line.
 
         *declared_indexes* lets ``concurrently=True`` be requested safely:
         backends that support concurrent refresh must reject the request
@@ -360,7 +361,7 @@ class DatabaseBackend(ABC):
         schema: str | None = None,
         if_exists: bool = True,
         cascade: bool = False,
-    ) -> None:
+    ) -> "MaterializationOutcome":
         """Drop a materialized view.
 
         Not ``@abstractmethod``: the base implementation requires backend
@@ -370,6 +371,9 @@ class DatabaseBackend(ABC):
         ``NotImplementedError`` the two methods above already raise.
         """
         self._require_capability("supports_materialized_views", "materialized views")
+        raise NotImplementedError(
+            f"Backend '{self.name}' must implement materialized-view drop"
+        )
 
     def create_materialized_view_index(
         self,
@@ -378,8 +382,11 @@ class DatabaseBackend(ABC):
         index: "MaterializedViewIndex",
         *,
         schema: str | None = None,
-        if_not_exists: bool = True,
-    ) -> None:
+        if_not_exists: bool = False,
+    ) -> "MaterializationOutcome":
         """Create one declared index on a materialized view. See
         ``drop_materialized_view`` for why this isn't ``@abstractmethod``."""
         self._require_capability("supports_materialized_views", "materialized views")
+        raise NotImplementedError(
+            f"Backend '{self.name}' must implement materialized-view index creation"
+        )

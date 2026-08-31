@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NoReturn
 from contextlib import AbstractContextManager
 
 import sqlalchemy as sa
@@ -12,8 +12,15 @@ from sqlalchemy import event, text
 from sqlalchemy.dialects import sqlite as sqlite_dialect
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql.compiler import IdentifierPreparer
+from sqlalchemy.sql.selectable import SelectBase
 
 from .base import BackendCapabilities, DatabaseBackend, Dialect
+from .materialized_view_errors import (
+    MaterializationFailure,
+    MaterializationOperation,
+    MaterializationOutcome,
+    UnsupportedMaterializationDialectError,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.engine import Connection, Engine
@@ -29,6 +36,24 @@ VALID_SQLITE_JOURNAL_MODES = frozenset(
 
 
 class SQLiteBackend(DatabaseBackend):
+    @staticmethod
+    def _unsupported_materialized_view(
+        operation: MaterializationOperation,
+        name: str,
+        schema: str | None,
+        *,
+        index_name: str | None = None,
+    ) -> NoReturn:
+        raise UnsupportedMaterializationDialectError(
+            MaterializationFailure(
+                operation=operation,
+                schema=schema,
+                name=name,
+                index_name=index_name,
+                reason="materialized-view lifecycle operations require PostgreSQL",
+            )
+        )
+
     @staticmethod
     def staging_name_for_table(tablename: str) -> str:
         return f"_staging_{tablename}"
@@ -280,13 +305,13 @@ class SQLiteBackend(DatabaseBackend):
         self,
         bind: "Engine | Connection",
         name: str,
-        selectable: sa.sql.Select[Any],
+        selectable: SelectBase,
         *,
         schema: str | None = None,
         with_data: bool = True,
-        if_not_exists: bool = True,
-    ) -> None:
-        self._require_capability("supports_materialized_views", "materialized views")
+        if_not_exists: bool = False,
+    ) -> MaterializationOutcome:
+        self._unsupported_materialized_view(MaterializationOperation.CREATE, name, schema)
 
     def refresh_materialized_view(
         self,
@@ -296,8 +321,8 @@ class SQLiteBackend(DatabaseBackend):
         schema: str | None = None,
         concurrently: bool = False,
         declared_indexes: tuple["MaterializedViewIndex", ...] = (),
-    ) -> None:
-        self._require_capability("supports_materialized_views", "materialized views")
+    ) -> MaterializationOutcome:
+        self._unsupported_materialized_view(MaterializationOperation.REFRESH, name, schema)
 
     def drop_materialized_view(
         self,
@@ -307,8 +332,8 @@ class SQLiteBackend(DatabaseBackend):
         schema: str | None = None,
         if_exists: bool = True,
         cascade: bool = False,
-    ) -> None:
-        self._require_capability("supports_materialized_views", "materialized views")
+    ) -> MaterializationOutcome:
+        self._unsupported_materialized_view(MaterializationOperation.DROP, name, schema)
 
     def create_materialized_view_index(
         self,
@@ -317,9 +342,14 @@ class SQLiteBackend(DatabaseBackend):
         index: "MaterializedViewIndex",
         *,
         schema: str | None = None,
-        if_not_exists: bool = True,
-    ) -> None:
-        self._require_capability("supports_materialized_views", "materialized views")
+        if_not_exists: bool = False,
+    ) -> MaterializationOutcome:
+        self._unsupported_materialized_view(
+            MaterializationOperation.CREATE_INDEX,
+            name,
+            schema,
+            index_name=index.name,
+        )
 
     def configure_dbapi_connection(self, dbapi_connection:  sa.engine.interfaces.DBAPIConnection) -> None:
         if dbapi_connection.__class__.__module__.startswith("sqlite3"):

@@ -1,6 +1,8 @@
 # Materialised Views
 
-This module provides a SQLAlchemy-native way to define, create, refresh, and order materialized views from ordinary `Select` constructs.
+The public `orm_loader.materialized_views` module provides a SQLAlchemy-native
+way to define, create, refresh, drop, index, and order materialized views from
+ordinary `Select` constructs.
 
 
 It is designed for:
@@ -9,29 +11,48 @@ It is designed for:
 * large fact tables with repeated joins or aggregates
 * schema-level orchestration (migrations, setup, Airflow, admin tasks)
 
-The implementation is PostgreSQL-oriented. The mixin resolves a backend from the supplied bind, and the built-in PostgreSQL backend is currently the only one that supports materialized views.
+Materialized-view lifecycle operations require PostgreSQL. This release is
+validated for unqualified materialized views in the `public` schema. Use a
+connection whose active schema resolves to `public`; qualified-schema support
+is outside this release contract.
 
 ## Overview
 
 The materialized view system consists of four main parts:
 
-1. `CreateMaterializedView`: A custom SQLAlchemy DDLElement that compiles a Select into a `CREATE MATERIALIZED VIEW IF NOT EXISTS` statement.
-2. `MaterializedViewMixin`: A mixin used to define materialized views declaratively, including:
+1. `MaterializedViewSpec`: an immutable, side-effect-free definition with a
+   name, selectable, logical row identity, dependencies, and indexes.
+2. `MaterializedViewMixin`: a mixin used to define and operate materialized
+   views declaratively, including:
     * name
     * backing `Select`
+    * complete logical row identity (`__mv_logical_identity__`)
     * optional dependencies
     * optional declared indexes (`__mv_indexes__`)
 3. Dependency resolution: A topological sort over declared dependencies to determine refresh order.
 4. Refresh orchestration: Helpers to refresh one or many materialized views in a predictable order.
 
-## Schema, indexes, and concurrent refresh
+Use only the public module in application code:
 
-Every lifecycle method (`create_mv`, `refresh_mv`, `drop_mv`) accepts an
-optional `schema` override. When omitted, the target schema is resolved
-from the bind's own `schema_translate_map` (via `oa_configurator.schema_of`)
-rather than needing to be threaded through by hand at every call site — an
-unconfigured bind resolves to the same unqualified name these methods have
-always used, so existing callers are unaffected.
+```python
+from orm_loader.materialized_views import (
+    MaterializedViewIndex,
+    MaterializedViewMixin,
+)
+```
+
+## Identity, indexes, and concurrent refresh
+
+`__mv_logical_identity__` declares the complete selected columns that
+distinguish rows in the view. Definitions fail before database execution when
+the identity is empty, contains duplicates, or references a column that the
+selectable does not expose. Index declarations receive the same selected-column
+validation, and duplicate index names or dependency declarations are rejected.
+
+Logical identity is descriptive metadata, not a database constraint. The
+application that owns a materialized view remains responsible for testing its
+uniqueness and declaring a matching unique index when concurrent refresh is
+required.
 
 `__mv_indexes__` declares simple column indexes (`MaterializedViewIndex`)
 created immediately after the view by `create_mv`. Declaring at least one
@@ -50,56 +71,61 @@ refresh and translates PostgreSQL's own rejection into the same
 `__cause__`.
 
 `drop_mv` supports the same `if_exists`/`cascade` options as the DDL itself.
-Any failure in `drop_mv` or index creation is wrapped in a
+Successful refresh and drop calls return a `MaterializationOutcome`;
+`create_mv` returns one outcome for the view followed by one for each declared
+index. Database failures during create, refresh, drop, or index creation are wrapped in a
 `MaterializationError` with the original exception preserved as `__cause__`,
 so callers can catch on operation/target context without losing the
-underlying database error. SQLite continues to reject every materialized-view
-operation outright.
+underlying database error. SQLite raises
+`UnsupportedMaterializationDialectError` before issuing lifecycle SQL.
+
+Creation defaults to failing when the target or index already exists.
+Applications should perform explicit replacement/rebuild decisions rather than
+using `IF NOT EXISTS` to hide definition drift. Set `if_not_exists=True` only
+when an idempotent no-op is the intended deployment policy.
 
 ### Defining the Materialised View
 
-::: orm_loader.mappers.materialised_view_mixin.CreateMaterializedView
-    options:
-      heading_level: 3
-
-::: orm_loader.mappers.materialised_view_mixin.MaterializedViewMixin
+::: orm_loader.materialized_views.MaterializedViewMixin
     options:
       heading_level: 3
       members: true
       
 
-::: orm_loader.mappers.materialised_view_mixin.resolve_mv_refresh_order
+::: orm_loader.materialized_views.MaterializedViewSpec
     options:
       heading_level: 3
       members: true
 
-::: orm_loader.mappers.materialised_view_mixin.refresh_all_mvs
+::: orm_loader.materialized_views.resolve_mv_refresh_order
     options:
       heading_level: 3
       members: true
 
-::: orm_loader.mappers.materialised_view_contracts.MaterializedViewIndex
+::: orm_loader.materialized_views.refresh_all_mvs
     options:
       heading_level: 3
       members: true
 
-::: orm_loader.mappers.materialised_view_contracts.CreateMaterializedViewIndex
-    options:
-      heading_level: 3
-
-::: orm_loader.mappers.materialised_view_contracts.DropMaterializedView
-    options:
-      heading_level: 3
-
-::: orm_loader.backends.materialized_view_errors.MaterializationError
+::: orm_loader.materialized_views.MaterializedViewIndex
     options:
       heading_level: 3
       members: true
 
-::: orm_loader.backends.materialized_view_errors.ConcurrentRefreshNotEligibleError
+::: orm_loader.materialized_views.MaterializationOutcome
+    options:
+      heading_level: 3
+      members: true
+
+::: orm_loader.materialized_views.MaterializationError
+    options:
+      heading_level: 3
+      members: true
+
+::: orm_loader.materialized_views.ConcurrentRefreshNotEligibleError
     options:
       heading_level: 3
 
-::: orm_loader.backends.materialized_view_errors.UnsupportedMaterializationDialectError
+::: orm_loader.materialized_views.UnsupportedMaterializationDialectError
     options:
       heading_level: 3
