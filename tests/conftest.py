@@ -5,7 +5,9 @@ import sqlalchemy as sa
 import sqlalchemy.orm as so
 from dotenv import load_dotenv
 
+from oa_configurator.testing import isolated_test_database
 from orm_loader.backends import STAGING_SCHEMA
+from orm_loader.config import OrmLoaderConfig
 from tests.models import Base
 
 load_dotenv(Path(__file__).parent.parent / ".env")
@@ -13,9 +15,12 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 
 @pytest.fixture
 def engine():
-    engine = sa.create_engine("sqlite:///:memory:", future=True)
-    Base.metadata.create_all(engine)
-    return engine
+    with isolated_test_database(
+        OrmLoaderConfig, "test_orm_db_sqlite", dialect="sqlite", future=True,
+    ) as db:
+        engine = db.connection.engine
+        Base.metadata.create_all(engine)
+        yield engine
 
 
 @pytest.fixture
@@ -34,10 +39,7 @@ def pg_db():
     ``pg_db.connection``/``pg_db.session`` happens inside one transaction
     that's rolled back on exit, so concurrent test runs can't collide and
     nothing needs manual cleanup."""
-    from oa_configurator.testing import isolated_test_database
-    from orm_loader.config import OrmLoaderConfig
-
-    with isolated_test_database(OrmLoaderConfig, "test_orm_db") as db:
+    with isolated_test_database(OrmLoaderConfig, "test_orm_db_pg") as db:
         yield db
 
 
