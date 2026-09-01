@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 import sqlalchemy as sa
 import sqlalchemy.event as sae
 import sqlalchemy.orm as so
-from oa_configurator import qualified, schema_of
+from oa_configurator import autocommit_connection, qualified, schema_of
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.sql.compiler import IdentifierPreparer
 
@@ -322,7 +322,7 @@ class PostgresBackend(DatabaseBackend):
         finally:
             sae.remove(engine, "connect", _set_replica_role)
             with engine.connect() as conn:
-                conn = conn.execution_options(isolation_level="AUTOCOMMIT")
+                conn = autocommit_connection(conn)
                 conn.execute(sa.text("SET session_replication_role = DEFAULT"))
                 role = conn.execute(sa.text("SHOW session_replication_role")).scalar()
                 if role != "origin":
