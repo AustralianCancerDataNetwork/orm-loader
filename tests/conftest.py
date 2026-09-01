@@ -34,12 +34,12 @@ def session(engine):
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
-def pg_db():
+def pg_db(request):
     """Isolated PostgreSQL test database. Everything done through
     ``pg_db.connection``/``pg_db.session`` happens inside one transaction
     that's rolled back on exit, so concurrent test runs can't collide and
     nothing needs manual cleanup."""
-    with isolated_test_database(OrmLoaderConfig, "test_orm_db_pg") as db:
+    with isolated_test_database(OrmLoaderConfig, "test_orm_db_pg", request=request) as db:
         yield db
 
 

@@ -42,4 +42,10 @@ class OrmLoaderConfig(PackageConfigBase):
         default=None,
         description="Real PostgreSQL test database, for Postgres-only integration testing.",
     )
-    test_orm_db_sqlite: Annotated[str | None, RefTo(CDMDatabaseConfig, is_test=True)] = None
+    test_orm_db_sqlite: Annotated[str | None, RefTo(CDMDatabaseConfig, is_test=True)] = Field(
+        default=None,
+        description=(
+            "Disposable SQLite test database; left unconfigured by design "
+            "(isolated_test_database(..., dialect='sqlite') provisions one automatically)."
+        ),
+    )

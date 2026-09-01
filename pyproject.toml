@@ -82,7 +82,7 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "-ra -m \"not requires_process_isolation\""
+addopts = "-ra -m 'not db_dialect'"
 
 [tool.pyright]
 reportMissingTypeStubs = false

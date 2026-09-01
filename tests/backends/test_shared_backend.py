@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Type, cast
 import pytest
 import sqlalchemy as sa
 
+from oa_configurator.testing import DIALECT_PARAMS
 from orm_loader.backends import STAGING_SCHEMA, DatabaseBackend, PostgresBackend, SQLiteBackend
 from tests.models import ComputedColumnTable, CompositeTable
 
@@ -17,26 +18,19 @@ _ComputedTableCls = cast("Type[CSVTableProtocol]", ComputedColumnTable)
 _CompositeTableCls = cast("Type[CSVTableProtocol]", CompositeTable)
 
 
-@pytest.fixture(
-    params=[pytest.param("postgres", marks=pytest.mark.requires_process_isolation), "sqlite"]
-)
+@pytest.fixture(params=DIALECT_PARAMS)
 def merge_backend(request: pytest.FixtureRequest) -> tuple[DatabaseBackend, "so.Session"]:
     """Same merge-method contract exercised against both real backends.
-    Only the postgres param ever requests pg_session, so the sqlite param
-    never needs a database.
+    Only the postgresql param ever requests pg_session, so the sqlite
+    param never needs a database.
 
-    The postgres param carries its own requires_process_isolation mark
-    directly (rather than relying on the usual pg_db-in-fixturenames
-    auto-detection): request.getfixturevalue("pg_session") is a dynamic,
-    runtime lookup, invisible to pytest's collection-time fixturenames
-    computation, so the auto-detection mechanism can't see it and would
-    silently leave these Postgres-touching runs in the default suite,
-    alongside SQLite tests in the same process. Confirmed via
-    `pytest -m requires_process_isolation --collect-only`: without this
-    explicit mark, this file's postgres-param tests were being deselected
-    from that run entirely.
+    DIALECT_PARAMS carries each dialect's own mark plus `forked` directly
+    on the param value, so this still works correctly even though
+    request.getfixturevalue("pg_session") is a dynamic, runtime lookup
+    invisible to pytest's collection-time fixturenames computation (the
+    usual pg_db-in-fixturenames auto-detection can't see it).
     """
-    if request.param == "postgres":
+    if request.param == "postgresql":
         session = request.getfixturevalue("pg_session")
         return PostgresBackend(staging_schema=STAGING_SCHEMA), session
     session = request.getfixturevalue("session")
