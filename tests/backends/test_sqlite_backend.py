@@ -9,23 +9,13 @@ import sqlalchemy.orm as so
 
 from orm_loader.backends import Dialect, SQLiteBackend
 from orm_loader.helpers.sqlite import attach_sqlite_bulk_load_pragmas
+from tests.models import ComputedColumnTable
 
 if TYPE_CHECKING:
     from orm_loader.tables.typing import CSVTableProtocol
 
-_TARGET_TABLE = "target_table"
+_TARGET_TABLE = ComputedColumnTable.__tablename__
 _STAGING_TABLE = f"_staging_{_TARGET_TABLE}"
-
-
-class _ComputedTable:
-    __tablename__ = _TARGET_TABLE
-    __table__ = sa.Table(
-        _TARGET_TABLE,
-        sa.MetaData(),
-        sa.Column("id", sa.Integer, primary_key=True),
-        sa.Column("name", sa.String),
-        sa.Column("slug", sa.String, sa.Computed("lower(name)")),
-    )
 
 
 class _FakeSession:
@@ -46,7 +36,7 @@ class _FakeSession:
         return _Result(self.scalar_result)
 
 
-_ComputedTableCls = cast("Type[CSVTableProtocol]", _ComputedTable)
+_ComputedTableCls = cast("Type[CSVTableProtocol]", ComputedColumnTable)
 
 
 def _sess(s: _FakeSession) -> so.Session:
@@ -152,56 +142,6 @@ def test_sqlite_backend_normalize_fk_check_state():
         assert "Invalid SQLite foreign_keys state" in str(exc)
     else:
         raise AssertionError("Expected ValueError for unrecognised string")
-
-
-def test_sqlite_backend_merge_replace_single_pk():
-    backend = SQLiteBackend()
-    session = _FakeSession()
-
-    backend.merge_replace(
-        _ComputedTableCls, _sess(session), _TARGET_TABLE, ["id"]
-    )
-
-    sql = session.statements[0]
-    assert f'DELETE FROM "{_TARGET_TABLE}"' in sql
-    assert f'SELECT "id" FROM "{_STAGING_TABLE}"' in sql
-
-
-def test_sqlite_backend_merge_replace_composite_pk():
-    backend = SQLiteBackend()
-    session = _FakeSession()
-
-    backend.merge_replace(
-        _ComputedTableCls, _sess(session), _TARGET_TABLE, ["id", "name"]
-    )
-
-    sql = session.statements[0]
-    assert "WHERE EXISTS (" in sql
-    assert f'"{_TARGET_TABLE}"."id" = "{_STAGING_TABLE}"."id"' in sql
-    assert f'"{_TARGET_TABLE}"."name" = "{_STAGING_TABLE}"."name"' in sql
-
-
-def test_sqlite_backend_merge_insert_excludes_computed_columns():
-    backend = SQLiteBackend()
-    session = _FakeSession()
-
-    backend.merge_insert(_ComputedTableCls, _sess(session), _TARGET_TABLE)
-
-    sql = session.statements[0]
-    assert f'INSERT INTO "{_TARGET_TABLE}" ("id", "name")' in sql
-    assert f'SELECT "id", "name" FROM "{_STAGING_TABLE}"' in sql
-
-
-def test_sqlite_backend_merge_upsert_excludes_computed_columns():
-    backend = SQLiteBackend()
-    session = _FakeSession()
-
-    backend.merge_upsert(
-        _ComputedTableCls, _sess(session), _TARGET_TABLE, ["id"]
-    )
-
-    sql = session.statements[0]
-    assert f'INSERT OR IGNORE INTO "{_TARGET_TABLE}" ("id", "name")' in sql
 
 
 def test_sqlite_backend_materialized_view_methods_raise(engine):

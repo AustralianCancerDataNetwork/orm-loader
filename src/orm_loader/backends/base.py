@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Type, Any
 
 import sqlalchemy as sa
 import sqlalchemy.orm as so
+from oa_configurator import register_reserved_schema
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.sql.compiler import IdentifierPreparer
 
@@ -40,6 +41,8 @@ class Dialect(str, Enum):
 
 
 STAGING_SCHEMA: str = "staging"
+
+register_reserved_schema(STAGING_SCHEMA, owner="orm-loader")
 
 
 class DatabaseBackend(ABC):
@@ -239,7 +242,6 @@ class DatabaseBackend(ABC):
         self,
         table_cls: Type["CSVTableProtocol"],
         session: so.Session,
-        target_name: str,
         pk_cols: list[str],
         *,
         merge_batch_size: int | None = None,
@@ -251,7 +253,6 @@ class DatabaseBackend(ABC):
         self,
         table_cls: Type["CSVTableProtocol"],
         session: so.Session,
-        target_name: str,
         pk_cols: list[str],
         *,
         merge_batch_size: int | None = None,
@@ -263,7 +264,6 @@ class DatabaseBackend(ABC):
         self,
         table_cls: Type["CSVTableProtocol"],
         session: so.Session,
-        target_name: str,
         *,
         merge_batch_size: int | None = None,
     ) -> None:
@@ -315,13 +315,25 @@ class DatabaseBackend(ABC):
         bind: "Engine | Connection",
         name: str,
         selectable: sa.sql.Select[Any],
+        *,
+        schema: str | None = None,
     ) -> None:
-        """Create a materialized view for the supplied selectable."""
+        """Create a materialized view for the supplied selectable.
+
+        *schema* defaults to the bind's own ``schema_translate_map`` (via
+        ``oa_configurator.schema_of``) when not given explicitly.
+        """
 
     @abstractmethod
     def refresh_materialized_view(
         self,
         bind: "Engine | Connection",
         name: str,
+        *,
+        schema: str | None = None,
     ) -> None:
-        """Refresh a materialized view."""
+        """Refresh a materialized view.
+
+        *schema* defaults to the bind's own ``schema_translate_map`` (via
+        ``oa_configurator.schema_of``) when not given explicitly.
+        """

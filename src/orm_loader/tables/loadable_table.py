@@ -2,6 +2,7 @@
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 import logging
+from oa_configurator import schema_inspect, schema_of
 from sqlalchemy.exc import InvalidRequestError, UnboundExecutionError
 
 from typing import Type, Any, Iterator
@@ -120,9 +121,8 @@ class CSVLoadableTableInterface(ORMTableBase):
         table_name = cls.__tablename__
 
         indices = list(cls.__table__.indexes) if resolved_index_strategy == "drop_rebuild" else []
-        inspector = sa.inspect(_require_bind(session))
-        assert inspector is not None, "Failed to create inspector for index management"
-    
+        inspector = schema_inspect(session)
+
         if indices:
             existing_in_db = {idx['name'] for idx in inspector.get_indexes(cls.__tablename__)}
             to_drop = [i for i in indices if i.name in existing_in_db]
@@ -232,10 +232,22 @@ class CSVLoadableTableInterface(ORMTableBase):
         -------
         sqlalchemy.Table
             The reflected staging table.
+
+        Notes
+        -----
+        Inspects and reflects via ``session.connection()``, not the bare
+        engine. Confirmed empirically: on SQLite's SingletonThreadPool, a
+        second connection opened straight from the engine is the same
+        underlying DBAPI connection, and closing that second wrapper resets
+        its perceived transaction state, silently discarding the session's
+        own uncommitted work. Using the session's own already-open
+        connection avoids ever opening a second one. Fetched fresh both
+        before and after the possible ``create_staging_table()`` call below,
+        since that call commits, which can invalidate an earlier reference.
         """
-        engine = _require_bind(session)
+        _require_bind(session)
         backend = resolve_backend(session, staging_schema=staging_schema)
-        inspector = sa.inspect(engine)
+        inspector = sa.inspect(session.connection())
         staging_name = backend.staging_name_for_table(cls.__tablename__)
 
         if not inspector.has_table(staging_name, schema=backend.staging_schema):
@@ -245,7 +257,7 @@ class CSVLoadableTableInterface(ORMTableBase):
         return sa.Table(
             staging_name,
             sa.MetaData(),  # throwaway — keeps staging table out of Base.metadata
-            autoload_with=engine,
+            autoload_with=session.connection(),
             schema=backend.staging_schema,
         )
 
@@ -470,6 +482,7 @@ class CSVLoadableTableInterface(ORMTableBase):
                 target,
                 sa.MetaData(),
                 autoload_with=session.get_bind(),
+                schema=schema_of(session),
             )
         row = session.execute(
              sa.select(sa.literal(1)).select_from(table).limit(1)
@@ -530,14 +543,14 @@ class CSVLoadableTableInterface(ORMTableBase):
         if merge_strategy == "replace":
             logger.info(f"Table `{target}`: Merge replace delete phase starting.")
             delete_started = perf_counter()
-            backend.merge_replace(cls, session, target, pk_cols, merge_batch_size=merge_batch_size)
+            backend.merge_replace(cls, session, pk_cols, merge_batch_size=merge_batch_size)
             logger.info(
                 f"Table `{target}`: Merge replace delete phase completed in "
                 f"{_format_elapsed(perf_counter() - delete_started)}."
             )
             logger.info(f"Table `{target}`: Merge insert phase starting.")
             insert_started = perf_counter()
-            backend.merge_insert(cls, session, target, merge_batch_size=merge_batch_size)
+            backend.merge_insert(cls, session, merge_batch_size=merge_batch_size)
             logger.info(
                 f"Table `{target}`: Merge insert phase completed in "
                 f"{_format_elapsed(perf_counter() - insert_started)}."
@@ -545,7 +558,7 @@ class CSVLoadableTableInterface(ORMTableBase):
         elif merge_strategy == "upsert":
             logger.info(f"Table `{target}`: Merge upsert phase starting.")
             upsert_started = perf_counter()
-            backend.merge_upsert(cls, session, target, pk_cols, merge_batch_size=merge_batch_size)
+            backend.merge_upsert(cls, session, pk_cols, merge_batch_size=merge_batch_size)
             logger.info(
                 f"Table `{target}`: Merge upsert phase completed in "
                 f"{_format_elapsed(perf_counter() - upsert_started)}."
@@ -571,7 +584,7 @@ class CSVLoadableTableInterface(ORMTableBase):
 
             logger.info(f"Table `{target}`: Merge insert-if-empty phase starting.")
             insert_started = perf_counter()
-            backend.merge_insert(cls, session, target, merge_batch_size=merge_batch_size)
+            backend.merge_insert(cls, session, merge_batch_size=merge_batch_size)
             logger.info(
                 f"Table `{target}`: Merge insert-if-empty phase completed in "
                 f"{_format_elapsed(perf_counter() - insert_started)}."

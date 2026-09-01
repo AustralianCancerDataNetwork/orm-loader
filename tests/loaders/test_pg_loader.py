@@ -8,7 +8,6 @@ from orm_loader.loaders.loading_helpers import infer_encoding, infer_delim, chec
 from tests.models import EnumTable, Role, SimpleTable
 
 
-@pytest.mark.requires_database("test_orm_db")
 def test_copy_into_staging_with_extra_identity_column(pg_session, tmp_path):
     """COPY must succeed when the staging table has a _rownum identity column."""
     csv = tmp_path / "test_table.csv"
@@ -32,7 +31,6 @@ def test_copy_into_staging_with_extra_identity_column(pg_session, tmp_path):
     assert rownums == [1, 2], "_rownum must be auto-populated by IDENTITY sequence"
 
 
-@pytest.mark.requires_database("test_orm_db")
 def test_copy_and_orm_path_equivalence(pg_session, tmp_path):
     csv = tmp_path / "test_table.csv"
 
@@ -54,7 +52,6 @@ def test_copy_and_orm_path_equivalence(pg_session, tmp_path):
 
 
 
-@pytest.mark.requires_database("test_orm_db")
 def test_postgres_copy_fast_path(pg_session, tmp_path):
     csv = tmp_path / "test_table.csv"
     pd.DataFrame([{"id": 1, "name": "alpha"}]).to_csv(csv, index=False)
@@ -64,7 +61,6 @@ def test_postgres_copy_fast_path(pg_session, tmp_path):
 
     assert inserted == 1
 
-@pytest.mark.requires_database("test_orm_db")
 def test_postgres_copy_fast_path_is_used(pg_session, tmp_path, monkeypatch):
     csv = tmp_path / "test_table.csv"
     pd.DataFrame([{"id": 1, "name": "alpha"}]).to_csv(csv, index=False)
@@ -84,7 +80,6 @@ def test_postgres_copy_fast_path_is_used(pg_session, tmp_path, monkeypatch):
     assert called["copy"] is True
     assert inserted == 1
 
-@pytest.mark.requires_database("test_orm_db")
 def test_copy_failure_falls_back_to_orm(pg_session, tmp_path, monkeypatch):
     csv = tmp_path / "test_table.csv"
     pd.DataFrame([{"id": 1, "name": "alpha"}]).to_csv(csv, index=False)
@@ -107,7 +102,6 @@ def test_copy_failure_falls_back_to_orm(pg_session, tmp_path, monkeypatch):
     assert [(r.id, r.name) for r in rows] == [(1, "alpha")]
 
 
-@pytest.mark.requires_database("test_orm_db")
 def test_postgres_upsert_does_not_update(pg_session, tmp_path):
     csv = tmp_path / "test_table.csv"
 
@@ -124,7 +118,6 @@ def test_postgres_upsert_does_not_update(pg_session, tmp_path):
     assert [(r.id, r.name) for r in rows] == [(1, "alpha")]
 
 
-@pytest.mark.requires_database("test_orm_db")
 def test_postgres_insert_if_empty(pg_session, tmp_path):
     csv = tmp_path / "test_table.csv"
 
@@ -152,7 +145,6 @@ def test_postgres_insert_if_empty(pg_session, tmp_path):
     ]
 
 
-@pytest.mark.requires_database("test_orm_db")
 def test_postgres_insert_if_empty_raises_on_non_empty_target(pg_session, tmp_path):
     csv = tmp_path / "test_table.csv"
 
@@ -171,7 +163,6 @@ def test_postgres_insert_if_empty_raises_on_non_empty_target(pg_session, tmp_pat
         )
 
 
-@pytest.mark.requires_database("test_orm_db")
 def test_postgres_copy_large_batch(pg_session, tmp_path):
     csv = tmp_path / "test_table.csv"
 
@@ -188,7 +179,6 @@ def test_postgres_copy_large_batch(pg_session, tmp_path):
     assert inserted == 9999
 
 
-@pytest.mark.requires_database("test_orm_db")
 def test_staging_schema_matches_target(pg_session, tmp_path):
     csv = tmp_path / "test_table.csv"
     pd.DataFrame([{"id": 1, "name": "alpha"}]).to_csv(csv, index=False)
@@ -259,7 +249,6 @@ def test_check_line_ending_unknown(caplog):
     assert "Unable to detect line ending" in caplog.text
 
 
-@pytest.mark.requires_database("test_orm_db")
 def test_quick_load_pg_basic(pg_session, tmp_path):
     csv = tmp_path / "test_table.csv"
     csv.write_text("id,name\n1,alpha\n2,beta\n")
@@ -275,7 +264,6 @@ def test_quick_load_pg_basic(pg_session, tmp_path):
     assert rows == [(1, "alpha"), (2, "beta")]
 
 
-@pytest.mark.requires_database("test_orm_db")
 def test_quick_load_pg_lowercases_header(pg_session, tmp_path):
     csv = tmp_path / "test_table.csv"
     csv.write_text("ID,NAME\n1,alpha\n")
@@ -287,7 +275,6 @@ def test_quick_load_pg_lowercases_header(pg_session, tmp_path):
     assert row == (1, "alpha")
 
 
-@pytest.mark.requires_database("test_orm_db")
 def test_quick_load_pg_strips_literally_quoted_header(pg_session, tmp_path):
     """A header row with literal quote characters around each column name
     (a common CSV-export convention) used to round-trip into an invalid
@@ -303,7 +290,6 @@ def test_quick_load_pg_strips_literally_quoted_header(pg_session, tmp_path):
     assert rows == [(1, "alpha"), (2, "beta")]
 
 
-@pytest.mark.requires_database("test_orm_db")
 def test_quick_load_pg_tab_delimiter(pg_session, tmp_path):
     csv = tmp_path / "test_table.csv"
     csv.write_text("id\tname\n1\talpha\n2\tbeta\n")
@@ -315,7 +301,6 @@ def test_quick_load_pg_tab_delimiter(pg_session, tmp_path):
     assert rows == [(1, "alpha"), (2, "beta")]
 
 
-@pytest.mark.requires_database("test_orm_db")
 def test_quick_load_pg_rollback_on_error(pg_session, tmp_path):
     csv = tmp_path / "test_table.csv"
     csv.write_text("id,name\n1,alpha\n2,\n")  # violates NOT NULL
@@ -327,7 +312,6 @@ def test_quick_load_pg_rollback_on_error(pg_session, tmp_path):
     assert rows == 0
 
 
-@pytest.mark.requires_database("test_orm_db")
 def test_quick_load_pg_equivalence_with_orm(pg_session, tmp_path):
     csv = tmp_path / "test_table.csv"
     csv.write_text("id,name\n1,alpha\n2,beta\n")
@@ -351,7 +335,6 @@ def test_quick_load_pg_equivalence_with_orm(pg_session, tmp_path):
     assert rows_pg == rows_orm
 
 
-@pytest.mark.requires_database("test_orm_db")
 def test_quick_load_pg_trailing_blank_lines(pg_session, tmp_path):
     csv = tmp_path / "test_table.csv"
 
@@ -370,7 +353,6 @@ def test_quick_load_pg_trailing_blank_lines(pg_session, tmp_path):
     assert total == 2
     assert rows == [(1, "alpha"), (2, "beta")]
 
-@pytest.mark.requires_database("test_orm_db")
 def test_copy_fails_with_raw_carriage_returns_but_succeeds_after_normalisation(pg_session, tmp_path):
     csv = tmp_path / "test_table.csv"
 
@@ -424,7 +406,6 @@ def _clear_column_cast_rules():
     _COLUMN_CAST_RULES.clear()
 
 
-@pytest.mark.requires_database("test_orm_db")
 def test_enum_column_cast_rule_round_trips_on_real_postgres(pg_session, tmp_path):
     # The merge step that moves rows from staging to the target table is a
     # plain SQL copy with no Python-level type translation, so whatever text

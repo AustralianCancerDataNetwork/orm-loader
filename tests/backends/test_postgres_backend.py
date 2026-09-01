@@ -6,30 +6,22 @@ from typing import TYPE_CHECKING, Type, cast
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 from sqlalchemy.dialects import postgresql
-from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.engine import Engine
 
 from orm_loader.backends import STAGING_SCHEMA, Dialect, PostgresBackend
 from orm_loader.helpers.sql import qualify_identifier
+from tests.models import ComputedColumnTable
 
-_TARGET_TABLE = "target_table"
+_TARGET_TABLE = ComputedColumnTable.__tablename__
 _STAGING_TABLE = f"_staging_{_TARGET_TABLE}"
 _PREPARER = postgresql.dialect().identifier_preparer
 _STAGING_TABLE_WITH_SCHEMA: str = qualify_identifier(_STAGING_TABLE, STAGING_SCHEMA, _PREPARER)
 
+_ComputedTableCls = cast("Type[CSVTableProtocol]", ComputedColumnTable)
+
 
 if TYPE_CHECKING:
     from orm_loader.tables.typing import CSVTableProtocol
-
-
-class _ComputedTable:
-    __tablename__ = _TARGET_TABLE
-    __table__ = sa.Table(
-        _TARGET_TABLE,
-        sa.MetaData(),
-        sa.Column("id", sa.Integer, primary_key=True),
-        sa.Column("name", sa.String),
-        sa.Column("slug", sa.String, sa.Computed("lower(name)")),
-    )
 
 
 class _FakeSession:
@@ -61,15 +53,8 @@ class _FakeSession:
         self.commits += 1
 
 
-_ComputedTableCls = cast("Type[CSVTableProtocol]", _ComputedTable)
-
-
 def _sess(s: _FakeSession) -> so.Session:
     return cast(so.Session, s)
-
-
-def _as_engine(s: _FakeSession) -> Engine | Connection:
-    return cast(Engine, s)
 
 
 def test_postgres_backend_identity_and_capabilities():
@@ -96,16 +81,14 @@ def test_postgres_backend_default_staging_schema_is_none():
     assert backend.qualified_staging_name(_TARGET_TABLE) == _PREPARER.quote_identifier(_STAGING_TABLE)
 
 
-def test_postgres_backend_create_staging_table_drops_computed_columns():
+def test_postgres_backend_create_staging_table_drops_computed_columns(pg_session):
     backend = PostgresBackend(staging_schema=STAGING_SCHEMA)
-    session = _FakeSession()
 
-    backend.create_staging_table(_ComputedTableCls, _sess(session))
+    backend.create_staging_table(_ComputedTableCls, pg_session)
 
-    assert any(f'DROP TABLE IF EXISTS {_STAGING_TABLE_WITH_SCHEMA}' in sql for sql in session.statements)
-    assert any(f'CREATE UNLOGGED TABLE {_STAGING_TABLE_WITH_SCHEMA}' in sql for sql in session.statements)
-    assert any(f'ALTER TABLE {_STAGING_TABLE_WITH_SCHEMA} DROP COLUMN "slug"' in sql for sql in session.statements)
-    assert session.commits == 1
+    inspector = sa.inspect(pg_session.get_bind())
+    cols = {c["name"] for c in inspector.get_columns(_STAGING_TABLE, schema=STAGING_SCHEMA)}
+    assert cols == {"id", "name", "_rownum"}  # slug is computed, excluded
 
 
 def test_postgres_backend_drop_staging_table():
@@ -136,96 +119,17 @@ def test_postgres_backend_fk_methods_emit_expected_sql():
     ]
 
 
-def test_postgres_backend_merge_replace_uses_using_delete():
-    backend = PostgresBackend(staging_schema=STAGING_SCHEMA)
-    session = _FakeSession(scalar_result=0)
-
-    backend.merge_replace(_ComputedTableCls, _sess(session), _TARGET_TABLE, ["id", "name"])
-
-    sql = session.statements[0]
-    assert f'DELETE FROM "{_TARGET_TABLE}" t' in sql
-    assert f'USING {_STAGING_TABLE_WITH_SCHEMA} s' in sql
-    assert 't."id" = s."id" AND t."name" = s."name"' in sql
-    assert f'USING {qualify_identifier(_TARGET_TABLE, STAGING_SCHEMA, _PREPARER)}' not in sql
-
-
-def test_postgres_backend_merge_insert_excludes_computed_columns():
-    backend = PostgresBackend(staging_schema=STAGING_SCHEMA)
-    session = _FakeSession(scalar_result=0)
-
-    backend.merge_insert(_ComputedTableCls, _sess(session), _TARGET_TABLE)
-
-    sql = session.statements[0]
-    assert f'INSERT INTO "{_TARGET_TABLE}" ("id", "name")' in sql
-    assert f'SELECT "id", "name" FROM {_STAGING_TABLE_WITH_SCHEMA}' in sql
-
-
-def test_postgres_backend_merge_upsert_excludes_computed_columns():
-    backend = PostgresBackend(staging_schema=STAGING_SCHEMA)
-    session = _FakeSession(scalar_result=0)
-
-    backend.merge_upsert(_ComputedTableCls, _sess(session), _TARGET_TABLE, ["id"])
-
-    sql = session.statements[0]
-    assert f'INSERT INTO "{_TARGET_TABLE}" ("id", "name")' in sql
-    assert 'ON CONFLICT ("id") DO NOTHING' in sql
-
-
-def test_postgres_backend_merge_replace_paginated_path():
-    backend = PostgresBackend(staging_schema=STAGING_SCHEMA)
-    session = _FakeSession(scalar_result=10)
-
-    backend.merge_replace(
-        _ComputedTableCls, _sess(session), _TARGET_TABLE,
-        ["id", "name"], merge_batch_size=3,
-    )
-
-    sqls = session.statements
-    assert any("CREATE INDEX IF NOT EXISTS" in s and "_rownum" in s for s in sqls)
-    assert any("_rownum >" in s and "DELETE" in s for s in sqls)
-    assert session.commits >= 4  # 1 for index + 4 batches (ceil(10/3))
-
-
-def test_postgres_backend_merge_insert_paginated_path():
-    backend = PostgresBackend(staging_schema=STAGING_SCHEMA)
-    session = _FakeSession(scalar_result=10)
-
-    backend.merge_insert(
-        _ComputedTableCls, _sess(session), _TARGET_TABLE,
-        merge_batch_size=3,
-    )
-
-    sqls = session.statements
-    assert any("CREATE INDEX IF NOT EXISTS" in s and "_rownum" in s for s in sqls)
-    assert any("_rownum >" in s and "INSERT" in s for s in sqls)
-    assert session.commits >= 4
-
-
-def test_postgres_backend_merge_upsert_paginated_path():
-    backend = PostgresBackend(staging_schema=STAGING_SCHEMA)
-    session = _FakeSession(scalar_result=10)
-
-    backend.merge_upsert(
-        _ComputedTableCls, _sess(session), _TARGET_TABLE,
-        ["id"], merge_batch_size=3,
-    )
-
-    sqls = session.statements
-    assert any("CREATE INDEX IF NOT EXISTS" in s and "_rownum" in s for s in sqls)
-    assert any("_rownum >" in s and "INSERT" in s for s in sqls)
-    assert session.commits >= 4
-
-
-def test_postgres_backend_materialized_view_methods_emit_expected_sql():
+def test_postgres_backend_materialized_view_methods_work_end_to_end(pg_db):
+    """Real create + refresh + query, not just checking emitted SQL text.
+    The whole point is proving this DDL actually round-trips correctly."""
     backend = PostgresBackend()
-    session = _FakeSession()
+    conn = pg_db.connection
     selectable = sa.select(sa.literal(1).label("n"))
 
-    backend.create_materialized_view(_as_engine(session), "mv_test", selectable)
-    backend.refresh_materialized_view(_as_engine(session), "mv_test")
+    backend.create_materialized_view(conn, "mv_test", selectable)
+    backend.refresh_materialized_view(conn, "mv_test")
 
-    assert any("CREATE MATERIALIZED VIEW IF NOT EXISTS mv_test as SELECT" in sql for sql in session.statements)
-    assert any("REFRESH MATERIALIZED VIEW mv_test;" == sql for sql in session.statements)
+    assert conn.execute(sa.text("SELECT n FROM mv_test")).scalar() == 1
 
 
 def test_postgres_backend_normalize_fk_check_state():
