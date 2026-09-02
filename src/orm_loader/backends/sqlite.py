@@ -246,21 +246,6 @@ class SQLiteBackend(DatabaseBackend):
     ) -> AbstractContextManager[None]:
         return self.bulk_load_context(session, disable_fk=True, no_autoflush=False)
 
-    def create_materialized_view(
-        self,
-        bind: "Engine | Connection",
-        name: str,
-        selectable: sa.sql.Select[Any],
-    ) -> None:
-        self._require_capability("supports_materialized_views", "materialized views")
-
-    def refresh_materialized_view(
-        self,
-        bind: "Engine | Connection",
-        name: str,
-    ) -> None:
-        self._require_capability("supports_materialized_views", "materialized views")
-
     def configure_dbapi_connection(self, dbapi_connection:  sa.engine.interfaces.DBAPIConnection) -> None:
         if dbapi_connection.__class__.__module__.startswith("sqlite3"):
             cursor = dbapi_connection.cursor()

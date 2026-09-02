@@ -22,4 +22,4 @@ All components are:
 
 - [`IdAllocator`](allocators.md)
 - [Typing Protocols](typing.md)
-- [Materialised Views](mat_view.md)
+- [Materialized Views](mat_view.md)

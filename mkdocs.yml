@@ -51,7 +51,7 @@ nav:
       - Loadable Tables: tables/loadable_table.md
       - IdAllocator: tables/allocators.md
       - Typing Protocols: tables/typing.md
-      - Materialised Views: tables/mat_view.md
+      - Materialized Views: tables/mat_view.md
   - Registry & Validation:
       - Overview: registry/index.md
       - Model Registry: registry/registry.md

@@ -5,7 +5,8 @@ from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass
 from enum import Enum
 from collections.abc import Generator
-from typing import TYPE_CHECKING, Type, Any
+from functools import wraps
+from typing import TYPE_CHECKING, Any, Callable, ParamSpec, Type, TypeVar, cast
 
 import sqlalchemy as sa
 import sqlalchemy.orm as so
@@ -14,6 +15,7 @@ from sqlalchemy.sql.compiler import IdentifierPreparer
 
 if TYPE_CHECKING:
     from ..loaders.data_classes import LoaderContext
+    from ..mappers.materialised_view_contracts import MaterializedViewIndex
     from ..tables.typing import CSVTableProtocol
 
 
@@ -40,6 +42,33 @@ class Dialect(str, Enum):
 
 
 STAGING_SCHEMA: str = "staging"
+
+P = ParamSpec("P")
+R = TypeVar("R")
+
+
+def requires_capability(
+    capability_name: str,
+    feature_name: str,
+) -> Callable[[Callable[P, R]], Callable[P, R]]:
+    """Guard a concrete backend method with a capability requirement.
+
+    Subclass overrides must apply this decorator themselves; Python does not
+    automatically retain decorators when a method is overridden.
+    """
+
+    def decorator(method: Callable[P, R]) -> Callable[P, R]:
+        @wraps(method)
+        def guarded(*args: P.args, **kwargs: P.kwargs) -> R:
+            # ParamSpec keeps the complete method signature, but type checkers
+            # cannot infer that args[0] is the backend instance here.
+            self = cast("DatabaseBackend", args[0])
+            self._require_capability(capability_name, feature_name)
+            return method(*args, **kwargs)
+
+        return guarded
+
+    return decorator
 
 
 class DatabaseBackend(ABC):
@@ -309,19 +338,83 @@ class DatabaseBackend(ABC):
             if previous_fk_state is not None:
                 self.restore_fk_check(session, previous_fk_state)
 
-    @abstractmethod
+    @requires_capability("supports_materialized_views", "materialized views")
     def create_materialized_view(
         self,
         bind: "Engine | Connection",
         name: str,
         selectable: sa.sql.Select[Any],
+        *,
+        schema: str | None = None,
+        with_data: bool = True,
+        if_not_exists: bool = True,
     ) -> None:
-        """Create a materialized view for the supplied selectable."""
+        """Create a materialized view for the supplied selectable.
 
-    @abstractmethod
+        ``schema`` defaults to ``None``, leaving the target unqualified for
+        the connection's ``search_path`` to resolve.
+        """
+        raise NotImplementedError(
+            f"Backend '{self.name}' has not implemented create_materialized_view()"
+        )
+
+    @requires_capability("supports_materialized_views", "materialized views")
     def refresh_materialized_view(
         self,
         bind: "Engine | Connection",
         name: str,
+        *,
+        schema: str | None = None,
+        concurrently: bool = False,
+        declared_indexes: tuple["MaterializedViewIndex", ...] = (),
     ) -> None:
-        """Refresh a materialized view."""
+        """Refresh a materialized view.
+
+        ``declared_indexes`` lets supporting backends validate a concurrent
+        refresh request without defining a second catalog-based eligibility
+        rule. Other backends may ignore it.
+        """
+        raise NotImplementedError(
+            f"Backend '{self.name}' has not implemented refresh_materialized_view()"
+        )
+
+    @requires_capability("supports_materialized_views", "materialized views")
+    def drop_materialized_view(
+        self,
+        bind: "Engine | Connection",
+        name: str,
+        *,
+        schema: str | None = None,
+        if_exists: bool = True,
+        cascade: bool = False,
+    ) -> None:
+        """Drop a materialized view.
+
+        This is deliberately non-abstract: the default implementation
+        requires the capability flag and then raises ``NotImplementedError``.
+        Older third-party backend subclasses need no override to receive a
+        clear error when they do not support this operation.
+        """
+        raise NotImplementedError(
+            f"Backend '{self.name}' has not implemented drop_materialized_view()"
+        )
+
+    @requires_capability("supports_materialized_views", "materialized views")
+    def create_materialized_view_index(
+        self,
+        bind: "Engine | Connection",
+        name: str,
+        index: "MaterializedViewIndex",
+        *,
+        schema: str | None = None,
+        if_not_exists: bool = True,
+    ) -> None:
+        """Create an index on a materialized view.
+
+        This is deliberately non-abstract for the same compatibility reason
+        as :meth:`drop_materialized_view`.
+        """
+        raise NotImplementedError(
+            f"Backend '{self.name}' has not implemented "
+            "create_materialized_view_index()"
+        )
