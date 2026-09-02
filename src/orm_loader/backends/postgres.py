@@ -10,8 +10,8 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.sql.compiler import IdentifierPreparer
 
-from .base import BackendCapabilities, DatabaseBackend, Dialect
-from .materialized_view_errors import (
+from .base import BackendCapabilities, DatabaseBackend, Dialect, requires_capability
+from ..mappers.materialized_view_errors import (
     ConcurrentRefreshNotEligibleError,
     MaterializationError,
     MaterializationFailure,
@@ -328,6 +328,7 @@ class PostgresBackend(DatabaseBackend):
     ) -> AbstractContextManager[None]:
         return self.bulk_load_context(session, disable_fk=True, no_autoflush=False)
 
+    @requires_capability("supports_materialized_views", "materialized views")
     def create_materialized_view(
         self,
         bind: Engine | Connection,
@@ -347,15 +348,27 @@ class PostgresBackend(DatabaseBackend):
                 schema=schema,
                 name=name,
             )
-            conn.execute(
-                CreateMaterializedView(
-                    self._mv_target(name, schema),
-                    selectable,
-                    with_data=with_data,
-                    if_not_exists=if_not_exists,
+            try:
+                conn.execute(
+                    CreateMaterializedView(
+                        self._mv_target(name, schema),
+                        selectable,
+                        with_data=with_data,
+                        if_not_exists=if_not_exists,
+                    )
                 )
-            )
+            except Exception as error:
+                raise MaterializationError(
+                    MaterializationFailure(
+                        operation=MaterializationOperation.CREATE,
+                        schema=schema,
+                        name=name,
+                        reason=str(error),
+                        cause=error,
+                    )
+                ) from error
 
+    @requires_capability("supports_materialized_views", "materialized views")
     def refresh_materialized_view(
         self,
         bind: Engine | Connection,
@@ -407,6 +420,7 @@ class PostgresBackend(DatabaseBackend):
                     )
                 ) from error
 
+    @requires_capability("supports_materialized_views", "materialized views")
     def drop_materialized_view(
         self,
         bind: Engine | Connection,
@@ -442,6 +456,7 @@ class PostgresBackend(DatabaseBackend):
                     )
                 ) from error
 
+    @requires_capability("supports_materialized_views", "materialized views")
     def create_materialized_view_index(
         self,
         bind: Engine | Connection,
@@ -479,8 +494,6 @@ class PostgresBackend(DatabaseBackend):
                 ) from error
 
     def _mv_target(self, name: str, schema: str | None) -> str:
-        if schema is None:
-            return name
         from ..helpers.sql import qualify_identifier
 
         return qualify_identifier(name, schema, self.identifier_preparer)

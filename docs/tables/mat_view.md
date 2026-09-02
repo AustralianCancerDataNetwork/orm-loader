@@ -158,15 +158,15 @@ The built-in implementation is PostgreSQL-oriented. SQLite rejects materialized-
     options:
       heading_level: 3
 
-::: orm_loader.backends.materialized_view_errors.MaterializationError
+::: orm_loader.mappers.materialized_view_errors.MaterializationError
     options:
       heading_level: 3
       members: true
 
-::: orm_loader.backends.materialized_view_errors.ConcurrentRefreshNotEligibleError
+::: orm_loader.mappers.materialized_view_errors.ConcurrentRefreshNotEligibleError
     options:
       heading_level: 3
 
-::: orm_loader.backends.materialized_view_errors.UnsupportedMaterializationDialectError
+::: orm_loader.mappers.materialized_view_errors.UnsupportedMaterializationDialectError
     options:
       heading_level: 3

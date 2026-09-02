@@ -235,12 +235,28 @@ def test_postgres_backend_materialized_view_methods_emit_expected_sql():
     backend.create_materialized_view(_as_engine(session), "mv_test", selectable)
     backend.refresh_materialized_view(_as_engine(session), "mv_test")
 
-    assert any("CREATE MATERIALIZED VIEW IF NOT EXISTS mv_test as SELECT" in sql for sql in session.statements)
-    assert any("REFRESH MATERIALIZED VIEW mv_test;" == sql for sql in session.statements)
+    assert any('CREATE MATERIALIZED VIEW IF NOT EXISTS "mv_test" as SELECT' in sql for sql in session.statements)
+    assert any('REFRESH MATERIALIZED VIEW "mv_test";' == sql for sql in session.statements)
+
+
+def test_postgres_backend_quotes_unqualified_materialized_view_name():
+    from orm_loader.mappers.materialised_view_contracts import MaterializedViewIndex
+
+    backend = PostgresBackend()
+    session = _FakeSession()
+    selectable = sa.select(sa.literal(1).label("n"))
+
+    backend.create_materialized_view(_sess(session), 'mv name', selectable)
+    backend.create_materialized_view_index(
+        _sess(session), 'mv name', MaterializedViewIndex(name="mv_name_idx", columns=("n",))
+    )
+
+    assert any('CREATE MATERIALIZED VIEW IF NOT EXISTS "mv name" as SELECT' in sql for sql in session.statements)
+    assert any('ON "mv name" ("n")' in sql for sql in session.statements)
 
 
 def test_postgres_backend_create_materialized_view_rejects_non_postgres_connection():
-    from orm_loader.backends.materialized_view_errors import (
+    from orm_loader.mappers.materialized_view_errors import (
         UnsupportedMaterializationDialectError,
     )
     from sqlalchemy.dialects import sqlite
@@ -257,7 +273,7 @@ def test_postgres_backend_create_materialized_view_rejects_non_postgres_connecti
 
 
 def test_postgres_backend_refresh_materialized_view_rejects_non_postgres_connection():
-    from orm_loader.backends.materialized_view_errors import (
+    from orm_loader.mappers.materialized_view_errors import (
         UnsupportedMaterializationDialectError,
     )
     from sqlalchemy.dialects import sqlite
@@ -272,7 +288,7 @@ def test_postgres_backend_refresh_materialized_view_rejects_non_postgres_connect
     assert session.statements == []
 
 
-def test_postgres_backend_create_mv_emits_unquoted_name_for_legacy_search_path_resolution():
+def test_postgres_backend_create_mv_quotes_name_for_legacy_search_path_resolution():
     from orm_loader.mappers.materialised_view_mixin import MaterializedViewMixin
 
     class MixedCaseMaterializedView(MaterializedViewMixin):
@@ -283,7 +299,7 @@ def test_postgres_backend_create_mv_emits_unquoted_name_for_legacy_search_path_r
     MixedCaseMaterializedView.create_mv(_as_engine(session))
 
     assert any(
-        "CREATE MATERIALIZED VIEW IF NOT EXISTS MixedCaseMv as SELECT" in sql
+        'CREATE MATERIALIZED VIEW IF NOT EXISTS "MixedCaseMv" as SELECT' in sql
         for sql in session.statements
     )
 
@@ -300,6 +316,19 @@ def test_postgres_backend_create_materialized_view_index_emits_expected_sql():
     assert session.statements == [
         'CREATE UNIQUE INDEX IF NOT EXISTS "mv_test_row_id_uq" ON "reporting"."mv_test" ("row_id")'
     ]
+
+
+def test_postgres_backend_create_materialized_view_index_failure_mentions_index_name():
+    from orm_loader.mappers.materialized_view_errors import MaterializationError
+    from orm_loader.mappers.materialised_view_contracts import MaterializedViewIndex
+
+    original = RuntimeError("boom")
+    backend = PostgresBackend()
+    session = _FakeSession(raise_on_execute=original)
+    index = MaterializedViewIndex(name="mv_test_row_id_uq", columns=("row_id",))
+
+    with pytest.raises(MaterializationError, match="mv_test_row_id_uq"):
+        backend.create_materialized_view_index(_sess(session), "mv_test", index)
 
 
 def test_postgres_backend_drop_materialized_view_default_args():
@@ -323,7 +352,7 @@ def test_postgres_backend_drop_materialized_view_cascade_and_if_exists_false():
 
 
 def test_postgres_backend_drop_materialized_view_failure_preserves_cause():
-    from orm_loader.backends.materialized_view_errors import MaterializationError, MaterializationOperation
+    from orm_loader.mappers.materialized_view_errors import MaterializationError, MaterializationOperation
 
     original = RuntimeError("boom")
     backend = PostgresBackend()
@@ -337,8 +366,25 @@ def test_postgres_backend_drop_materialized_view_failure_preserves_cause():
     assert exc_info.value.failure.operation is MaterializationOperation.DROP
 
 
+def test_postgres_backend_create_materialized_view_failure_preserves_cause():
+    from orm_loader.mappers.materialized_view_errors import MaterializationError, MaterializationOperation
+
+    original = RuntimeError("boom")
+    backend = PostgresBackend()
+    session = _FakeSession(raise_on_execute=original)
+
+    with pytest.raises(MaterializationError) as exc_info:
+        backend.create_materialized_view(
+            _sess(session), "mv_test", sa.select(sa.literal(1).label("n"))
+        )
+
+    assert exc_info.value.__cause__ is original
+    assert exc_info.value.failure.cause is original
+    assert exc_info.value.failure.operation is MaterializationOperation.CREATE
+
+
 def test_postgres_backend_refresh_concurrently_without_declared_unique_index_raises_before_executing():
-    from orm_loader.backends.materialized_view_errors import ConcurrentRefreshNotEligibleError
+    from orm_loader.mappers.materialized_view_errors import ConcurrentRefreshNotEligibleError
 
     backend = PostgresBackend()
     session = _FakeSession()
@@ -354,7 +400,7 @@ def test_postgres_backend_refresh_concurrently_without_declared_unique_index_rai
 def test_postgres_backend_refresh_concurrently_declared_but_database_rejects_it_translates_error():
     psycopg = pytest.importorskip("psycopg")
 
-    from orm_loader.backends.materialized_view_errors import ConcurrentRefreshNotEligibleError
+    from orm_loader.mappers.materialized_view_errors import ConcurrentRefreshNotEligibleError
     from orm_loader.mappers.materialised_view_contracts import MaterializedViewIndex
 
     orig = psycopg.errors.ObjectNotInPrerequisiteState(
@@ -465,7 +511,7 @@ def test_postgres_backend_materialized_view_lifecycle_is_schema_isolated_with_ad
 def test_postgres_backend_refresh_concurrently_raises_when_declared_index_was_never_created(
     pg_session, pg_engine
 ):
-    from orm_loader.backends.materialized_view_errors import ConcurrentRefreshNotEligibleError
+    from orm_loader.mappers.materialized_view_errors import ConcurrentRefreshNotEligibleError
     from orm_loader.mappers.materialised_view_contracts import MaterializedViewIndex
 
     backend = PostgresBackend()

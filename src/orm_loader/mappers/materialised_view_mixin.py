@@ -1,8 +1,10 @@
+from collections import defaultdict, deque
+from typing import Any
+
+import sqlalchemy as sa
 from sqlalchemy.ext import compiler
 from sqlalchemy.schema import DDLElement
-import sqlalchemy as sa
-from typing import Any
-from collections import defaultdict, deque
+
 from ..backends.resolve import resolve_backend
 from .materialised_view_contracts import MaterializedViewIndex
 
@@ -230,19 +232,31 @@ class MaterializedViewMixin:
         ```
         """
         backend = resolve_backend(bind)
-        backend.create_materialized_view(
-            bind,
-            cls.__mv_name__,
-            cls.__mv_select__,
-            schema=schema,
-            with_data=with_data,
-            if_not_exists=if_not_exists,
-        )
-        if create_indexes:
-            for index in cls.__mv_indexes__:
-                backend.create_materialized_view_index(
-                    bind, cls.__mv_name__, index, schema=schema
-                )
+
+        def create(connection: sa.engine.Connection | sa.engine.Engine) -> None:
+            backend.create_materialized_view(
+                connection,
+                cls.__mv_name__,
+                cls.__mv_select__,
+                schema=schema,
+                with_data=with_data,
+                if_not_exists=if_not_exists,
+            )
+            if create_indexes:
+                for index in cls.__mv_indexes__:
+                    backend.create_materialized_view_index(
+                        connection,
+                        cls.__mv_name__,
+                        index,
+                        schema=schema,
+                        if_not_exists=if_not_exists,
+                    )
+
+        if isinstance(bind, sa.engine.Engine):
+            with bind.begin() as connection:
+                create(connection)
+        else:
+            create(bind)
 
     @classmethod
     def refresh_mv(

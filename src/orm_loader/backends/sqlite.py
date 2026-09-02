@@ -13,7 +13,7 @@ from sqlalchemy.dialects import sqlite as sqlite_dialect
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql.compiler import IdentifierPreparer
 
-from .base import BackendCapabilities, DatabaseBackend, Dialect
+from .base import BackendCapabilities, DatabaseBackend, Dialect, requires_capability
 
 if TYPE_CHECKING:
     from sqlalchemy.engine import Connection, Engine
@@ -247,6 +247,7 @@ class SQLiteBackend(DatabaseBackend):
     ) -> AbstractContextManager[None]:
         return self.bulk_load_context(session, disable_fk=True, no_autoflush=False)
 
+    @requires_capability("supports_materialized_views", "materialized views")
     def create_materialized_view(
         self,
         bind: "Engine | Connection",
@@ -257,8 +258,10 @@ class SQLiteBackend(DatabaseBackend):
         with_data: bool = True,
         if_not_exists: bool = True,
     ) -> None:
-        self._require_capability("supports_materialized_views", "materialized views")
+        """SQLite does not support materialized views."""
+        return None
 
+    @requires_capability("supports_materialized_views", "materialized views")
     def refresh_materialized_view(
         self,
         bind: "Engine | Connection",
@@ -268,29 +271,8 @@ class SQLiteBackend(DatabaseBackend):
         concurrently: bool = False,
         declared_indexes: tuple["MaterializedViewIndex", ...] = (),
     ) -> None:
-        self._require_capability("supports_materialized_views", "materialized views")
-
-    def drop_materialized_view(
-        self,
-        bind: "Engine | Connection",
-        name: str,
-        *,
-        schema: str | None = None,
-        if_exists: bool = True,
-        cascade: bool = False,
-    ) -> None:
-        self._require_capability("supports_materialized_views", "materialized views")
-
-    def create_materialized_view_index(
-        self,
-        bind: "Engine | Connection",
-        name: str,
-        index: "MaterializedViewIndex",
-        *,
-        schema: str | None = None,
-        if_not_exists: bool = True,
-    ) -> None:
-        self._require_capability("supports_materialized_views", "materialized views")
+        """SQLite does not support materialized views."""
+        return None
 
     def configure_dbapi_connection(self, dbapi_connection:  sa.engine.interfaces.DBAPIConnection) -> None:
         if dbapi_connection.__class__.__module__.startswith("sqlite3"):

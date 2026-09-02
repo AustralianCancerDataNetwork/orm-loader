@@ -5,7 +5,8 @@ from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass
 from enum import Enum
 from collections.abc import Generator
-from typing import TYPE_CHECKING, Type, Any
+from functools import wraps
+from typing import TYPE_CHECKING, Any, Callable, Concatenate, ParamSpec, Type, TypeVar
 
 import sqlalchemy as sa
 import sqlalchemy.orm as so
@@ -41,6 +42,40 @@ class Dialect(str, Enum):
 
 
 STAGING_SCHEMA: str = "staging"
+
+P = ParamSpec("P")
+R = TypeVar("R")
+BackendT = TypeVar("BackendT", bound="DatabaseBackend")
+
+
+def requires_capability(
+    capability_name: str,
+    feature_name: str,
+) -> Callable[
+    [Callable[Concatenate[BackendT, P], R]],
+    Callable[Concatenate[BackendT, P], R],
+]:
+    """Guard a concrete backend method with a capability requirement.
+
+    Subclass overrides must apply this decorator themselves; Python does not
+    automatically retain decorators when a method is overridden.
+    """
+
+    def decorator(
+        method: Callable[Concatenate[BackendT, P], R],
+    ) -> Callable[Concatenate[BackendT, P], R]:
+        @wraps(method)
+        def guarded(
+            self: BackendT,
+            *args: P.args,
+            **kwargs: P.kwargs,
+        ) -> R:
+            self._require_capability(capability_name, feature_name)
+            return method(self, *args, **kwargs)
+
+        return guarded
+
+    return decorator
 
 
 class DatabaseBackend(ABC):
@@ -344,6 +379,7 @@ class DatabaseBackend(ABC):
         rule. Other backends may ignore it.
         """
 
+    @requires_capability("supports_materialized_views", "materialized views")
     def drop_materialized_view(
         self,
         bind: "Engine | Connection",
@@ -356,11 +392,15 @@ class DatabaseBackend(ABC):
         """Drop a materialized view.
 
         This is deliberately non-abstract: the default implementation
-        requires the capability flag, so older third-party backend subclasses
-        need no override to receive the same clear ``NotImplementedError``.
+        requires the capability flag and then raises ``NotImplementedError``.
+        Older third-party backend subclasses need no override to receive a
+        clear error when they do not support this operation.
         """
-        self._require_capability("supports_materialized_views", "materialized views")
+        raise NotImplementedError(
+            f"Backend '{self.name}' has not implemented drop_materialized_view()"
+        )
 
+    @requires_capability("supports_materialized_views", "materialized views")
     def create_materialized_view_index(
         self,
         bind: "Engine | Connection",
@@ -375,4 +415,7 @@ class DatabaseBackend(ABC):
         This is deliberately non-abstract for the same compatibility reason
         as :meth:`drop_materialized_view`.
         """
-        self._require_capability("supports_materialized_views", "materialized views")
+        raise NotImplementedError(
+            f"Backend '{self.name}' has not implemented "
+            "create_materialized_view_index()"
+        )

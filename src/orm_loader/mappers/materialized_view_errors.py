@@ -33,9 +33,10 @@ class MaterializationError(RuntimeError):
     def __init__(self, failure: MaterializationFailure) -> None:
         self.failure = failure
         qualified_name = f"{failure.schema}.{failure.name}" if failure.schema else failure.name
+        index_context = f" (index {failure.index_name})" if failure.index_name else ""
         super().__init__(
             f"Could not {failure.operation.value} materialized view "
-            f"{qualified_name}: {failure.reason}"
+            f"{qualified_name}{index_context}: {failure.reason}"
         )
 
 

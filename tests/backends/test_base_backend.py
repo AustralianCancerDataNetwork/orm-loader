@@ -302,13 +302,35 @@ def test_resolve_backend_raises_for_unknown_dialect():
         resolve_backend(cast(Engine, _Unknown()))
 
 
-def test_fake_backend_inherits_default_materialized_view_drop_and_index_behavior():
+def test_unsupported_fake_backend_inherits_default_materialized_view_guards():
     backend = FakeBackend()
 
     with pytest.raises(NotImplementedError, match="does not support materialized views"):
         backend.drop_materialized_view(cast(Engine, None), "mv_test")
 
     with pytest.raises(NotImplementedError, match="does not support materialized views"):
+        backend.create_materialized_view_index(cast(Engine, None), "mv_test", cast(Any, None))
+
+
+def test_capable_backend_inheriting_default_materialized_view_methods_fails_loudly():
+    class CapableBackend(FakeBackend):
+        @property
+        def capabilities(self) -> BackendCapabilities:
+            return BackendCapabilities(
+                supports_fast_load=True,
+                supports_fk_toggle=True,
+                supports_materialized_views=True,
+            )
+
+    backend = CapableBackend()
+
+    with pytest.raises(NotImplementedError, match="has not implemented drop_materialized_view"):
+        backend.drop_materialized_view(cast(Engine, None), "mv_test")
+
+    with pytest.raises(
+        NotImplementedError,
+        match="has not implemented create_materialized_view_index",
+    ):
         backend.create_materialized_view_index(cast(Engine, None), "mv_test", cast(Any, None))
 
 

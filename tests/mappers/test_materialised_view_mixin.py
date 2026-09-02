@@ -77,7 +77,7 @@ def test_create_mv_creates_declared_indexes_after_the_view(fake_backend: _FakeBa
         "create_materialized_view_index",
     ]
     assert fake_backend.calls[1][1] == ("bind", "mv_indexed", _INDEX)
-    assert fake_backend.calls[1][2] == {"schema": None}
+    assert fake_backend.calls[1][2] == {"schema": None, "if_not_exists": True}
 
 
 def test_create_mv_create_indexes_false_skips_index_creation(fake_backend: _FakeBackend):
@@ -94,6 +94,66 @@ def test_create_mv_forwards_schema_with_data_and_if_not_exists_overrides(fake_ba
         "with_data": False,
         "if_not_exists": False,
     }
+
+
+def test_create_mv_forwards_if_not_exists_to_declared_indexes(fake_backend: _FakeBackend):
+    _IndexedMv.create_mv("bind", if_not_exists=False)
+
+    assert fake_backend.calls[1][2] == {"schema": None, "if_not_exists": False}
+
+
+def test_create_mv_engine_uses_one_transaction_for_view_and_indexes(monkeypatch: pytest.MonkeyPatch):
+    engine = sa.create_engine("sqlite:///:memory:", future=True)
+    with engine.begin() as connection:
+        connection.execute(
+            sa.text("CREATE TABLE materialization_steps (step TEXT NOT NULL)")
+        )
+
+    connections: list[sa.engine.Connection] = []
+    fail_once = True
+
+    class TransactionalBackend(_FakeBackend):
+        def create_materialized_view(self, bind, name, selectable, **kwargs):
+            connections.append(bind)
+            bind.execute(
+                sa.text("INSERT INTO materialization_steps (step) VALUES ('view')")
+            )
+
+        def create_materialized_view_index(self, bind, name, index, **kwargs):
+            nonlocal fail_once
+            connections.append(bind)
+            bind.execute(
+                sa.text("INSERT INTO materialization_steps (step) VALUES ('index')")
+            )
+            if fail_once:
+                fail_once = False
+                raise RuntimeError("index failed")
+
+    backend = TransactionalBackend()
+    monkeypatch.setattr(
+        "orm_loader.mappers.materialised_view_mixin.resolve_backend",
+        lambda bind: backend,
+    )
+
+    class TransactionalMv(MaterializedViewMixin):
+        __mv_name__ = "mv_transactional"
+        __mv_select__ = _SELECT
+        __mv_indexes__ = (MaterializedViewIndex("mv_transactional_idx", ("row_id",)),)
+
+    with pytest.raises(RuntimeError, match="index failed"):
+        TransactionalMv.create_mv(engine)
+
+    assert connections[0] is connections[1]
+    with engine.connect() as connection:
+        assert connection.execute(
+            sa.text("SELECT COUNT(*) FROM materialization_steps")
+        ).scalar_one() == 0
+
+    TransactionalMv.create_mv(engine)
+    with engine.connect() as connection:
+        assert connection.execute(
+            sa.text("SELECT step FROM materialization_steps ORDER BY rowid")
+        ).all() == [("view",), ("index",)]
 
 
 def test_refresh_mv_forwards_default_args_and_declared_indexes(fake_backend: _FakeBackend):
