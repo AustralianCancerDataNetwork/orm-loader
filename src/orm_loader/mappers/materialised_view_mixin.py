@@ -230,6 +230,9 @@ class MaterializedViewMixin:
         WHERE observation.observation_date >= CURRENT_DATE - INTERVAL '30 days';
         ```
         """
+        if not isinstance(bind, (sa.engine.Engine, sa.engine.Connection)):
+            raise TypeError("bind must be a SQLAlchemy Engine or Connection")
+
         from ..backends.resolve import resolve_backend
 
         backend = resolve_backend(bind)
@@ -256,8 +259,10 @@ class MaterializedViewMixin:
         if isinstance(bind, sa.engine.Engine):
             with bind.begin() as connection:
                 create(connection)
-        else:
+        elif isinstance(bind, sa.engine.Connection):
             create(bind)
+        else:  # pragma: no cover - guarded above; keeps the runtime contract explicit.
+            raise TypeError("bind must be a SQLAlchemy Engine or Connection")
 
     @classmethod
     def refresh_mv(

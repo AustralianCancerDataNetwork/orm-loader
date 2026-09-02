@@ -314,6 +314,9 @@ def test_unsupported_fake_backend_inherits_default_materialized_view_guards():
 
 def test_capable_backend_inheriting_default_materialized_view_methods_fails_loudly():
     class CapableBackend(FakeBackend):
+        create_materialized_view = DatabaseBackend.create_materialized_view
+        refresh_materialized_view = DatabaseBackend.refresh_materialized_view
+
         @property
         def capabilities(self) -> BackendCapabilities:
             return BackendCapabilities(
@@ -326,6 +329,20 @@ def test_capable_backend_inheriting_default_materialized_view_methods_fails_loud
 
     with pytest.raises(NotImplementedError, match="has not implemented drop_materialized_view"):
         backend.drop_materialized_view(cast(Engine, None), "mv_test")
+
+    with pytest.raises(
+        NotImplementedError,
+        match="has not implemented create_materialized_view",
+    ):
+        backend.create_materialized_view(
+            cast(Engine, None), "mv_test", cast(Any, None)
+        )
+
+    with pytest.raises(
+        NotImplementedError,
+        match="has not implemented refresh_materialized_view",
+    ):
+        backend.refresh_materialized_view(cast(Engine, None), "mv_test")
 
     with pytest.raises(
         NotImplementedError,

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import Enum
 from collections.abc import Generator
 from functools import wraps
-from typing import TYPE_CHECKING, Any, Callable, Concatenate, ParamSpec, Type, TypeVar
+from typing import TYPE_CHECKING, Any, Callable, ParamSpec, Type, TypeVar, cast
 
 import sqlalchemy as sa
 import sqlalchemy.orm as so
@@ -45,33 +45,26 @@ STAGING_SCHEMA: str = "staging"
 
 P = ParamSpec("P")
 R = TypeVar("R")
-BackendT = TypeVar("BackendT", bound="DatabaseBackend")
 
 
 def requires_capability(
     capability_name: str,
     feature_name: str,
-) -> Callable[
-    [Callable[Concatenate[BackendT, P], R]],
-    Callable[Concatenate[BackendT, P], R],
-]:
+) -> Callable[[Callable[P, R]], Callable[P, R]]:
     """Guard a concrete backend method with a capability requirement.
 
     Subclass overrides must apply this decorator themselves; Python does not
     automatically retain decorators when a method is overridden.
     """
 
-    def decorator(
-        method: Callable[Concatenate[BackendT, P], R],
-    ) -> Callable[Concatenate[BackendT, P], R]:
+    def decorator(method: Callable[P, R]) -> Callable[P, R]:
         @wraps(method)
-        def guarded(
-            self: BackendT,
-            *args: P.args,
-            **kwargs: P.kwargs,
-        ) -> R:
+        def guarded(*args: P.args, **kwargs: P.kwargs) -> R:
+            # ParamSpec keeps the complete method signature, but type checkers
+            # cannot infer that args[0] is the backend instance here.
+            self = cast("DatabaseBackend", args[0])
             self._require_capability(capability_name, feature_name)
-            return method(self, *args, **kwargs)
+            return method(*args, **kwargs)
 
         return guarded
 
@@ -345,7 +338,7 @@ class DatabaseBackend(ABC):
             if previous_fk_state is not None:
                 self.restore_fk_check(session, previous_fk_state)
 
-    @abstractmethod
+    @requires_capability("supports_materialized_views", "materialized views")
     def create_materialized_view(
         self,
         bind: "Engine | Connection",
@@ -361,8 +354,11 @@ class DatabaseBackend(ABC):
         ``schema`` defaults to ``None``, leaving the target unqualified for
         the connection's ``search_path`` to resolve.
         """
+        raise NotImplementedError(
+            f"Backend '{self.name}' has not implemented create_materialized_view()"
+        )
 
-    @abstractmethod
+    @requires_capability("supports_materialized_views", "materialized views")
     def refresh_materialized_view(
         self,
         bind: "Engine | Connection",
@@ -378,6 +374,9 @@ class DatabaseBackend(ABC):
         refresh request without defining a second catalog-based eligibility
         rule. Other backends may ignore it.
         """
+        raise NotImplementedError(
+            f"Backend '{self.name}' has not implemented refresh_materialized_view()"
+        )
 
     @requires_capability("supports_materialized_views", "materialized views")
     def drop_materialized_view(

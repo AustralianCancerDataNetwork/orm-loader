@@ -41,6 +41,14 @@ def fake_backend(monkeypatch: pytest.MonkeyPatch) -> _FakeBackend:
     return backend
 
 
+@pytest.fixture
+def bind():
+    engine = sa.create_engine("sqlite:///:memory:", future=True)
+    with engine.connect() as connection:
+        yield connection
+    engine.dispose()
+
+
 _SELECT = sa.select(sa.literal(1).label("row_id"))
 _INDEX = MaterializedViewIndex(name="mv_test_row_id_uq", columns=("row_id",), unique=True)
 
@@ -56,37 +64,46 @@ class _IndexedMv(MaterializedViewMixin):
     __mv_indexes__ = (_INDEX,)
 
 
-def test_create_mv_forwards_default_args_to_backend(fake_backend: _FakeBackend):
-    _NoIndexMv.create_mv("bind")
+def test_create_mv_forwards_default_args_to_backend(fake_backend: _FakeBackend, bind):
+    _NoIndexMv.create_mv(bind)
 
     assert fake_backend.calls == [
         (
             "create_materialized_view",
-            ("bind", "mv_no_index", _SELECT),
+            (bind, "mv_no_index", _SELECT),
             {"schema": None, "with_data": True, "if_not_exists": True},
         )
     ]
 
 
-def test_create_mv_creates_declared_indexes_after_the_view(fake_backend: _FakeBackend):
-    _IndexedMv.create_mv("bind")
+def test_create_mv_rejects_invalid_bind(fake_backend: _FakeBackend):
+    with pytest.raises(TypeError, match="bind must be a SQLAlchemy Engine or Connection"):
+        _NoIndexMv.create_mv("bind")
+
+    assert fake_backend.calls == []
+
+
+def test_create_mv_creates_declared_indexes_after_the_view(fake_backend: _FakeBackend, bind):
+    _IndexedMv.create_mv(bind)
 
     assert [call[0] for call in fake_backend.calls] == [
         "create_materialized_view",
         "create_materialized_view_index",
     ]
-    assert fake_backend.calls[1][1] == ("bind", "mv_indexed", _INDEX)
+    assert fake_backend.calls[1][1] == (bind, "mv_indexed", _INDEX)
     assert fake_backend.calls[1][2] == {"schema": None, "if_not_exists": True}
 
 
-def test_create_mv_create_indexes_false_skips_index_creation(fake_backend: _FakeBackend):
-    _IndexedMv.create_mv("bind", create_indexes=False)
+def test_create_mv_create_indexes_false_skips_index_creation(fake_backend: _FakeBackend, bind):
+    _IndexedMv.create_mv(bind, create_indexes=False)
 
     assert [call[0] for call in fake_backend.calls] == ["create_materialized_view"]
 
 
-def test_create_mv_forwards_schema_with_data_and_if_not_exists_overrides(fake_backend: _FakeBackend):
-    _NoIndexMv.create_mv("bind", schema="reporting", with_data=False, if_not_exists=False)
+def test_create_mv_forwards_schema_with_data_and_if_not_exists_overrides(
+    fake_backend: _FakeBackend, bind
+):
+    _NoIndexMv.create_mv(bind, schema="reporting", with_data=False, if_not_exists=False)
 
     assert fake_backend.calls[0][2] == {
         "schema": "reporting",
@@ -95,8 +112,8 @@ def test_create_mv_forwards_schema_with_data_and_if_not_exists_overrides(fake_ba
     }
 
 
-def test_create_mv_forwards_if_not_exists_to_declared_indexes(fake_backend: _FakeBackend):
-    _IndexedMv.create_mv("bind", if_not_exists=False)
+def test_create_mv_forwards_if_not_exists_to_declared_indexes(fake_backend: _FakeBackend, bind):
+    _IndexedMv.create_mv(bind, if_not_exists=False)
 
     assert fake_backend.calls[1][2] == {"schema": None, "if_not_exists": False}
 
@@ -153,20 +170,20 @@ def test_create_mv_engine_uses_one_transaction_for_view_and_indexes(monkeypatch:
         ).all() == [("view",), ("index",)]
 
 
-def test_refresh_mv_forwards_default_args_and_declared_indexes(fake_backend: _FakeBackend):
-    _IndexedMv.refresh_mv("bind")
+def test_refresh_mv_forwards_default_args_and_declared_indexes(fake_backend: _FakeBackend, bind):
+    _IndexedMv.refresh_mv(bind)
 
     assert fake_backend.calls == [
         (
             "refresh_materialized_view",
-            ("bind", "mv_indexed"),
+            (bind, "mv_indexed"),
             {"schema": None, "concurrently": False, "declared_indexes": (_INDEX,)},
         )
     ]
 
 
-def test_refresh_mv_forwards_schema_and_concurrently(fake_backend: _FakeBackend):
-    _IndexedMv.refresh_mv("bind", schema="reporting", concurrently=True)
+def test_refresh_mv_forwards_schema_and_concurrently(fake_backend: _FakeBackend, bind):
+    _IndexedMv.refresh_mv(bind, schema="reporting", concurrently=True)
 
     assert fake_backend.calls[0][2] == {
         "schema": "reporting",
@@ -175,20 +192,20 @@ def test_refresh_mv_forwards_schema_and_concurrently(fake_backend: _FakeBackend)
     }
 
 
-def test_drop_mv_forwards_default_args(fake_backend: _FakeBackend):
-    _NoIndexMv.drop_mv("bind")
+def test_drop_mv_forwards_default_args(fake_backend: _FakeBackend, bind):
+    _NoIndexMv.drop_mv(bind)
 
     assert fake_backend.calls == [
         (
             "drop_materialized_view",
-            ("bind", "mv_no_index"),
+            (bind, "mv_no_index"),
             {"schema": None, "if_exists": True, "cascade": False},
         )
     ]
 
 
-def test_drop_mv_forwards_schema_if_exists_and_cascade(fake_backend: _FakeBackend):
-    _NoIndexMv.drop_mv("bind", schema="reporting", if_exists=False, cascade=True)
+def test_drop_mv_forwards_schema_if_exists_and_cascade(fake_backend: _FakeBackend, bind):
+    _NoIndexMv.drop_mv(bind, schema="reporting", if_exists=False, cascade=True)
 
     assert fake_backend.calls[0][2] == {
         "schema": "reporting",
@@ -248,8 +265,8 @@ def test_resolve_mv_refresh_order_raises_on_cycle():
         resolve_mv_refresh_order([_CycleA, _CycleB])
 
 
-def test_refresh_all_mvs_refreshes_in_dependency_order(fake_backend: _FakeBackend):
-    refresh_all_mvs("bind", [_MvB, _MvA])
+def test_refresh_all_mvs_refreshes_in_dependency_order(fake_backend: _FakeBackend, bind):
+    refresh_all_mvs(bind, [_MvB, _MvA])
 
     refreshed_names = [call[1][1] for call in fake_backend.calls]
     assert refreshed_names == ["mv_a", "mv_b"]

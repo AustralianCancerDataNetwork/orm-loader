@@ -289,14 +289,11 @@ def test_postgres_backend_refresh_materialized_view_rejects_non_postgres_connect
 
 
 def test_postgres_backend_create_mv_quotes_name_for_legacy_search_path_resolution():
-    from orm_loader.mappers.materialised_view_mixin import MaterializedViewMixin
-
-    class MixedCaseMaterializedView(MaterializedViewMixin):
-        __mv_name__ = "MixedCaseMv"
-        __mv_select__ = sa.select(sa.literal(1).label("n"))
-
+    backend = PostgresBackend()
     session = _FakeSession()
-    MixedCaseMaterializedView.create_mv(_as_engine(session))
+    backend.create_materialized_view(
+        _sess(session), "MixedCaseMv", sa.select(sa.literal(1).label("n"))
+    )
 
     assert any(
         'CREATE MATERIALIZED VIEW IF NOT EXISTS "MixedCaseMv" as SELECT' in sql
@@ -472,7 +469,7 @@ def test_postgres_backend_refresh_concurrently_with_declared_index_emits_concurr
 def test_postgres_backend_materialized_view_lifecycle_is_schema_isolated_with_adversarial_identifiers(
     pg_session, pg_engine
 ):
-    from orm_loader.mappers.materialized_view_contracts import MaterializedViewIndex
+    from orm_loader.mappers.materialised_view_contracts import MaterializedViewIndex
 
     backend = PostgresBackend()
     left_schema, right_schema = 'mv "left" schema', 'mv "right" schema'
@@ -512,7 +509,7 @@ def test_postgres_backend_refresh_concurrently_raises_when_declared_index_was_ne
     pg_session, pg_engine
 ):
     from orm_loader.mappers.materialised_view_errors import ConcurrentRefreshNotEligibleError
-    from orm_loader.mappers.materialized_view_contracts import MaterializedViewIndex
+    from orm_loader.mappers.materialised_view_contracts import MaterializedViewIndex
 
     backend = PostgresBackend()
     index = MaterializedViewIndex(name="mv_missing_index_test_uq", columns=("row_id",), unique=True)

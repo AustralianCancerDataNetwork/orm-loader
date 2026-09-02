@@ -13,12 +13,11 @@ from sqlalchemy.dialects import sqlite as sqlite_dialect
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql.compiler import IdentifierPreparer
 
-from .base import BackendCapabilities, DatabaseBackend, Dialect, requires_capability
+from .base import BackendCapabilities, DatabaseBackend, Dialect
 
 if TYPE_CHECKING:
     from sqlalchemy.engine import Connection, Engine
 
-    from ..mappers.materialised_view_contracts import MaterializedViewIndex
     from ..tables.typing import CSVTableProtocol
 
 
@@ -246,33 +245,6 @@ class SQLiteBackend(DatabaseBackend):
         session: so.Session,
     ) -> AbstractContextManager[None]:
         return self.bulk_load_context(session, disable_fk=True, no_autoflush=False)
-
-    @requires_capability("supports_materialized_views", "materialized views")
-    def create_materialized_view(
-        self,
-        bind: "Engine | Connection",
-        name: str,
-        selectable: sa.sql.Select[Any],
-        *,
-        schema: str | None = None,
-        with_data: bool = True,
-        if_not_exists: bool = True,
-    ) -> None:
-        """SQLite does not support materialized views."""
-        return None
-
-    @requires_capability("supports_materialized_views", "materialized views")
-    def refresh_materialized_view(
-        self,
-        bind: "Engine | Connection",
-        name: str,
-        *,
-        schema: str | None = None,
-        concurrently: bool = False,
-        declared_indexes: tuple["MaterializedViewIndex", ...] = (),
-    ) -> None:
-        """SQLite does not support materialized views."""
-        return None
 
     def configure_dbapi_connection(self, dbapi_connection:  sa.engine.interfaces.DBAPIConnection) -> None:
         if dbapi_connection.__class__.__module__.startswith("sqlite3"):
