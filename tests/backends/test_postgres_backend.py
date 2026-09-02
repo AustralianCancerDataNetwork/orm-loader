@@ -256,6 +256,22 @@ def test_postgres_backend_create_materialized_view_rejects_non_postgres_connecti
     assert session.statements == []
 
 
+def test_postgres_backend_refresh_materialized_view_rejects_non_postgres_connection():
+    from orm_loader.backends.materialized_view_errors import (
+        UnsupportedMaterializationDialectError,
+    )
+    from sqlalchemy.dialects import sqlite
+
+    backend = PostgresBackend()
+    session = _FakeSession()
+    session.dialect = sqlite.dialect()
+
+    with pytest.raises(UnsupportedMaterializationDialectError, match="received dialect 'sqlite'"):
+        backend.refresh_materialized_view(_sess(session), "mv_test")
+
+    assert session.statements == []
+
+
 def test_postgres_backend_create_mv_emits_unquoted_name_for_legacy_search_path_resolution():
     from orm_loader.mappers.materialised_view_mixin import MaterializedViewMixin
 

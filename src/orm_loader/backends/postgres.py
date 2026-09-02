@@ -366,13 +366,13 @@ class PostgresBackend(DatabaseBackend):
         declared_indexes: tuple["MaterializedViewIndex", ...] = (),
     ) -> None:
         with self._as_connection(bind) as conn:
+            _require_postgres_dialect(
+                conn,
+                operation=MaterializationOperation.REFRESH,
+                schema=schema,
+                name=name,
+            )
             if concurrently:
-                _require_postgres_dialect(
-                    conn,
-                    operation=MaterializationOperation.REFRESH,
-                    schema=schema,
-                    name=name,
-                )
                 if not any(index.unique for index in declared_indexes):
                     raise ConcurrentRefreshNotEligibleError(
                         MaterializationFailure(
