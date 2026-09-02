@@ -27,7 +27,7 @@
     
     
       
-        <title>Materialised Views - orm-loader</title>
+        <title>Materialized Views - orm-loader</title>
       
     
     
@@ -70,7 +70,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#materialised-views" class="md-skip">
+        <a href="#materialized-views" class="md-skip">
           Skip to content
         </a>
       
@@ -106,7 +106,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Materialised Views
+              Materialized Views
             
           </span>
         </div>
@@ -491,7 +491,7 @@
   <span class="md-ellipsis">
     
   
-    Materialised Views
+    Materialized Views
   
 
     
@@ -509,7 +509,7 @@
   <span class="md-ellipsis">
     
   
-    Materialised Views
+    Materialized Views
   
 
     
@@ -535,41 +535,85 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#overview" class="md-nav__link">
+  <a href="#the-ownership-boundary" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Overview
+        The ownership boundary
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Overview">
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#declare-the-read-model-once" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Declare the read model once
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#a-safe-lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A safe lifecycle
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#choose-creation-and-refresh-semantics-deliberately" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Choose creation and refresh semantics deliberately
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#concurrent-refresh-is-a-declaration-and-database-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Concurrent refresh is a declaration-and-database contract
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#failure-handling-and-backend-support" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Failure handling and backend support
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#api-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API reference
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="API reference">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#defining-the-materialised-view" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Defining the Materialised View
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#orm_loader.mappers.materialised_view_mixin.CreateMaterializedView" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        CreateMaterializedView
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#orm_loader.mappers.materialised_view_mixin.MaterializedViewMixin" class="md-nav__link">
+  <a href="#orm_loader.mappers.MaterializedViewMixin" class="md-nav__link">
     <span class="md-ellipsis">
       
         MaterializedViewMixin
@@ -580,7 +624,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#orm_loader.mappers.materialised_view_mixin.MaterializedViewMixin.__mv_dependencies__" class="md-nav__link">
+  <a href="#orm_loader.mappers.MaterializedViewMixin.__mv_dependencies__" class="md-nav__link">
     <span class="md-ellipsis">
       
         __mv_dependencies__
@@ -591,7 +635,18 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#orm_loader.mappers.materialised_view_mixin.MaterializedViewMixin.__mv_name__" class="md-nav__link">
+  <a href="#orm_loader.mappers.MaterializedViewMixin.__mv_indexes__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __mv_indexes__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#orm_loader.mappers.MaterializedViewMixin.__mv_name__" class="md-nav__link">
     <span class="md-ellipsis">
       
         __mv_name__
@@ -602,7 +657,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#orm_loader.mappers.materialised_view_mixin.MaterializedViewMixin.__mv_select__" class="md-nav__link">
+  <a href="#orm_loader.mappers.MaterializedViewMixin.__mv_select__" class="md-nav__link">
     <span class="md-ellipsis">
       
         __mv_select__
@@ -613,7 +668,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#orm_loader.mappers.materialised_view_mixin.MaterializedViewMixin.create_mv" class="md-nav__link">
+  <a href="#orm_loader.mappers.MaterializedViewMixin.create_mv" class="md-nav__link">
     <span class="md-ellipsis">
       
         create_mv
@@ -624,7 +679,18 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#orm_loader.mappers.materialised_view_mixin.MaterializedViewMixin.refresh_mv" class="md-nav__link">
+  <a href="#orm_loader.mappers.MaterializedViewMixin.drop_mv" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        drop_mv
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#orm_loader.mappers.MaterializedViewMixin.refresh_mv" class="md-nav__link">
     <span class="md-ellipsis">
       
         refresh_mv
@@ -635,7 +701,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#orm_loader.mappers.materialised_view_mixin.resolve_mv_refresh_order" class="md-nav__link">
+  <a href="#orm_loader.mappers.resolve_mv_refresh_order" class="md-nav__link">
     <span class="md-ellipsis">
       
         resolve_mv_refresh_order
@@ -646,10 +712,164 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#orm_loader.mappers.materialised_view_mixin.refresh_all_mvs" class="md-nav__link">
+  <a href="#orm_loader.mappers.refresh_all_mvs" class="md-nav__link">
     <span class="md-ellipsis">
       
         refresh_all_mvs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#orm_loader.mappers.CreateMaterializedView" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CreateMaterializedView
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#orm_loader.mappers.MaterializedViewIndex" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MaterializedViewIndex
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#orm_loader.mappers.MaterializedViewIndex.columns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        columns
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#orm_loader.mappers.MaterializedViewIndex.name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        name
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#orm_loader.mappers.MaterializedViewIndex.unique" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        unique
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#orm_loader.mappers.MaterializedViewIndex.__init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#orm_loader.mappers.MaterializedViewIndex.__post_init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __post_init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#orm_loader.mappers.CreateMaterializedViewIndex" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CreateMaterializedViewIndex
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#orm_loader.mappers.DropMaterializedView" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DropMaterializedView
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#orm_loader.mappers.MaterializationError" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MaterializationError
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#orm_loader.mappers.MaterializationError.failure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        failure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#orm_loader.mappers.MaterializationError.__init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#orm_loader.mappers.ConcurrentRefreshNotEligibleError" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ConcurrentRefreshNotEligibleError
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#orm_loader.mappers.UnsupportedMaterializationDialectError" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UnsupportedMaterializationDialectError
       
     </span>
   </a>
@@ -1106,41 +1326,85 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#overview" class="md-nav__link">
+  <a href="#the-ownership-boundary" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Overview
+        The ownership boundary
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Overview">
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#declare-the-read-model-once" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Declare the read model once
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#a-safe-lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A safe lifecycle
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#choose-creation-and-refresh-semantics-deliberately" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Choose creation and refresh semantics deliberately
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#concurrent-refresh-is-a-declaration-and-database-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Concurrent refresh is a declaration-and-database contract
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#failure-handling-and-backend-support" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Failure handling and backend support
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#api-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API reference
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="API reference">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#defining-the-materialised-view" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Defining the Materialised View
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#orm_loader.mappers.materialised_view_mixin.CreateMaterializedView" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        CreateMaterializedView
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#orm_loader.mappers.materialised_view_mixin.MaterializedViewMixin" class="md-nav__link">
+  <a href="#orm_loader.mappers.MaterializedViewMixin" class="md-nav__link">
     <span class="md-ellipsis">
       
         MaterializedViewMixin
@@ -1151,7 +1415,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#orm_loader.mappers.materialised_view_mixin.MaterializedViewMixin.__mv_dependencies__" class="md-nav__link">
+  <a href="#orm_loader.mappers.MaterializedViewMixin.__mv_dependencies__" class="md-nav__link">
     <span class="md-ellipsis">
       
         __mv_dependencies__
@@ -1162,7 +1426,18 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#orm_loader.mappers.materialised_view_mixin.MaterializedViewMixin.__mv_name__" class="md-nav__link">
+  <a href="#orm_loader.mappers.MaterializedViewMixin.__mv_indexes__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __mv_indexes__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#orm_loader.mappers.MaterializedViewMixin.__mv_name__" class="md-nav__link">
     <span class="md-ellipsis">
       
         __mv_name__
@@ -1173,7 +1448,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#orm_loader.mappers.materialised_view_mixin.MaterializedViewMixin.__mv_select__" class="md-nav__link">
+  <a href="#orm_loader.mappers.MaterializedViewMixin.__mv_select__" class="md-nav__link">
     <span class="md-ellipsis">
       
         __mv_select__
@@ -1184,7 +1459,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#orm_loader.mappers.materialised_view_mixin.MaterializedViewMixin.create_mv" class="md-nav__link">
+  <a href="#orm_loader.mappers.MaterializedViewMixin.create_mv" class="md-nav__link">
     <span class="md-ellipsis">
       
         create_mv
@@ -1195,7 +1470,18 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#orm_loader.mappers.materialised_view_mixin.MaterializedViewMixin.refresh_mv" class="md-nav__link">
+  <a href="#orm_loader.mappers.MaterializedViewMixin.drop_mv" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        drop_mv
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#orm_loader.mappers.MaterializedViewMixin.refresh_mv" class="md-nav__link">
     <span class="md-ellipsis">
       
         refresh_mv
@@ -1206,7 +1492,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#orm_loader.mappers.materialised_view_mixin.resolve_mv_refresh_order" class="md-nav__link">
+  <a href="#orm_loader.mappers.resolve_mv_refresh_order" class="md-nav__link">
     <span class="md-ellipsis">
       
         resolve_mv_refresh_order
@@ -1217,10 +1503,164 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#orm_loader.mappers.materialised_view_mixin.refresh_all_mvs" class="md-nav__link">
+  <a href="#orm_loader.mappers.refresh_all_mvs" class="md-nav__link">
     <span class="md-ellipsis">
       
         refresh_all_mvs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#orm_loader.mappers.CreateMaterializedView" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CreateMaterializedView
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#orm_loader.mappers.MaterializedViewIndex" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MaterializedViewIndex
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#orm_loader.mappers.MaterializedViewIndex.columns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        columns
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#orm_loader.mappers.MaterializedViewIndex.name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        name
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#orm_loader.mappers.MaterializedViewIndex.unique" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        unique
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#orm_loader.mappers.MaterializedViewIndex.__init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#orm_loader.mappers.MaterializedViewIndex.__post_init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __post_init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#orm_loader.mappers.CreateMaterializedViewIndex" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CreateMaterializedViewIndex
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#orm_loader.mappers.DropMaterializedView" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DropMaterializedView
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#orm_loader.mappers.MaterializationError" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MaterializationError
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#orm_loader.mappers.MaterializationError.failure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        failure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#orm_loader.mappers.MaterializationError.__init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#orm_loader.mappers.ConcurrentRefreshNotEligibleError" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ConcurrentRefreshNotEligibleError
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#orm_loader.mappers.UnsupportedMaterializationDialectError" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UnsupportedMaterializationDialectError
       
     </span>
   </a>
@@ -1300,131 +1740,126 @@
   
 
 
-<h1 id="materialised-views">Materialised Views<a class="headerlink" href="#materialised-views" title="Permanent link">&para;</a></h1>
-<p>This module provides a SQLAlchemy-native way to define, create, refresh, and order materialized views from ordinary <code>Select</code> constructs.</p>
-<p>It is designed for:</p>
-<ul>
-<li>analytics and reporting layers</li>
-<li>large fact tables with repeated joins or aggregates</li>
-<li>schema-level orchestration (migrations, setup, Airflow, admin tasks)</li>
-</ul>
-<p>The implementation is PostgreSQL-oriented. The mixin resolves a backend from the supplied bind, and the built-in PostgreSQL backend is currently the only one that supports materialized views.</p>
-<h2 id="overview">Overview<a class="headerlink" href="#overview" title="Permanent link">&para;</a></h2>
-<p>The materialized view system consists of four main parts:</p>
+<h1 id="materialized-views">Materialized Views<a class="headerlink" href="#materialized-views" title="Permanent link">&para;</a></h1>
+<p>Materialized views are database-maintained read models: a stored <code>Select</code> whose result can be queried like a table and rebuilt when its source data changes. They are useful when a downstream application repeatedly performs the same expensive join, filter, or aggregation.</p>
+<p>This page describes the contract that downstream packages should depend on. The implementation lives in <code>orm_loader</code>; consumers should declare a view once and call its lifecycle methods rather than reproducing the DDL themselves.</p>
+<h2 id="the-ownership-boundary">The ownership boundary<a class="headerlink" href="#the-ownership-boundary" title="Permanent link">&para;</a></h2>
+<p><code>orm_loader</code> owns the physical materialized-view lifecycle:</p>
 <ol>
-<li><code>CreateMaterializedView</code>: A custom SQLAlchemy DDLElement that compiles a Select into a <code>CREATE MATERIALIZED VIEW IF NOT EXISTS</code> statement.</li>
-<li><code>MaterializedViewMixin</code>: A mixin used to define materialized views declaratively, including:<ul>
-<li>name</li>
-<li>backing <code>Select</code></li>
-<li>optional dependencies</li>
-</ul>
-</li>
-<li>Dependency resolution: A topological sort over declared dependencies to determine refresh order.</li>
-<li>Refresh orchestration: Helpers to refresh one or many materialized views in a predictable order.</li>
+<li>create the view from <code>__mv_select__</code>;</li>
+<li>create its declared indexes;</li>
+<li>refresh views in dependency order; and</li>
+<li>drop views during teardown or replacement.</li>
 </ol>
-<h3 id="defining-the-materialised-view">Defining the Materialised View<a class="headerlink" href="#defining-the-materialised-view" title="Permanent link">&para;</a></h3>
+<p>The consumer owns when those operations happen. A typical application creates views during database setup, loads or updates its source tables, and refreshes the views as part of the same operational workflow. A view is not a second source of truth: its <code>Select</code> and declarations in code are the source of truth, while the database object is a refreshable read cache.</p>
+<p>This is deliberately separate from the ordinary <a href="../orm_table/">ORM table mixins</a> and from the <a href="../../loaders/">loader lifecycle</a>. Loaders populate source tables; materialized-view orchestration makes derived read models available after that work has completed.</p>
+<h2 id="declare-the-read-model-once">Declare the read model once<a class="headerlink" href="#declare-the-read-model-once" title="Permanent link">&para;</a></h2>
+<p>The class declaration is the integration point that downstream code can import and reuse. It names the physical view, defines its contents, records materialized-view dependencies, and optionally declares indexes.</p>
+<div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">RecentObservationMV</span><span class="p">(</span><span class="n">Base</span><span class="p">,</span> <span class="n">MaterializedViewMixin</span><span class="p">):</span>
+    <span class="n">__mv_name__</span> <span class="o">=</span> <span class="s2">&quot;mv_recent_observation&quot;</span>
+    <span class="n">__mv_select__</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">sa</span><span class="o">.</span><span class="n">select</span><span class="p">(</span>
+            <span class="n">Observation</span><span class="o">.</span><span class="n">observation_id</span><span class="p">,</span>
+            <span class="n">Observation</span><span class="o">.</span><span class="n">person_id</span><span class="p">,</span>
+            <span class="n">Observation</span><span class="o">.</span><span class="n">observation_date</span><span class="p">,</span>
+            <span class="n">Observation</span><span class="o">.</span><span class="n">value_as_number</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="o">.</span><span class="n">where</span><span class="p">(</span>
+            <span class="n">Observation</span><span class="o">.</span><span class="n">observation_date</span>
+            <span class="o">&gt;=</span> <span class="n">sa</span><span class="o">.</span><span class="n">func</span><span class="o">.</span><span class="n">current_date</span><span class="p">()</span> <span class="o">-</span> <span class="n">sa</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="s2">&quot;INTERVAL &#39;30 days&#39;&quot;</span><span class="p">)</span>
+        <span class="p">)</span>
+    <span class="p">)</span>
+    <span class="n">__mv_dependencies__</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;observation&quot;</span><span class="p">}</span>
+    <span class="n">__mv_indexes__</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">MaterializedViewIndex</span><span class="p">(</span>
+            <span class="n">name</span><span class="o">=</span><span class="s2">&quot;mv_recent_observation_id_uq&quot;</span><span class="p">,</span>
+            <span class="n">columns</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;observation_id&quot;</span><span class="p">,),</span>
+            <span class="n">unique</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+        <span class="p">),</span>
+    <span class="p">)</span>
+</code></pre></div>
+<p>The mixin can also be used without an ORM mapping when the view is consumed through SQLAlchemy Core. When it is combined with a declarative base, the class can additionally describe how application code queries the resulting rows. In both cases, keep the physical name and lifecycle declaration in one shared class so setup code and query code cannot drift apart.</p>
+<p><code>__mv_dependencies__</code> may contain source-table names as documentation. Only names that belong to the list passed to <code>resolve_mv_refresh_order</code> participate in the topological sort. This means a source table does not need to be registered as a materialized view, while dependencies between registered materialized views are refreshed in the correct order.</p>
+<h2 id="a-safe-lifecycle">A safe lifecycle<a class="headerlink" href="#a-safe-lifecycle" title="Permanent link">&para;</a></h2>
+<p>For a collection of views, make the refresh list explicit and share it between setup and refresh jobs:</p>
+<div class="highlight"><pre><span></span><code><span class="n">ALL_MVS</span> <span class="o">=</span> <span class="p">[</span><span class="n">RecentObservationMV</span><span class="p">,</span> <span class="n">DailyObservationCountsMV</span><span class="p">]</span>
+
+<span class="k">for</span> <span class="n">view</span> <span class="ow">in</span> <span class="n">ALL_MVS</span><span class="p">:</span>
+    <span class="n">view</span><span class="o">.</span><span class="n">create_mv</span><span class="p">(</span><span class="n">engine</span><span class="p">)</span>
+
+<span class="c1"># Run after the source-table load or update has committed.</span>
+<span class="n">refresh_all_mvs</span><span class="p">(</span><span class="n">engine</span><span class="p">,</span> <span class="n">ALL_MVS</span><span class="p">)</span>
+</code></pre></div>
+<p><code>create_mv()</code> is idempotent with its default <code>if_not_exists=True</code>, but it does not compare or migrate an existing definition. If <code>__mv_select__</code> changes, the consumer must choose a replacement/migration strategy; calling <code>create_mv()</code> again will not rewrite the existing view.</p>
+<p><code>refresh_all_mvs()</code> is the useful boundary for downstream orchestration. It sorts the supplied classes and raises <code>RuntimeError</code> for a dependency cycle. Refreshing one class directly is appropriate when the caller already knows that its prerequisites are current.</p>
+<h2 id="choose-creation-and-refresh-semantics-deliberately">Choose creation and refresh semantics deliberately<a class="headerlink" href="#choose-creation-and-refresh-semantics-deliberately" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Operation</th>
+<th>Default</th>
+<th>Consumer decision</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>create_mv()</code></td>
+<td>Create and populate the view; create declared indexes</td>
+<td>Use <code>with_data=False</code> when population should happen in a later refresh; use <code>create_indexes=False</code> only when index creation is managed elsewhere</td>
+</tr>
+<tr>
+<td><code>refresh_mv()</code></td>
+<td>Blocking refresh</td>
+<td>Use <code>concurrently=True</code> only when the declaration includes a simple unique index that is created in the target database</td>
+</tr>
+<tr>
+<td><code>drop_mv()</code></td>
+<td><code>IF EXISTS</code>, no cascade</td>
+<td>Use <code>cascade=True</code> only when dependent database objects should be removed as part of teardown</td>
+</tr>
+</tbody>
+</table>
+<p><code>with_data=False</code> leaves a newly created view uninitialized. It must be refreshed before consumers query it. <code>if_not_exists=False</code> and <code>drop_mv(if_exists=False)</code> are useful when setup should fail loudly instead of treating an existing or missing object as acceptable.</p>
+<p>The lower-level <a href="#api-reference">DDL contracts</a> are available for migration systems that need to compose statements themselves, but most downstream code should use the mixin methods so indexes and refresh eligibility remain tied to the declaration.</p>
+<h2 id="concurrent-refresh-is-a-declaration-and-database-contract">Concurrent refresh is a declaration-and-database contract<a class="headerlink" href="#concurrent-refresh-is-a-declaration-and-database-contract" title="Permanent link">&para;</a></h2>
+<p>PostgreSQL permits <code>REFRESH MATERIALIZED VIEW CONCURRENTLY</code> only when the view has a suitable simple unique index. Declare that index with <code>MaterializedViewIndex(unique=True)</code> in <code>__mv_indexes__</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">PatientSummaryMV</span><span class="p">(</span><span class="n">MaterializedViewMixin</span><span class="p">):</span>
+    <span class="n">__mv_name__</span> <span class="o">=</span> <span class="s2">&quot;mv_patient_summary&quot;</span>
+    <span class="n">__mv_select__</span> <span class="o">=</span> <span class="n">patient_summary_select</span>
+    <span class="n">__mv_indexes__</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">MaterializedViewIndex</span><span class="p">(</span>
+            <span class="n">name</span><span class="o">=</span><span class="s2">&quot;mv_patient_summary_patient_id_uq&quot;</span><span class="p">,</span>
+            <span class="n">columns</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;patient_id&quot;</span><span class="p">,),</span>
+            <span class="n">unique</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+        <span class="p">),</span>
+    <span class="p">)</span>
+
+
+<span class="n">PatientSummaryMV</span><span class="o">.</span><span class="n">create_mv</span><span class="p">(</span><span class="n">engine</span><span class="p">)</span>
+<span class="n">PatientSummaryMV</span><span class="o">.</span><span class="n">refresh_mv</span><span class="p">(</span><span class="n">engine</span><span class="p">,</span> <span class="n">concurrently</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</code></pre></div>
+<p><code>create_mv()</code> creates declared indexes immediately after the view. The <code>concurrently=True</code> pre-check is intentionally cheap and conservative: it checks the declaration before issuing SQL, then lets PostgreSQL verify that the index really exists and is valid. If no unique index is declared, or if PostgreSQL rejects the concurrent refresh, the operation raises <code>ConcurrentRefreshNotEligibleError</code> without hiding the underlying cause.</p>
+<p>This is fail-closed by design. An index created manually outside <code>__mv_indexes__</code> does not satisfy the mixin's declaration contract; declare it in the class even if another migration is responsible for creating it. Expressions, partial indexes, and other index forms are outside this simple contract and should not be represented as <code>MaterializedViewIndex</code> entries.</p>
+<p>By default, <code>schema=None</code> leaves the view name unqualified. PostgreSQL resolves that name through the connection's <code>search_path</code>, matching the behavior of existing callers. Pass <code>schema="reporting"</code> only when the caller intentionally wants an explicit schema-qualified target.</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Existing/default behavior: search_path resolves the target.</span>
+<span class="n">RecentObservationMV</span><span class="o">.</span><span class="n">create_mv</span><span class="p">(</span><span class="n">engine</span><span class="p">)</span>
+
+<span class="c1"># Explicit schema: the target is quoted and schema-qualified.</span>
+<span class="n">RecentObservationMV</span><span class="o">.</span><span class="n">create_mv</span><span class="p">(</span><span class="n">engine</span><span class="p">,</span> <span class="n">schema</span><span class="o">=</span><span class="s2">&quot;reporting&quot;</span><span class="p">)</span>
+<span class="n">RecentObservationMV</span><span class="o">.</span><span class="n">refresh_mv</span><span class="p">(</span><span class="n">engine</span><span class="p">,</span> <span class="n">schema</span><span class="o">=</span><span class="s2">&quot;reporting&quot;</span><span class="p">)</span>
+</code></pre></div>
+<p>Explicit schema targets are quoted component by component. This matters for embedded quotes, spaces, and mixed-case identifiers. It also means an unqualified mixed-case name and the same name passed with <code>schema=</code> can address different PostgreSQL relations. Keep schema selection at the call site and do not assume that this API provides <code>schema_translate_map</code>, role-token, or general multi-schema behavior.</p>
+<h2 id="failure-handling-and-backend-support">Failure handling and backend support<a class="headerlink" href="#failure-handling-and-backend-support" title="Permanent link">&para;</a></h2>
+<p>The built-in implementation is PostgreSQL-oriented. SQLite rejects materialized-view operations with <code>NotImplementedError</code>; this is intentional, not an emulation using ordinary views.</p>
+<p><code>drop_mv()</code> and declared-index creation wrap execution failures in <code>MaterializationError</code>. </p>
+<h2 id="api-reference">API reference<a class="headerlink" href="#api-reference" title="Permanent link">&para;</a></h2>
 
 
 <div class="doc doc-object doc-class">
 
 
 
-<a id="orm_loader.mappers.materialised_view_mixin.CreateMaterializedView"></a>
-    <div class="doc doc-contents first">
-            <p class="doc doc-class-bases">
-              Bases: <code><span title="sqlalchemy.schema.DDLElement">DDLElement</span></code></p>
-
-
-
-        <p><code>CreateMaterializedView</code></p>
-<p>SQLAlchemy DDL element representing a CREATE MATERIALIZED VIEW statement.</p>
-<p>This custom DDL construct allows a SQLAlchemy Select construct to be
-compiled into a backend-specific CREATE MATERIALIZED VIEW statement,
-enabling materialized view creation to be expressed using SQLAlchemy's
-DDL execution model.</p>
-
-
-<p><span class="doc-section-title">Parameters:</span></p>
-    <table>
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Type</th>
-          <th>Description</th>
-          <th>Default</th>
-        </tr>
-      </thead>
-      <tbody>
-          <tr class="doc-section-item">
-            <td>
-                <code>name</code>
-            </td>
-            <td>
-                  <code><span title="str">str</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>Name of the materialized view to be created.</p>
-              </div>
-            </td>
-            <td>
-                <em>required</em>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                <code>selectable</code>
-            </td>
-            <td>
-                  <code><span title="sqlalchemy.sql.Select">Select</span>[<span title="typing.Any">Any</span>]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>A SQLAlchemy Select construct defining the query backing the
-materialized view.</p>
-              </div>
-            </td>
-            <td>
-                <em>required</em>
-            </td>
-          </tr>
-      </tbody>
-    </table>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<a id="orm_loader.mappers.materialised_view_mixin.MaterializedViewMixin"></a>
+<a id="orm_loader.mappers.MaterializedViewMixin"></a>
     <div class="doc doc-contents first">
 
 
@@ -1536,7 +1971,7 @@ Query like a normal mapped class:</p>
 
 
 
-<h3 id="orm_loader.mappers.materialised_view_mixin.MaterializedViewMixin.__mv_dependencies__" class="doc doc-heading">
+<h3 id="orm_loader.mappers.MaterializedViewMixin.__mv_dependencies__" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">__mv_dependencies__</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span></code>
 
   <span class="doc doc-labels">
@@ -1544,7 +1979,7 @@ Query like a normal mapped class:</p>
       <small class="doc doc-label doc-label-instance-attribute"><code>instance-attribute</code></small>
   </span>
 
-<a href="#orm_loader.mappers.materialised_view_mixin.MaterializedViewMixin.__mv_dependencies__" class="headerlink" title="Permanent link">&para;</a></h3>
+<a href="#orm_loader.mappers.MaterializedViewMixin.__mv_dependencies__" class="headerlink" title="Permanent link">&para;</a></h3>
 
 
     <div class="doc doc-contents ">
@@ -1557,14 +1992,35 @@ Query like a normal mapped class:</p>
 
 
 
-<h3 id="orm_loader.mappers.materialised_view_mixin.MaterializedViewMixin.__mv_name__" class="doc doc-heading">
+<h3 id="orm_loader.mappers.MaterializedViewMixin.__mv_indexes__" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">__mv_indexes__</span> <span class="o">=</span> <span class="p">()</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-class-attribute"><code>class-attribute</code></small>
+      <small class="doc doc-label doc-label-instance-attribute"><code>instance-attribute</code></small>
+  </span>
+
+<a href="#orm_loader.mappers.MaterializedViewMixin.__mv_indexes__" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h3 id="orm_loader.mappers.MaterializedViewMixin.__mv_name__" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">__mv_name__</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-instance-attribute"><code>instance-attribute</code></small>
   </span>
 
-<a href="#orm_loader.mappers.materialised_view_mixin.MaterializedViewMixin.__mv_name__" class="headerlink" title="Permanent link">&para;</a></h3>
+<a href="#orm_loader.mappers.MaterializedViewMixin.__mv_name__" class="headerlink" title="Permanent link">&para;</a></h3>
 
 
     <div class="doc doc-contents ">
@@ -1577,14 +2033,14 @@ Query like a normal mapped class:</p>
 
 
 
-<h3 id="orm_loader.mappers.materialised_view_mixin.MaterializedViewMixin.__mv_select__" class="doc doc-heading">
+<h3 id="orm_loader.mappers.MaterializedViewMixin.__mv_select__" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">__mv_select__</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-instance-attribute"><code>instance-attribute</code></small>
   </span>
 
-<a href="#orm_loader.mappers.materialised_view_mixin.MaterializedViewMixin.__mv_select__" class="headerlink" title="Permanent link">&para;</a></h3>
+<a href="#orm_loader.mappers.MaterializedViewMixin.__mv_select__" class="headerlink" title="Permanent link">&para;</a></h3>
 
 
     <div class="doc doc-contents ">
@@ -1599,14 +2055,14 @@ Query like a normal mapped class:</p>
 <div class="doc doc-object doc-function">
 
 
-<h3 id="orm_loader.mappers.materialised_view_mixin.MaterializedViewMixin.create_mv" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">create_mv</span><span class="p">(</span><span class="n">bind</span><span class="p">)</span></code>
+<h3 id="orm_loader.mappers.MaterializedViewMixin.create_mv" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">create_mv</span><span class="p">(</span><span class="n">bind</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">schema</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">with_data</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">if_not_exists</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">create_indexes</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-classmethod"><code>classmethod</code></small>
   </span>
 
-<a href="#orm_loader.mappers.materialised_view_mixin.MaterializedViewMixin.create_mv" class="headerlink" title="Permanent link">&para;</a></h3>
+<a href="#orm_loader.mappers.MaterializedViewMixin.create_mv" class="headerlink" title="Permanent link">&para;</a></h3>
 
 
     <div class="doc doc-contents ">
@@ -1639,6 +2095,39 @@ Query like a normal mapped class:</p>
             </td>
             <td>
                 <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>schema</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Explicit schema override. When omitted, the view name remains
+unqualified for the connection's <code>search_path</code> to resolve.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>create_indexes</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>When True, create every index declared in <code>__mv_indexes__</code>.</p>
+              </div>
+            </td>
+            <td>
+                  <code>True</code>
             </td>
           </tr>
       </tbody>
@@ -1675,14 +2164,38 @@ PostgreSQL. Unsupported backends raise <code>NotImplementedError</code>.</p>
 <div class="doc doc-object doc-function">
 
 
-<h3 id="orm_loader.mappers.materialised_view_mixin.MaterializedViewMixin.refresh_mv" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">refresh_mv</span><span class="p">(</span><span class="n">bind</span><span class="p">)</span></code>
+<h3 id="orm_loader.mappers.MaterializedViewMixin.drop_mv" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">drop_mv</span><span class="p">(</span><span class="n">bind</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">schema</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">if_exists</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">cascade</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-classmethod"><code>classmethod</code></small>
   </span>
 
-<a href="#orm_loader.mappers.materialised_view_mixin.MaterializedViewMixin.refresh_mv" class="headerlink" title="Permanent link">&para;</a></h3>
+<a href="#orm_loader.mappers.MaterializedViewMixin.drop_mv" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Drop the materialized view using the resolved backend.</p>
+<p>When <code>schema</code> is omitted, the view name remains unqualified for the
+connection's <code>search_path</code> to resolve.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="orm_loader.mappers.MaterializedViewMixin.refresh_mv" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">refresh_mv</span><span class="p">(</span><span class="n">bind</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">schema</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">concurrently</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-classmethod"><code>classmethod</code></small>
+  </span>
+
+<a href="#orm_loader.mappers.MaterializedViewMixin.refresh_mv" class="headerlink" title="Permanent link">&para;</a></h3>
 
 
     <div class="doc doc-contents ">
@@ -1715,6 +2228,39 @@ PostgreSQL. Unsupported backends raise <code>NotImplementedError</code>.</p>
             </td>
             <td>
                 <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>schema</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Explicit schema override. When omitted, the view name remains
+unqualified for the connection's <code>search_path</code> to resolve.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>concurrently</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Request concurrent refresh, requiring a declared unique index.</p>
+              </div>
+            </td>
+            <td>
+                  <code>False</code>
             </td>
           </tr>
       </tbody>
@@ -1750,7 +2296,7 @@ Concurrent refresh semantics are not handled here.</p>
 
 
 
-<a id="orm_loader.mappers.materialised_view_mixin.resolve_mv_refresh_order"></a>
+<a id="orm_loader.mappers.resolve_mv_refresh_order"></a>
     <div class="doc doc-contents first">
 
         <p><code>resolve_mv_refresh_order</code></p>
@@ -1788,7 +2334,7 @@ Concurrent refresh semantics are not handled here.</p>
 
 
 
-<a id="orm_loader.mappers.materialised_view_mixin.refresh_all_mvs"></a>
+<a id="orm_loader.mappers.refresh_all_mvs"></a>
     <div class="doc doc-contents first">
 
         <p><code>refresh_all_mvs</code></p>
@@ -1804,6 +2350,651 @@ Concurrent refresh semantics are not handled here.</p>
     <span class="n">refresh_all_mvs</span><span class="p">(</span><span class="n">engine</span><span class="p">,</span> <span class="n">ALL_MVS</span><span class="p">)</span>
 </code></pre></div>
 
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<a id="orm_loader.mappers.CreateMaterializedView"></a>
+    <div class="doc doc-contents first">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="sqlalchemy.schema.DDLElement">DDLElement</span></code></p>
+
+
+
+        <p><code>CreateMaterializedView</code></p>
+<p>SQLAlchemy DDL element representing a CREATE MATERIALIZED VIEW statement.</p>
+<p>This custom DDL construct allows a SQLAlchemy Select construct to be
+compiled into a backend-specific CREATE MATERIALIZED VIEW statement,
+enabling materialized view creation to be expressed using SQLAlchemy's
+DDL execution model.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>name</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Name of the materialized view to be created.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>selectable</code>
+            </td>
+            <td>
+                  <code><span title="sqlalchemy.sql.Select">Select</span>[<span title="typing.Any">Any</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A SQLAlchemy Select construct defining the query backing the
+materialized view.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>with_data</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>When False, emit <code>WITH NO DATA</code>.</p>
+              </div>
+            </td>
+            <td>
+                  <code>True</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>if_not_exists</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>When True, emit <code>IF NOT EXISTS</code>.</p>
+              </div>
+            </td>
+            <td>
+                  <code>True</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<a id="orm_loader.mappers.MaterializedViewIndex"></a>
+    <div class="doc doc-contents first">
+
+
+
+        <p>A simple column index declared on a materialized view.</p>
+<p>Only plain column indexes are representable here (no expressions or
+partial predicates). That restriction is deliberate: it's what keeps
+"is this index eligible for CONCURRENTLY refresh" decidable from the
+declaration alone, without inspecting the live catalog first.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h3 id="orm_loader.mappers.MaterializedViewIndex.columns" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">columns</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-instance-attribute"><code>instance-attribute</code></small>
+  </span>
+
+<a href="#orm_loader.mappers.MaterializedViewIndex.columns" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h3 id="orm_loader.mappers.MaterializedViewIndex.name" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">name</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-instance-attribute"><code>instance-attribute</code></small>
+  </span>
+
+<a href="#orm_loader.mappers.MaterializedViewIndex.name" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h3 id="orm_loader.mappers.MaterializedViewIndex.unique" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">unique</span> <span class="o">=</span> <span class="kc">False</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-class-attribute"><code>class-attribute</code></small>
+      <small class="doc doc-label doc-label-instance-attribute"><code>instance-attribute</code></small>
+  </span>
+
+<a href="#orm_loader.mappers.MaterializedViewIndex.unique" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+    </div>
+
+</div>
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="orm_loader.mappers.MaterializedViewIndex.__init__" class="doc doc-heading">
+            <code class="highlight language-python"><span class="fm">__init__</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">columns</span><span class="p">,</span> <span class="n">unique</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></code>
+
+<a href="#orm_loader.mappers.MaterializedViewIndex.__init__" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="orm_loader.mappers.MaterializedViewIndex.__post_init__" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">__post_init__</span><span class="p">()</span></code>
+
+<a href="#orm_loader.mappers.MaterializedViewIndex.__post_init__" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<a id="orm_loader.mappers.CreateMaterializedViewIndex"></a>
+    <div class="doc doc-contents first">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="sqlalchemy.schema.DDLElement">DDLElement</span></code></p>
+
+
+
+        <p>Create one declared index on a materialized view.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>target</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Fully qualified, quoted name of the materialized view to index (see
+<code>orm_loader.helpers.sql.qualify_identifier</code>).</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>index</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="orm_loader.mappers.materialised_view_contracts.MaterializedViewIndex" href="#orm_loader.mappers.MaterializedViewIndex">MaterializedViewIndex</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The index to create.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>if_not_exists</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Emit <code>IF NOT EXISTS</code> so creating an already-present index is a
+no-op rather than an error.</p>
+              </div>
+            </td>
+            <td>
+                  <code>True</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<a id="orm_loader.mappers.DropMaterializedView"></a>
+    <div class="doc doc-contents first">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="sqlalchemy.schema.DDLElement">DDLElement</span></code></p>
+
+
+
+        <p>Drop one materialized view.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>name</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Fully qualified, quoted name of the materialized view to drop (see
+<code>orm_loader.helpers.sql.qualify_identifier</code>).</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>if_exists</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Emit <code>IF EXISTS</code> so dropping an already-absent view is a no-op
+rather than an error.</p>
+              </div>
+            </td>
+            <td>
+                  <code>True</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>cascade</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Emit <code>CASCADE</code> to also drop objects that depend on this view.</p>
+              </div>
+            </td>
+            <td>
+                  <code>False</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<a id="orm_loader.mappers.MaterializationError"></a>
+    <div class="doc doc-contents first">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="RuntimeError">RuntimeError</span></code></p>
+
+
+
+        <p>Base exception carrying structured materialization failure context.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h3 id="orm_loader.mappers.MaterializationError.failure" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">failure</span> <span class="o">=</span> <span class="n">failure</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-instance-attribute"><code>instance-attribute</code></small>
+  </span>
+
+<a href="#orm_loader.mappers.MaterializationError.failure" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+    </div>
+
+</div>
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="orm_loader.mappers.MaterializationError.__init__" class="doc doc-heading">
+            <code class="highlight language-python"><span class="fm">__init__</span><span class="p">(</span><span class="n">failure</span><span class="p">)</span></code>
+
+<a href="#orm_loader.mappers.MaterializationError.__init__" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<a id="orm_loader.mappers.ConcurrentRefreshNotEligibleError"></a>
+    <div class="doc doc-contents first">
+            <p class="doc doc-class-bases">
+              Bases: <code><a class="autorefs autorefs-internal" title="orm_loader.mappers.materialised_view_errors.MaterializationError" href="#orm_loader.mappers.MaterializationError">MaterializationError</a></code></p>
+
+
+
+        <p>Raised when a concurrent materialized-view refresh is not eligible.</p>
+<p>This can happen before execution when no eligible unique index is
+declared, or after execution when PostgreSQL rejects the refresh.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<a id="orm_loader.mappers.UnsupportedMaterializationDialectError"></a>
+    <div class="doc doc-contents first">
+            <p class="doc doc-class-bases">
+              Bases: <code><a class="autorefs autorefs-internal" title="orm_loader.mappers.materialised_view_errors.MaterializationError" href="#orm_loader.mappers.MaterializationError">MaterializationError</a></code></p>
+
+
+
+        <p>Raised before executing Postgres-only DDL/catalog SQL against a
+non-Postgres connection. Defense in depth: the normal <code>resolve_backend</code>
+dispatch path already prevents this via <code>_require_capability</code>; this
+guards direct/manual <code>PostgresBackend()</code> use.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
 
     </div>
 
