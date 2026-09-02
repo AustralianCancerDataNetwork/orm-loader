@@ -5,7 +5,6 @@ import sqlalchemy as sa
 from sqlalchemy.ext import compiler
 from sqlalchemy.schema import DDLElement
 
-from ..backends.resolve import resolve_backend
 from .materialised_view_contracts import MaterializedViewIndex
 
 class CreateMaterializedView(DDLElement):
@@ -231,6 +230,8 @@ class MaterializedViewMixin:
         WHERE observation.observation_date >= CURRENT_DATE - INTERVAL '30 days';
         ```
         """
+        from ..backends.resolve import resolve_backend
+
         backend = resolve_backend(bind)
 
         def create(connection: sa.engine.Connection | sa.engine.Engine) -> None:
@@ -292,6 +293,8 @@ class MaterializedViewMixin:
             RecentObservationMV.refresh_mv(conn)
         ```
         """
+        from ..backends.resolve import resolve_backend
+
         backend = resolve_backend(bind)
         backend.refresh_materialized_view(
             bind,
@@ -315,6 +318,8 @@ class MaterializedViewMixin:
         When ``schema`` is omitted, the view name remains unqualified for the
         connection's ``search_path`` to resolve.
         """
+        from ..backends.resolve import resolve_backend
+
         backend = resolve_backend(bind)
         backend.drop_materialized_view(
             bind, cls.__mv_name__, schema=schema, if_exists=if_exists, cascade=cascade

@@ -256,7 +256,7 @@ def test_postgres_backend_quotes_unqualified_materialized_view_name():
 
 
 def test_postgres_backend_create_materialized_view_rejects_non_postgres_connection():
-    from orm_loader.mappers.materialized_view_errors import (
+    from orm_loader.mappers.materialised_view_errors import (
         UnsupportedMaterializationDialectError,
     )
     from sqlalchemy.dialects import sqlite
@@ -273,7 +273,7 @@ def test_postgres_backend_create_materialized_view_rejects_non_postgres_connecti
 
 
 def test_postgres_backend_refresh_materialized_view_rejects_non_postgres_connection():
-    from orm_loader.mappers.materialized_view_errors import (
+    from orm_loader.mappers.materialised_view_errors import (
         UnsupportedMaterializationDialectError,
     )
     from sqlalchemy.dialects import sqlite
@@ -319,7 +319,7 @@ def test_postgres_backend_create_materialized_view_index_emits_expected_sql():
 
 
 def test_postgres_backend_create_materialized_view_index_failure_mentions_index_name():
-    from orm_loader.mappers.materialized_view_errors import MaterializationError
+    from orm_loader.mappers.materialised_view_errors import MaterializationError
     from orm_loader.mappers.materialised_view_contracts import MaterializedViewIndex
 
     original = RuntimeError("boom")
@@ -352,7 +352,7 @@ def test_postgres_backend_drop_materialized_view_cascade_and_if_exists_false():
 
 
 def test_postgres_backend_drop_materialized_view_failure_preserves_cause():
-    from orm_loader.mappers.materialized_view_errors import MaterializationError, MaterializationOperation
+    from orm_loader.mappers.materialised_view_errors import MaterializationError, MaterializationOperation
 
     original = RuntimeError("boom")
     backend = PostgresBackend()
@@ -367,7 +367,7 @@ def test_postgres_backend_drop_materialized_view_failure_preserves_cause():
 
 
 def test_postgres_backend_create_materialized_view_failure_preserves_cause():
-    from orm_loader.mappers.materialized_view_errors import MaterializationError, MaterializationOperation
+    from orm_loader.mappers.materialised_view_errors import MaterializationError, MaterializationOperation
 
     original = RuntimeError("boom")
     backend = PostgresBackend()
@@ -384,7 +384,7 @@ def test_postgres_backend_create_materialized_view_failure_preserves_cause():
 
 
 def test_postgres_backend_refresh_concurrently_without_declared_unique_index_raises_before_executing():
-    from orm_loader.mappers.materialized_view_errors import ConcurrentRefreshNotEligibleError
+    from orm_loader.mappers.materialised_view_errors import ConcurrentRefreshNotEligibleError
 
     backend = PostgresBackend()
     session = _FakeSession()
@@ -400,7 +400,7 @@ def test_postgres_backend_refresh_concurrently_without_declared_unique_index_rai
 def test_postgres_backend_refresh_concurrently_declared_but_database_rejects_it_translates_error():
     psycopg = pytest.importorskip("psycopg")
 
-    from orm_loader.mappers.materialized_view_errors import ConcurrentRefreshNotEligibleError
+    from orm_loader.mappers.materialised_view_errors import ConcurrentRefreshNotEligibleError
     from orm_loader.mappers.materialised_view_contracts import MaterializedViewIndex
 
     orig = psycopg.errors.ObjectNotInPrerequisiteState(
@@ -472,7 +472,7 @@ def test_postgres_backend_refresh_concurrently_with_declared_index_emits_concurr
 def test_postgres_backend_materialized_view_lifecycle_is_schema_isolated_with_adversarial_identifiers(
     pg_session, pg_engine
 ):
-    from orm_loader.mappers.materialised_view_contracts import MaterializedViewIndex
+    from orm_loader.mappers.materialized_view_contracts import MaterializedViewIndex
 
     backend = PostgresBackend()
     left_schema, right_schema = 'mv "left" schema', 'mv "right" schema'
@@ -511,8 +511,8 @@ def test_postgres_backend_materialized_view_lifecycle_is_schema_isolated_with_ad
 def test_postgres_backend_refresh_concurrently_raises_when_declared_index_was_never_created(
     pg_session, pg_engine
 ):
-    from orm_loader.mappers.materialized_view_errors import ConcurrentRefreshNotEligibleError
-    from orm_loader.mappers.materialised_view_contracts import MaterializedViewIndex
+    from orm_loader.mappers.materialised_view_errors import ConcurrentRefreshNotEligibleError
+    from orm_loader.mappers.materialized_view_contracts import MaterializedViewIndex
 
     backend = PostgresBackend()
     index = MaterializedViewIndex(name="mv_missing_index_test_uq", columns=("row_id",), unique=True)

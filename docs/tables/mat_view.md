@@ -1,4 +1,4 @@
-# Materialised Views
+# Materialized Views
 
 Materialized views are database-maintained read models: a stored `Select` whose result can be queried like a table and rebuilt when its source data changes. They are useful when a downstream application repeatedly performs the same expensive join, filter, or aggregation.
 
@@ -126,47 +126,47 @@ The built-in implementation is PostgreSQL-oriented. SQLite rejects materialized-
 
 ## API reference
 
-::: orm_loader.mappers.materialised_view_mixin.MaterializedViewMixin
+::: orm_loader.mappers.MaterializedViewMixin
     options:
       heading_level: 3
       members: true
 
-::: orm_loader.mappers.materialised_view_mixin.resolve_mv_refresh_order
+::: orm_loader.mappers.resolve_mv_refresh_order
     options:
       heading_level: 3
       members: true
 
-::: orm_loader.mappers.materialised_view_mixin.refresh_all_mvs
+::: orm_loader.mappers.refresh_all_mvs
     options:
       heading_level: 3
       members: true
 
-::: orm_loader.mappers.materialised_view_mixin.CreateMaterializedView
+::: orm_loader.mappers.CreateMaterializedView
     options:
       heading_level: 3
 
-::: orm_loader.mappers.materialised_view_contracts.MaterializedViewIndex
-    options:
-      heading_level: 3
-      members: true
-
-::: orm_loader.mappers.materialised_view_contracts.CreateMaterializedViewIndex
-    options:
-      heading_level: 3
-
-::: orm_loader.mappers.materialised_view_contracts.DropMaterializedView
-    options:
-      heading_level: 3
-
-::: orm_loader.mappers.materialized_view_errors.MaterializationError
+::: orm_loader.mappers.MaterializedViewIndex
     options:
       heading_level: 3
       members: true
 
-::: orm_loader.mappers.materialized_view_errors.ConcurrentRefreshNotEligibleError
+::: orm_loader.mappers.CreateMaterializedViewIndex
     options:
       heading_level: 3
 
-::: orm_loader.mappers.materialized_view_errors.UnsupportedMaterializationDialectError
+::: orm_loader.mappers.DropMaterializedView
+    options:
+      heading_level: 3
+
+::: orm_loader.mappers.MaterializationError
+    options:
+      heading_level: 3
+      members: true
+
+::: orm_loader.mappers.ConcurrentRefreshNotEligibleError
+    options:
+      heading_level: 3
+
+::: orm_loader.mappers.UnsupportedMaterializationDialectError
     options:
       heading_level: 3

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 from typing import Any
 
 import pytest
@@ -35,10 +36,8 @@ class _FakeBackend:
 @pytest.fixture
 def fake_backend(monkeypatch: pytest.MonkeyPatch) -> _FakeBackend:
     backend = _FakeBackend()
-    monkeypatch.setattr(
-        "orm_loader.mappers.materialised_view_mixin.resolve_backend",
-        lambda bind: backend,
-    )
+    resolver_module = importlib.import_module("orm_loader.backends.resolve")
+    monkeypatch.setattr(resolver_module, "resolve_backend", lambda bind: backend)
     return backend
 
 
@@ -130,10 +129,8 @@ def test_create_mv_engine_uses_one_transaction_for_view_and_indexes(monkeypatch:
                 raise RuntimeError("index failed")
 
     backend = TransactionalBackend()
-    monkeypatch.setattr(
-        "orm_loader.mappers.materialised_view_mixin.resolve_backend",
-        lambda bind: backend,
-    )
+    resolver_module = importlib.import_module("orm_loader.backends.resolve")
+    monkeypatch.setattr(resolver_module, "resolve_backend", lambda bind: backend)
 
     class TransactionalMv(MaterializedViewMixin):
         __mv_name__ = "mv_transactional"

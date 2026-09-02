@@ -14,6 +14,18 @@ from orm_loader.mappers.materialised_view_mixin import CreateMaterializedView
 _DIALECT = postgresql.dialect()
 
 
+def test_mappers_package_exports_materialized_view_api():
+    import orm_loader.mappers as mappers
+
+    from orm_loader.mappers.materialised_view_errors import MaterializationError
+
+    assert mappers.MaterializedViewIndex is MaterializedViewIndex
+    assert mappers.CreateMaterializedViewIndex is CreateMaterializedViewIndex
+    assert mappers.DropMaterializedView is DropMaterializedView
+    assert mappers.CreateMaterializedView is CreateMaterializedView
+    assert mappers.MaterializationError is MaterializationError
+
+
 def test_materialized_view_index_requires_a_non_empty_name():
     with pytest.raises(ValueError, match="index name"):
         MaterializedViewIndex(name="", columns=("id",))
