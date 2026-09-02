@@ -4,6 +4,7 @@ import sqlalchemy as sa
 from typing import Any
 from collections import defaultdict, deque
 from ..backends.resolve import resolve_backend
+from .materialised_view_contracts import MaterializedViewIndex
 
 class CreateMaterializedView(DDLElement):
     """
@@ -23,11 +24,24 @@ class CreateMaterializedView(DDLElement):
     selectable
         A SQLAlchemy Select construct defining the query backing the
         materialized view.
+    with_data
+        When False, emit ``WITH NO DATA``.
+    if_not_exists
+        When True, emit ``IF NOT EXISTS``.
     """
 
-    def __init__(self, name: str, selectable: sa.sql.Select[Any]):
+    def __init__(
+        self,
+        name: str,
+        selectable: sa.sql.Select[Any],
+        *,
+        with_data: bool = True,
+        if_not_exists: bool = True,
+    ):
         self.name = name
         self.selectable = selectable
+        self.with_data = with_data
+        self.if_not_exists = if_not_exists
 
 @compiler.compiles(CreateMaterializedView)
 def _create_view(
@@ -51,7 +65,9 @@ def _create_view(
     CREATE MATERIALIZED VIEW IF NOT EXISTS syntax (e.g. PostgreSQL).
     """
     compiled = compiler.sql_compiler.process(element.selectable, literal_binds=True)
-    return f"CREATE MATERIALIZED VIEW IF NOT EXISTS {element.name} as {compiled}"
+    existence = "IF NOT EXISTS " if element.if_not_exists else ""
+    population = "" if element.with_data else " WITH NO DATA"
+    return f"CREATE MATERIALIZED VIEW {existence}{element.name} as {compiled}{population}"
 
 class MaterializedViewMixin:
 
@@ -158,9 +174,18 @@ class MaterializedViewMixin:
     __mv_name__: str
     __mv_select__: sa.sql.Select[Any]
     __mv_dependencies__: set[str] = set()
+    __mv_indexes__: tuple[MaterializedViewIndex, ...] = ()
 
     @classmethod
-    def create_mv(cls, bind: "sa.engine.Connection | sa.engine.Engine") -> None:
+    def create_mv(
+        cls,
+        bind: "sa.engine.Connection | sa.engine.Engine",
+        *,
+        schema: str | None = None,
+        with_data: bool = True,
+        if_not_exists: bool = True,
+        create_indexes: bool = True,
+    ) -> None:
         """
         Create the materialized view if it does not already exist.
 
@@ -168,6 +193,11 @@ class MaterializedViewMixin:
         ----------
         bind
             A SQLAlchemy Engine or Connection used to execute the DDL.
+        schema
+            Explicit schema override. When omitted, the view name remains
+            unqualified for the connection's ``search_path`` to resolve.
+        create_indexes
+            When True, create every index declared in ``__mv_indexes__``.
 
         Notes
         -----
@@ -200,10 +230,28 @@ class MaterializedViewMixin:
         ```
         """
         backend = resolve_backend(bind)
-        backend.create_materialized_view(bind, cls.__mv_name__, cls.__mv_select__)
+        backend.create_materialized_view(
+            bind,
+            cls.__mv_name__,
+            cls.__mv_select__,
+            schema=schema,
+            with_data=with_data,
+            if_not_exists=if_not_exists,
+        )
+        if create_indexes:
+            for index in cls.__mv_indexes__:
+                backend.create_materialized_view_index(
+                    bind, cls.__mv_name__, index, schema=schema
+                )
 
     @classmethod
-    def refresh_mv(cls, bind: "sa.engine.Connection | sa.engine.Engine") -> None:
+    def refresh_mv(
+        cls,
+        bind: "sa.engine.Connection | sa.engine.Engine",
+        *,
+        schema: str | None = None,
+        concurrently: bool = False,
+    ) -> None:
         """
         Refresh the contents of the materialized view.
 
@@ -211,6 +259,11 @@ class MaterializedViewMixin:
         ----------
         bind
             A SQLAlchemy Engine or Connection used to execute the refresh.
+        schema
+            Explicit schema override. When omitted, the view name remains
+            unqualified for the connection's ``search_path`` to resolve.
+        concurrently
+            Request concurrent refresh, requiring a declared unique index.
 
         Notes
         -----
@@ -226,7 +279,32 @@ class MaterializedViewMixin:
         ```
         """
         backend = resolve_backend(bind)
-        backend.refresh_materialized_view(bind, cls.__mv_name__)
+        backend.refresh_materialized_view(
+            bind,
+            cls.__mv_name__,
+            schema=schema,
+            concurrently=concurrently,
+            declared_indexes=cls.__mv_indexes__,
+        )
+
+    @classmethod
+    def drop_mv(
+        cls,
+        bind: "sa.engine.Connection | sa.engine.Engine",
+        *,
+        schema: str | None = None,
+        if_exists: bool = True,
+        cascade: bool = False,
+    ) -> None:
+        """Drop the materialized view using the resolved backend.
+
+        When ``schema`` is omitted, the view name remains unqualified for the
+        connection's ``search_path`` to resolve.
+        """
+        backend = resolve_backend(bind)
+        backend.drop_materialized_view(
+            bind, cls.__mv_name__, schema=schema, if_exists=if_exists, cascade=cascade
+        )
         
 
 def resolve_mv_refresh_order(mv_classes: list[type[MaterializedViewMixin]]) -> list[type]:
