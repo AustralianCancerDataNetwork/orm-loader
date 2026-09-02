@@ -47,6 +47,8 @@ class UnsupportedMaterializationDialectError(MaterializationError):
 
 
 class ConcurrentRefreshNotEligibleError(MaterializationError):
-    """Raised before ``REFRESH MATERIALIZED VIEW CONCURRENTLY`` executes,
-    when no eligible unique index is declared or found live in the
-    catalog."""
+    """Raised when a concurrent materialized-view refresh is not eligible.
+
+    This can happen before execution when no eligible unique index is
+    declared, or after execution when PostgreSQL rejects the refresh.
+    """

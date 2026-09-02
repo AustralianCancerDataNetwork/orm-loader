@@ -239,7 +239,24 @@ def test_postgres_backend_materialized_view_methods_emit_expected_sql():
     assert any("REFRESH MATERIALIZED VIEW mv_test;" == sql for sql in session.statements)
 
 
-def test_postgres_backend_create_mv_preserves_unquoted_mixed_case_name():
+def test_postgres_backend_create_materialized_view_rejects_non_postgres_connection():
+    from orm_loader.backends.materialized_view_errors import (
+        UnsupportedMaterializationDialectError,
+    )
+    from sqlalchemy.dialects import sqlite
+
+    backend = PostgresBackend()
+    session = _FakeSession()
+    session.dialect = sqlite.dialect()
+    selectable = sa.select(sa.literal(1).label("n"))
+
+    with pytest.raises(UnsupportedMaterializationDialectError, match="received dialect 'sqlite'"):
+        backend.create_materialized_view(_sess(session), "mv_test", selectable)
+
+    assert session.statements == []
+
+
+def test_postgres_backend_create_mv_emits_unquoted_name_for_legacy_search_path_resolution():
     from orm_loader.mappers.materialised_view_mixin import MaterializedViewMixin
 
     class MixedCaseMaterializedView(MaterializedViewMixin):
@@ -319,7 +336,7 @@ def test_postgres_backend_refresh_concurrently_without_declared_unique_index_rai
 
 
 def test_postgres_backend_refresh_concurrently_declared_but_database_rejects_it_translates_error():
-    import psycopg.errors
+    psycopg = pytest.importorskip("psycopg")
 
     from orm_loader.backends.materialized_view_errors import ConcurrentRefreshNotEligibleError
     from orm_loader.mappers.materialised_view_contracts import MaterializedViewIndex
@@ -349,7 +366,7 @@ def test_postgres_backend_refresh_concurrently_declared_but_database_rejects_it_
 
 
 def test_postgres_backend_refresh_concurrently_unrelated_operational_error_propagates_unchanged():
-    import psycopg.errors
+    psycopg = pytest.importorskip("psycopg")
 
     from orm_loader.mappers.materialised_view_contracts import MaterializedViewIndex
 

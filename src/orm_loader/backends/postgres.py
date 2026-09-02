@@ -341,6 +341,12 @@ class PostgresBackend(DatabaseBackend):
         from ..mappers.materialised_view_mixin import CreateMaterializedView
 
         with self._as_connection(bind) as conn:
+            _require_postgres_dialect(
+                conn,
+                operation=MaterializationOperation.CREATE,
+                schema=schema,
+                name=name,
+            )
             conn.execute(
                 CreateMaterializedView(
                     self._mv_target(name, schema),
@@ -384,7 +390,10 @@ class PostgresBackend(DatabaseBackend):
             except OperationalError as error:
                 # Keep psycopg optional at import time; it is only needed when
                 # handling an actual PostgreSQL driver error.
-                from psycopg.errors import ObjectNotInPrerequisiteState
+                try:
+                    from psycopg.errors import ObjectNotInPrerequisiteState
+                except ImportError:
+                    raise error from None
 
                 if not concurrently or not isinstance(error.orig, ObjectNotInPrerequisiteState):
                     raise
