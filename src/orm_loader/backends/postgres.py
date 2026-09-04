@@ -321,9 +321,8 @@ class PostgresBackend(DatabaseBackend):
             yield engine
         finally:
             sae.remove(engine, "connect", _set_replica_role)
-            with engine.connect() as conn:
-                conn = autocommit_connection(conn)
-                conn.execute(sa.text("SET session_replication_role = DEFAULT"))
-                role = conn.execute(sa.text("SHOW session_replication_role")).scalar()
+            with autocommit_connection(engine) as autocommit_conn:
+                autocommit_conn.execute(sa.text("SET session_replication_role = DEFAULT"))
+                role = autocommit_conn.execute(sa.text("SHOW session_replication_role")).scalar()
                 if role != "origin":
                     raise RuntimeError("Failed to restore session_replication_role")

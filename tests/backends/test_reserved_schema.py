@@ -8,15 +8,15 @@ works end to end, not just in isolation on either side.
 from __future__ import annotations
 
 import pytest
-from oa_configurator import CDMDatabaseConfig, ConnectionConfig, Resolver, StackConfig
+from oa_configurator import CDMDatabaseConfig, ConnectionConfig, StackConfig
+from pydantic import ValidationError
 
 from orm_loader.backends import STAGING_SCHEMA
 
 
 def test_resolving_cdm_database_with_staging_schema_name_raises() -> None:
-    cfg = StackConfig.for_session(
-        connections={"c": ConnectionConfig(dialect="sqlite", database_name=":memory:")},
-        databases={"default": CDMDatabaseConfig(connection="c", schema_name=STAGING_SCHEMA)},
-    )
-    with pytest.raises(RuntimeError, match=f"{STAGING_SCHEMA!r}.*orm-loader"):
-        Resolver(cfg).resolve_database("default")
+    with pytest.raises(ValidationError, match=f"{STAGING_SCHEMA!r}.*orm-loader"):
+        StackConfig.for_session(
+            connections={"c": ConnectionConfig(dialect="sqlite", database_name=":memory:")},
+            databases={"default": CDMDatabaseConfig(connection="c", schema_name=STAGING_SCHEMA)},
+        )

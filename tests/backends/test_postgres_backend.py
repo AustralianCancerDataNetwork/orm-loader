@@ -199,12 +199,25 @@ def test_postgres_backend_engine_with_replica_role_unregisters_listener(monkeypa
         def execution_options(self, **_):
             return self
 
+        def get_isolation_level(self):
+            return "READ COMMITTED"
+
+        def rollback(self) -> None:
+            return None
+
+        def close(self) -> None:
+            return None
+
         def execute(self, statement):
             sql = str(statement.compile(dialect=postgresql.dialect()))
             statements.append(sql)
             return _Result()
 
-    class _Engine:
+    class _Engine(Engine):
+        def __init__(self) -> None:
+            # only exists for autocommit_connection() to route it into its real Engine branch
+            pass
+
         def connect(self):
             events.append(("connect", self, "connect"))
             return _Conn()

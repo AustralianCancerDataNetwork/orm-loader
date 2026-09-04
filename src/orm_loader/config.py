@@ -4,8 +4,12 @@ from __future__ import annotations
 
 from typing import Annotated, ClassVar
 
-from oa_configurator import CDMDatabaseConfig, PackageConfigBase, RefTo
+from oa_configurator import CDMDatabaseConfig, PackageConfigBase, RefTo, register_reserved_schema
 from pydantic import Field
+
+from .backends.base import STAGING_SCHEMA
+# Guaranteed to be imported and registered if there is a config
+register_reserved_schema(STAGING_SCHEMA, owner="orm-loader")
 
 
 class OrmLoaderConfig(PackageConfigBase):

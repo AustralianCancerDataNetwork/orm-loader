@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Type, Any
 
 import sqlalchemy as sa
 import sqlalchemy.orm as so
-from oa_configurator import register_reserved_schema
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.sql.compiler import IdentifierPreparer
 
@@ -41,8 +40,6 @@ class Dialect(str, Enum):
 
 
 STAGING_SCHEMA: str = "staging"
-
-register_reserved_schema(STAGING_SCHEMA, owner="orm-loader")
 
 
 class DatabaseBackend(ABC):
