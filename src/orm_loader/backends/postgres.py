@@ -6,11 +6,11 @@ from typing import TYPE_CHECKING, Any
 import sqlalchemy as sa
 import sqlalchemy.event as sae
 import sqlalchemy.orm as so
-from oa_configurator import autocommit_connection, qualified, schema_of
+from oa_configurator import autocommit_connection, qualified, schema_of, Dialect
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.sql.compiler import IdentifierPreparer
 
-from .base import BackendCapabilities, DatabaseBackend, Dialect
+from .base import BackendCapabilities, DatabaseBackend
 
 if TYPE_CHECKING:
     from sqlalchemy.engine import Connection, Engine

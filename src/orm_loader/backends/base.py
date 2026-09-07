@@ -3,7 +3,6 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass
-from enum import Enum
 from collections.abc import Generator
 from typing import TYPE_CHECKING, Type, Any
 
@@ -11,6 +10,8 @@ import sqlalchemy as sa
 import sqlalchemy.orm as so
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.sql.compiler import IdentifierPreparer
+
+from oa_configurator import Dialect
 
 if TYPE_CHECKING:
     from ..loaders.data_classes import LoaderContext
@@ -30,13 +31,6 @@ class BackendCapabilities:
     supports_unlogged_staging: bool = False
     supports_fk_toggle: bool = False
     supports_materialized_views: bool = False
-
-
-class Dialect(str, Enum):
-    """Supported SQLAlchemy dialect names."""
-
-    SQLITE = "sqlite"
-    POSTGRESQL = "postgresql"
 
 
 STAGING_SCHEMA: str = "staging"

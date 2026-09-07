@@ -81,7 +81,7 @@ class SQLiteBackend(DatabaseBackend):
 
     @property
     def name(self) -> str:
-        return "sqlite"
+        return Dialect.SQLITE
 
     @property
     def dialect(self) -> Dialect:
@@ -320,7 +320,7 @@ class SQLiteBackend(DatabaseBackend):
         raise_error: bool = True,
     ) -> None:
         bind: Engine | Connection = session.get_bind()
-        if bind.dialect.name != "sqlite":
+        if bind.dialect.name != Dialect.SQLITE:
             raise exc
 
         with self._as_connection(bind) as conn:
