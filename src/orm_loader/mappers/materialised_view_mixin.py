@@ -3,6 +3,7 @@ from sqlalchemy.schema import DDLElement
 import sqlalchemy as sa
 from typing import Any
 from collections import defaultdict, deque
+from oa_configurator import Role
 from ..backends.resolve import resolve_backend
 
 class CreateMaterializedView(DDLElement):
@@ -162,7 +163,9 @@ class MaterializedViewMixin:
     __mv_dependencies__: set[str] = set()
 
     @classmethod
-    def create_mv(cls, bind: "sa.engine.Connection | sa.engine.Engine") -> None:
+    def create_mv(
+        cls, bind: "sa.engine.Connection | sa.engine.Engine", *, role: Role = Role.PRIMARY
+    ) -> None:
         """
         Create the materialized view if it does not already exist.
 
@@ -170,6 +173,12 @@ class MaterializedViewMixin:
         ----------
         bind
             A SQLAlchemy Engine or Connection used to execute the DDL.
+        role
+            Schema role the view's own physical schema resolves through
+            (defaults to primary). Set this to the role of the tables
+            ``__mv_select__`` reads from when it's a vocab/results view,
+            not primary -- otherwise the view always lands in the primary
+            schema regardless of what it was actually built over.
 
         Notes
         -----
@@ -202,10 +211,12 @@ class MaterializedViewMixin:
         ```
         """
         backend = resolve_backend(bind)
-        backend.create_materialized_view(bind, cls.__mv_name__, cls.__mv_select__)
+        backend.create_materialized_view(bind, cls.__mv_name__, cls.__mv_select__, role=role)
 
     @classmethod
-    def refresh_mv(cls, bind: "sa.engine.Connection | sa.engine.Engine") -> None:
+    def refresh_mv(
+        cls, bind: "sa.engine.Connection | sa.engine.Engine", *, role: Role = Role.PRIMARY
+    ) -> None:
         """
         Refresh the contents of the materialized view.
 
@@ -213,6 +224,9 @@ class MaterializedViewMixin:
         ----------
         bind
             A SQLAlchemy Engine or Connection used to execute the refresh.
+        role
+            Schema role the view's own physical schema resolves through;
+            see :meth:`create_mv` for when to override the default.
 
         Notes
         -----
@@ -228,7 +242,7 @@ class MaterializedViewMixin:
         ```
         """
         backend = resolve_backend(bind)
-        backend.refresh_materialized_view(bind, cls.__mv_name__)
+        backend.refresh_materialized_view(bind, cls.__mv_name__, role=role)
         
 
 def resolve_mv_refresh_order(mv_classes: list[type[MaterializedViewMixin]]) -> list[type]:

@@ -2,7 +2,9 @@
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 import logging
-from oa_configurator import schema_inspect, schema_of
+from oa_configurator import schema_inspect
+
+from ..helpers.sql import role_of_table
 from sqlalchemy.exc import InvalidRequestError, UnboundExecutionError
 
 from typing import Type, Any, Iterator
@@ -121,7 +123,7 @@ class CSVLoadableTableInterface(ORMTableBase):
         table_name = cls.__tablename__
 
         indices = list(cls.__table__.indexes) if resolved_index_strategy == "drop_rebuild" else []
-        inspector = schema_inspect(session)
+        inspector = schema_inspect(session, role=role_of_table(cls.__table__))
 
         if indices:
             existing_in_db = {idx['name'] for idx in inspector.get_indexes(cls.__tablename__)}
@@ -417,10 +419,7 @@ class CSVLoadableTableInterface(ORMTableBase):
                 f"Table `{cls.__tablename__}`: Checking whether target table is empty before staging load."
             )
             check_started = perf_counter()
-            has_rows = cls._target_has_rows(
-                session=session,
-                target=cls.__tablename__,
-            )
+            has_rows = cls._target_has_rows(session=session)
             logger.info(
                 f"Table `{cls.__tablename__}`: Pre-load empty-table check completed in "
                 f"{_format_elapsed(perf_counter() - check_started)}."
@@ -471,21 +470,12 @@ class CSVLoadableTableInterface(ORMTableBase):
     def _target_has_rows(
         cls: Type[CSVTableProtocol],
         session: so.Session,
-        target: str,
     ) -> bool:
         """
         Return whether the target table currently contains any rows.
         """
-        table = cls.__table__
-        if target not in {table.name, table.fullname}:
-            table = sa.Table(
-                target,
-                sa.MetaData(),
-                autoload_with=session.get_bind(),
-                schema=schema_of(session),
-            )
         row = session.execute(
-             sa.select(sa.literal(1)).select_from(table).limit(1)
+             sa.select(sa.literal(1)).select_from(cls.__table__).limit(1)
         ).first()
         return row is not None
 
@@ -524,10 +514,7 @@ class CSVLoadableTableInterface(ORMTableBase):
                 f"Table `{target}`: Checking whether target table is empty for merge optimisation."
             )
             check_started = perf_counter()
-            has_rows = cls._target_has_rows(
-                session=session,
-                target=target,
-            )
+            has_rows = cls._target_has_rows(session=session)
             logger.info(
                 f"Table `{target}`: Empty-table optimisation check completed in "
                 f"{_format_elapsed(perf_counter() - check_started)}."
@@ -567,10 +554,7 @@ class CSVLoadableTableInterface(ORMTableBase):
             if not target_empty_confirmed:
                 logger.info(f"Table `{target}`: Checking whether target table is empty.")
                 check_started = perf_counter()
-                has_rows = cls._target_has_rows(
-                    session=session,
-                    target=target,
-                )
+                has_rows = cls._target_has_rows(session=session)
                 logger.info(
                     f"Table `{target}`: Empty-table check completed in "
                     f"{_format_elapsed(perf_counter() - check_started)}."

@@ -11,7 +11,7 @@ import sqlalchemy.orm as so
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.sql.compiler import IdentifierPreparer
 
-from oa_configurator import Dialect
+from oa_configurator import Dialect, Role
 
 if TYPE_CHECKING:
     from ..loaders.data_classes import LoaderContext
@@ -307,12 +307,14 @@ class DatabaseBackend(ABC):
         name: str,
         selectable: sa.sql.Select[Any],
         *,
-        schema: str | None = None,
+        role: Role = Role.PRIMARY,
     ) -> None:
         """Create a materialized view for the supplied selectable.
 
-        *schema* defaults to the bind's own ``schema_translate_map`` (via
-        ``oa_configurator.schema_of``) when not given explicitly.
+        The view's schema is the bind's own ``schema_translate_map`` entry
+        for *role* (via ``oa_configurator.schema_of``), letting a view
+        built over vocab/results-role tables land in that role's own
+        schema instead of always primary.
         """
 
     @abstractmethod
@@ -321,10 +323,12 @@ class DatabaseBackend(ABC):
         bind: "Engine | Connection",
         name: str,
         *,
-        schema: str | None = None,
+        role: Role = Role.PRIMARY,
     ) -> None:
         """Refresh a materialized view.
 
-        *schema* defaults to the bind's own ``schema_translate_map`` (via
-        ``oa_configurator.schema_of``) when not given explicitly.
+        The view's schema is the bind's own ``schema_translate_map`` entry
+        for *role* (via ``oa_configurator.schema_of``), letting a view
+        built over vocab/results-role tables land in that role's own
+        schema instead of always primary.
         """

@@ -8,6 +8,8 @@ import sqlalchemy.orm as so
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import Engine
 
+from oa_configurator import Role
+from oa_configurator.testing import isolated_test_schema
 from orm_loader.backends import STAGING_SCHEMA, Dialect, PostgresBackend
 from orm_loader.helpers.sql import qualify_identifier
 from tests.models import ComputedColumnTable
@@ -130,6 +132,33 @@ def test_postgres_backend_materialized_view_methods_work_end_to_end(pg_db):
     backend.refresh_materialized_view(conn, "mv_test")
 
     assert conn.execute(sa.text("SELECT n FROM mv_test")).scalar() == 1
+
+
+def test_postgres_backend_materialized_view_respects_role(pg_db) -> None:
+    """create_materialized_view()/refresh_materialized_view() used to always
+    resolve schema=None -> schema_of(conn) with no role, which defaults to
+    Role.PRIMARY regardless of what role the view was actually built over.
+    A view over vocab-role tables must land in the vocab schema, not
+    wherever primary happens to be."""
+    backend = PostgresBackend()
+    selectable = sa.select(sa.literal(1).label("n"))
+    engine = pg_db.connection.engine
+
+    with isolated_test_schema(engine, prefix="mv_primary") as primary_schema, \
+         isolated_test_schema(engine, prefix="mv_vocab") as vocab_schema:
+        scoped = engine.execution_options(
+            schema_translate_map={Role.PRIMARY.value: primary_schema, "vocab": vocab_schema}
+        )
+        with scoped.begin() as conn:
+            backend.create_materialized_view(conn, "mv_role_test", selectable, role=Role.VOCAB)
+            backend.refresh_materialized_view(conn, "mv_role_test", role=Role.VOCAB)
+
+        with engine.connect() as conn:
+            assert sa.inspect(conn).has_table("mv_role_test", schema=vocab_schema)
+            assert not sa.inspect(conn).has_table("mv_role_test", schema=primary_schema)
+            assert conn.execute(
+                sa.text(f'SELECT n FROM "{vocab_schema}".mv_role_test')
+            ).scalar() == 1
 
 
 def test_postgres_backend_normalize_fk_check_state():

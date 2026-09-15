@@ -6,7 +6,8 @@ from typing import TYPE_CHECKING, Any
 import sqlalchemy as sa
 import sqlalchemy.event as sae
 import sqlalchemy.orm as so
-from oa_configurator import autocommit_connection, qualified, schema_of, Dialect
+from oa_configurator import autocommit_connection, qualified, Dialect, Role
+from ..helpers.sql import role_of_table
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.sql.compiler import IdentifierPreparer
 
@@ -58,7 +59,7 @@ class PostgresBackend(DatabaseBackend):
         table = table_cls.__table__
         preparer = self.identifier_preparer
         staging_ref = self.qualified_staging_name(table_cls.__tablename__)
-        source_ref = qualified(session, table.name)
+        source_ref = qualified(session, table.name, role=role_of_table(table))
         session.execute(sa.text(f'DROP TABLE IF EXISTS {staging_ref};'))
         session.execute(
             sa.text(
@@ -284,13 +285,12 @@ class PostgresBackend(DatabaseBackend):
         name: str,
         selectable: sa.sql.Select[Any],
         *,
-        schema: str | None = None,
+        role: Role = Role.PRIMARY,
     ) -> None:
         from ..mappers.materialised_view_mixin import CreateMaterializedView
 
         with self._as_connection(bind) as conn:
-            effective_schema = schema if schema is not None else schema_of(conn)
-            qualified_name = qualified(conn, name, schema=effective_schema)
+            qualified_name = qualified(conn, name, role=role)
             conn.execute(CreateMaterializedView(qualified_name, selectable))
 
     def refresh_materialized_view(
@@ -298,11 +298,10 @@ class PostgresBackend(DatabaseBackend):
         bind: Engine | Connection,
         name: str,
         *,
-        schema: str | None = None,
+        role: Role = Role.PRIMARY,
     ) -> None:
         with self._as_connection(bind) as conn:
-            effective_schema = schema if schema is not None else schema_of(conn)
-            safe_name = qualified(conn, name, schema=effective_schema)
+            safe_name = qualified(conn, name, role=role)
             conn.execute(sa.text(f"REFRESH MATERIALIZED VIEW {safe_name};"))
 
     @contextmanager

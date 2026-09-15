@@ -13,6 +13,8 @@ from sqlalchemy.dialects import sqlite as sqlite_dialect
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql.compiler import IdentifierPreparer
 
+from oa_configurator import Role
+
 from .base import BackendCapabilities, DatabaseBackend, Dialect
 
 if TYPE_CHECKING:
@@ -281,7 +283,7 @@ class SQLiteBackend(DatabaseBackend):
         name: str,
         selectable: sa.sql.Select[Any],
         *,
-        schema: str | None = None,
+        role: Role = Role.PRIMARY,
     ) -> None:
         self._require_capability("supports_materialized_views", "materialized views")
 
@@ -290,7 +292,7 @@ class SQLiteBackend(DatabaseBackend):
         bind: "Engine | Connection",
         name: str,
         *,
-        schema: str | None = None,
+        role: Role = Role.PRIMARY,
     ) -> None:
         self._require_capability("supports_materialized_views", "materialized views")
 
