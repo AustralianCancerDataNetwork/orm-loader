@@ -94,3 +94,19 @@ class ImpliedEnumTable(Base, CSVLoadableTableInterface):
 
     id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     flag: so.Mapped[str | None] = so.mapped_column(sa.String(1), nullable=True)
+
+
+class VocabRoleTable(Base, CSVLoadableTableInterface):
+    """A VOCAB-tagged table, so tests can prove the staging/index role
+    derivation (role_of_table(), threaded through create_staging_table()/
+    manage_indices()) actually resolves a non-primary role correctly,
+    instead of only ever exercising the PRIMARY-tagged default."""
+
+    __tablename__ = "test_vocab_role_table"
+    __table_args__ = (
+        sa.Index("ix_test_vocab_role_table_name", "name"),
+        {"schema": SchemaRole.VOCAB.value},
+    )
+
+    id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
+    name: so.Mapped[str] = so.mapped_column(sa.String, nullable=False)

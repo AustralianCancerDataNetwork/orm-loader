@@ -29,7 +29,7 @@ from oa_configurator import Role as SchemaRole
 from orm_loader.backends import STAGING_SCHEMA
 from orm_loader.loaders.loader_interface import PandasLoader
 
-from tests.models import SimpleTable
+from tests.models import SimpleTable, VocabRoleTable
 
 
 def test_load_csv_respects_non_default_schema_end_to_end(pg_db, tmp_path):
@@ -110,3 +110,45 @@ def test_replace_merge_respects_non_default_schema_end_to_end(pg_db, tmp_path):
         sa.text(f'SELECT id, name FROM "{schema}"."test_table" ORDER BY id')
     ).fetchall()
     assert rows == [(1, "alpha-updated"), (2, "beta")]
+
+
+def test_load_csv_respects_non_primary_role_end_to_end(pg_db, tmp_path):
+    """Checks if the derivation of the role from the table's own
+    __table_role__ attribute works correctly for each role."""
+    primary_schema = f"test_primary_{uuid.uuid4().hex[:8]}"
+    vocab_schema = f"test_vocab_{uuid.uuid4().hex[:8]}"
+    conn = pg_db.connection
+    ensure_schema(conn, primary_schema)
+    ensure_schema(conn, vocab_schema)
+    ensure_schema(conn, STAGING_SCHEMA)
+
+    scoped_conn = conn.execution_options(
+        schema_translate_map={
+            SchemaRole.PRIMARY.value: primary_schema,
+            SchemaRole.VOCAB.value: vocab_schema,
+        }
+    )
+    session = so.Session(bind=scoped_conn)
+    VocabRoleTable.__table__.create(scoped_conn, checkfirst=True)
+
+    csv_path = tmp_path / "test_vocab_role_table.csv"
+    pd.DataFrame([{"id": 1, "name": "alpha"}, {"id": 2, "name": "beta"}]).to_csv(
+        csv_path, index=False, sep="\t"
+    )
+
+    inserted = VocabRoleTable.load_csv(
+        session, csv_path, dedupe=False, loader=PandasLoader(), staging_schema=STAGING_SCHEMA
+    )
+    session.commit()
+
+    assert inserted == 2
+
+    rows = conn.execute(
+        sa.text(f'SELECT id, name FROM "{vocab_schema}"."test_vocab_role_table" ORDER BY id')
+    ).fetchall()
+    assert rows == [(1, "alpha"), (2, "beta")]
+
+    leaked = conn.execute(
+        sa.text(f"SELECT to_regclass('{primary_schema}.test_vocab_role_table')")
+    ).scalar()
+    assert leaked is None

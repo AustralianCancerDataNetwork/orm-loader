@@ -12,6 +12,7 @@ import sqlalchemy as sa
 import sqlalchemy.orm as so
 from sqlalchemy.engine import Connection, Engine
 
+from oa_configurator import Role
 from orm_loader.backends import (
     BackendCapabilities,
     DatabaseBackend,
@@ -123,11 +124,18 @@ class FakeBackend(DatabaseBackend):
         self.calls.append(("restore_fk_check", previous_state))
 
     def create_materialized_view(
-        self, bind: Engine | Connection, name: str, selectable: sa.sql.Select[Any]
+        self,
+        bind: Engine | Connection,
+        name: str,
+        selectable: sa.sql.Select[Any],
+        *,
+        role: Role = Role.PRIMARY,
     ) -> None:
         return None
 
-    def refresh_materialized_view(self, bind: Engine | Connection, name: str) -> None:
+    def refresh_materialized_view(
+        self, bind: Engine | Connection, name: str, *, role: Role = Role.PRIMARY
+    ) -> None:
         return None
 
 

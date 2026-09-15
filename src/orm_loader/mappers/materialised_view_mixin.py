@@ -1,3 +1,4 @@
+from docutils.parsers.rst.languages.cs import roles
 from sqlalchemy.ext import compiler
 from sqlalchemy.schema import DDLElement
 import sqlalchemy as sa
@@ -68,6 +69,9 @@ class MaterializedViewMixin:
     - ``__mv_name__``: the name of the materialized view
     - ``__mv_select__``: a SQLAlchemy Select defining the view contents
     - optionally, ``__mv_dependencies__``: names of tables or materialized views this MV depends on
+    - optionally, ``__mv_role__``: the schema role the view itself lives under
+      (defaults to primary); set this on a vocab/results view so
+      :func:`refresh_all_mvs` resolves it to the right schema
 
     This mixin does not define ORM mappings; it is intended for schema-level
     helpers used during migrations, setup, or administrative workflows.
@@ -161,10 +165,14 @@ class MaterializedViewMixin:
     __mv_name__: str
     __mv_select__: sa.sql.Select[Any]
     __mv_dependencies__: set[str] = set()
+    __mv_role__: Role = Role.PRIMARY
 
     @classmethod
     def create_mv(
-        cls, bind: "sa.engine.Connection | sa.engine.Engine", *, role: Role = Role.PRIMARY
+        cls, 
+        bind: "sa.engine.Connection | sa.engine.Engine", 
+        *, 
+        role: Role | None = None
     ) -> None:
         """
         Create the materialized view if it does not already exist.
@@ -174,11 +182,11 @@ class MaterializedViewMixin:
         bind
             A SQLAlchemy Engine or Connection used to execute the DDL.
         role
-            Schema role the view's own physical schema resolves through
-            (defaults to primary). Set this to the role of the tables
-            ``__mv_select__`` reads from when it's a vocab/results view,
-            not primary -- otherwise the view always lands in the primary
-            schema regardless of what it was actually built over.
+            Schema role the view's own physical schema resolves through.
+            Defaults to ``cls.__mv_role__``when omitted. 
+            Set ``__mv_role__`` on a vocab/results view to ensure it resolves
+            to the correct schema and can be refreshed by :func:`refresh_all_mvs` 
+            without caller needing to know the role.
 
         Notes
         -----
@@ -211,11 +219,14 @@ class MaterializedViewMixin:
         ```
         """
         backend = resolve_backend(bind)
-        backend.create_materialized_view(bind, cls.__mv_name__, cls.__mv_select__, role=role)
+        role_ = role if role is not None else cls.__mv_role__
+        backend.create_materialized_view(
+            bind, cls.__mv_name__, cls.__mv_select__, role=role_
+        )
 
     @classmethod
     def refresh_mv(
-        cls, bind: "sa.engine.Connection | sa.engine.Engine", *, role: Role = Role.PRIMARY
+        cls, bind: "sa.engine.Connection | sa.engine.Engine", *, role: Role | None = None
     ) -> None:
         """
         Refresh the contents of the materialized view.
@@ -242,7 +253,10 @@ class MaterializedViewMixin:
         ```
         """
         backend = resolve_backend(bind)
-        backend.refresh_materialized_view(bind, cls.__mv_name__, role=role)
+        role_ = role if role is not None else cls.__mv_role__
+        backend.refresh_materialized_view(
+            bind, cls.__mv_name__, role=role_
+        )
         
 
 def resolve_mv_refresh_order(mv_classes: list[type[MaterializedViewMixin]]) -> list[type]:
