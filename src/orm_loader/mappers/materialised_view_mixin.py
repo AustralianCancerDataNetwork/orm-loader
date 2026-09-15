@@ -1,4 +1,3 @@
-from docutils.parsers.rst.languages.cs import roles
 from sqlalchemy.ext import compiler
 from sqlalchemy.schema import DDLElement
 import sqlalchemy as sa
