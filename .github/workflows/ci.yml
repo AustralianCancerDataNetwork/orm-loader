@@ -22,4 +22,4 @@ jobs:
           --set test_orm_db_pg.connection.password=test \
           --set test_orm_db_pg.connection.database_name=orm_loader_test \
           --set test_orm_db_pg.connection.test_only=true \
-          --set test_orm_db_pg.schema_name=public
+          --set test_orm_db_pg.cdm_schema=public
