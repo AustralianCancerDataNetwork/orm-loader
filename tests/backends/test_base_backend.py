@@ -130,11 +130,19 @@ class FakeBackend(DatabaseBackend):
         selectable: sa.sql.Select[Any],
         *,
         role: Role = Role.PRIMARY,
+        with_data: bool = True,
+        if_not_exists: bool = True,
     ) -> None:
         return None
 
     def refresh_materialized_view(
-        self, bind: Engine | Connection, name: str, *, role: Role = Role.PRIMARY
+        self,
+        bind: Engine | Connection,
+        name: str,
+        *,
+        role: Role = Role.PRIMARY,
+        concurrently: bool = False,
+        declared_indexes: tuple = (),
     ) -> None:
         return None
 
@@ -293,6 +301,55 @@ def test_resolve_backend_raises_for_unknown_dialect():
 
     with pytest.raises(NotImplementedError, match="Unsupported SQLAlchemy dialect"):
         resolve_backend(cast(Engine, _Unknown()))
+
+
+def test_unsupported_fake_backend_inherits_default_materialized_view_guards():
+    backend = FakeBackend()
+
+    with pytest.raises(NotImplementedError, match="does not support materialized views"):
+        backend.drop_materialized_view(cast(Engine, None), "mv_test")
+
+    with pytest.raises(NotImplementedError, match="does not support materialized views"):
+        backend.create_materialized_view_index(cast(Engine, None), "mv_test", cast(Any, None))
+
+
+def test_capable_backend_inheriting_default_materialized_view_methods_fails_loudly():
+    class CapableBackend(FakeBackend):
+        create_materialized_view = DatabaseBackend.create_materialized_view
+        refresh_materialized_view = DatabaseBackend.refresh_materialized_view
+
+        @property
+        def capabilities(self) -> BackendCapabilities:
+            return BackendCapabilities(
+                supports_fast_load=True,
+                supports_fk_toggle=True,
+                supports_materialized_views=True,
+            )
+
+    backend = CapableBackend()
+
+    with pytest.raises(NotImplementedError, match="has not implemented drop_materialized_view"):
+        backend.drop_materialized_view(cast(Engine, None), "mv_test")
+
+    with pytest.raises(
+        NotImplementedError,
+        match="has not implemented create_materialized_view",
+    ):
+        backend.create_materialized_view(
+            cast(Engine, None), "mv_test", cast(Any, None)
+        )
+
+    with pytest.raises(
+        NotImplementedError,
+        match="has not implemented refresh_materialized_view",
+    ):
+        backend.refresh_materialized_view(cast(Engine, None), "mv_test")
+
+    with pytest.raises(
+        NotImplementedError,
+        match="has not implemented create_materialized_view_index",
+    ):
+        backend.create_materialized_view_index(cast(Engine, None), "mv_test", cast(Any, None))
 
 
 def test_backends_import_does_not_require_psycopg():

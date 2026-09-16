@@ -3,12 +3,13 @@ from __future__ import annotations
 import sqlalchemy.event as sae
 from typing import TYPE_CHECKING, Type, cast
 
+import pytest
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import Engine
 
-from oa_configurator import Role
+from oa_configurator import SCHEMA_TRANSLATE_MAP_KEY, Role
 from oa_configurator.testing import isolated_test_schema
 from orm_loader.backends import STAGING_SCHEMA, Dialect, PostgresBackend
 from orm_loader.helpers.sql import qualify_identifier
@@ -27,10 +28,27 @@ if TYPE_CHECKING:
 
 
 class _FakeSession:
-    def __init__(self, scalar_result: str | int = "origin") -> None:
+    dialect = postgresql.dialect()
+
+    def __init__(
+        self,
+        scalar_result: str | int | bool = "origin",
+        *,
+        raise_on_execute: Exception | None = None,
+        schema_translate_map: dict[str, str | None] | None = None,
+    ) -> None:
         self.statements: list[str] = []
         self.scalar_result = scalar_result
+        self.raise_on_execute = raise_on_execute
         self.commits = 0
+        self._schema_translate_map = schema_translate_map
+
+    def get_execution_options(self) -> dict:
+        """Minimal support for oa_configurator.schema_of(), which every
+        materialized-view backend method resolves its target schema through."""
+        if self._schema_translate_map is None:
+            return {}
+        return {SCHEMA_TRANSLATE_MAP_KEY: self._schema_translate_map}
 
     def execute(self, statement, parameters=None):
         if hasattr(statement, "compile"):
@@ -38,6 +56,8 @@ class _FakeSession:
         else:
             sql = str(statement)
         self.statements.append(sql)
+        if self.raise_on_execute is not None:
+            raise self.raise_on_execute
 
         class _Result:
             def __init__(self, value):
@@ -159,6 +179,342 @@ def test_postgres_backend_materialized_view_respects_role(pg_db) -> None:
             assert conn.execute(
                 sa.text(f'SELECT n FROM "{vocab_schema}".mv_role_test')
             ).scalar() == 1
+
+
+def test_postgres_backend_materialized_view_methods_emit_expected_sql():
+    backend = PostgresBackend()
+    session = _FakeSession()
+    selectable = sa.select(sa.literal(1).label("n"))
+
+    backend.create_materialized_view(_sess(session), "mv_test", selectable)
+    backend.refresh_materialized_view(_sess(session), "mv_test")
+
+    assert any('CREATE MATERIALIZED VIEW IF NOT EXISTS mv_test as SELECT' in sql for sql in session.statements)
+    assert any('REFRESH MATERIALIZED VIEW mv_test;' == sql for sql in session.statements)
+
+
+def test_postgres_backend_quotes_unqualified_materialized_view_name():
+    from orm_loader.mappers.materialised_view_contracts import MaterializedViewIndex
+
+    backend = PostgresBackend()
+    session = _FakeSession()
+    selectable = sa.select(sa.literal(1).label("n"))
+
+    backend.create_materialized_view(_sess(session), 'mv name', selectable)
+    backend.create_materialized_view_index(
+        _sess(session), 'mv name', MaterializedViewIndex(name="mv_name_idx", columns=("n",))
+    )
+
+    assert any('CREATE MATERIALIZED VIEW IF NOT EXISTS "mv name" as SELECT' in sql for sql in session.statements)
+    assert any('ON "mv name" ("n")' in sql for sql in session.statements)
+
+
+def test_postgres_backend_create_materialized_view_rejects_non_postgres_connection():
+    from orm_loader.mappers.materialised_view_errors import (
+        UnsupportedMaterializationDialectError,
+    )
+    from sqlalchemy.dialects import sqlite
+
+    backend = PostgresBackend()
+    session = _FakeSession()
+    session.dialect = sqlite.dialect()
+    selectable = sa.select(sa.literal(1).label("n"))
+
+    with pytest.raises(UnsupportedMaterializationDialectError, match="received dialect 'sqlite'"):
+        backend.create_materialized_view(_sess(session), "mv_test", selectable)
+
+    assert session.statements == []
+
+
+def test_postgres_backend_refresh_materialized_view_rejects_non_postgres_connection():
+    from orm_loader.mappers.materialised_view_errors import (
+        UnsupportedMaterializationDialectError,
+    )
+    from sqlalchemy.dialects import sqlite
+
+    backend = PostgresBackend()
+    session = _FakeSession()
+    session.dialect = sqlite.dialect()
+
+    with pytest.raises(UnsupportedMaterializationDialectError, match="received dialect 'sqlite'"):
+        backend.refresh_materialized_view(_sess(session), "mv_test")
+
+    assert session.statements == []
+
+
+def test_postgres_backend_create_mv_quotes_name_for_legacy_search_path_resolution():
+    backend = PostgresBackend()
+    session = _FakeSession()
+    backend.create_materialized_view(
+        _sess(session), "MixedCaseMv", sa.select(sa.literal(1).label("n"))
+    )
+
+    assert any(
+        'CREATE MATERIALIZED VIEW IF NOT EXISTS "MixedCaseMv" as SELECT' in sql
+        for sql in session.statements
+    )
+
+
+def test_postgres_backend_create_materialized_view_index_emits_expected_sql():
+    from orm_loader.mappers.materialised_view_contracts import MaterializedViewIndex
+
+    backend = PostgresBackend()
+    session = _FakeSession(schema_translate_map={Role.PRIMARY.value: "reporting"})
+    index = MaterializedViewIndex(name="mv_test_row_id_uq", columns=("row_id",), unique=True)
+
+    backend.create_materialized_view_index(_sess(session), "mv_test", index)
+
+    assert session.statements == [
+        'CREATE UNIQUE INDEX IF NOT EXISTS "mv_test_row_id_uq" ON reporting.mv_test ("row_id")'
+    ]
+
+
+def test_postgres_backend_create_materialized_view_index_failure_mentions_index_name():
+    from orm_loader.mappers.materialised_view_errors import MaterializationError
+    from orm_loader.mappers.materialised_view_contracts import MaterializedViewIndex
+
+    original = RuntimeError("boom")
+    backend = PostgresBackend()
+    session = _FakeSession(raise_on_execute=original)
+    index = MaterializedViewIndex(name="mv_test_row_id_uq", columns=("row_id",))
+
+    with pytest.raises(MaterializationError, match="mv_test_row_id_uq"):
+        backend.create_materialized_view_index(_sess(session), "mv_test", index)
+
+
+def test_postgres_backend_drop_materialized_view_default_args():
+    backend = PostgresBackend()
+    session = _FakeSession(schema_translate_map={Role.PRIMARY.value: "reporting"})
+
+    backend.drop_materialized_view(_sess(session), "mv_test")
+
+    assert session.statements == ['DROP MATERIALIZED VIEW IF EXISTS reporting.mv_test']
+
+
+def test_postgres_backend_drop_materialized_view_cascade_and_if_exists_false():
+    backend = PostgresBackend()
+    session = _FakeSession(schema_translate_map={Role.PRIMARY.value: "reporting"})
+
+    backend.drop_materialized_view(_sess(session), "mv_test", if_exists=False, cascade=True)
+
+    assert session.statements == ['DROP MATERIALIZED VIEW reporting.mv_test CASCADE']
+
+
+def test_postgres_backend_drop_materialized_view_failure_preserves_cause():
+    from orm_loader.mappers.materialised_view_errors import MaterializationError, MaterializationOperation
+
+    original = RuntimeError("boom")
+    backend = PostgresBackend()
+    session = _FakeSession(
+        raise_on_execute=original, schema_translate_map={Role.PRIMARY.value: "reporting"}
+    )
+
+    with pytest.raises(MaterializationError) as exc_info:
+        backend.drop_materialized_view(_sess(session), "mv_test")
+
+    assert exc_info.value.__cause__ is original
+    assert exc_info.value.failure.cause is original
+    assert exc_info.value.failure.operation is MaterializationOperation.DROP
+
+
+def test_postgres_backend_create_materialized_view_failure_preserves_cause():
+    from orm_loader.mappers.materialised_view_errors import MaterializationError, MaterializationOperation
+
+    original = RuntimeError("boom")
+    backend = PostgresBackend()
+    session = _FakeSession(raise_on_execute=original)
+
+    with pytest.raises(MaterializationError) as exc_info:
+        backend.create_materialized_view(
+            _sess(session), "mv_test", sa.select(sa.literal(1).label("n"))
+        )
+
+    assert exc_info.value.__cause__ is original
+    assert exc_info.value.failure.cause is original
+    assert exc_info.value.failure.operation is MaterializationOperation.CREATE
+
+
+def test_postgres_backend_refresh_concurrently_without_declared_unique_index_raises_before_executing():
+    from orm_loader.mappers.materialised_view_errors import ConcurrentRefreshNotEligibleError
+
+    backend = PostgresBackend()
+    session = _FakeSession(schema_translate_map={Role.PRIMARY.value: "reporting"})
+
+    with pytest.raises(ConcurrentRefreshNotEligibleError, match="no simple unique index"):
+        backend.refresh_materialized_view(_sess(session), "mv_test", concurrently=True)
+
+    assert session.statements == []
+
+
+def test_postgres_backend_refresh_concurrently_declared_but_database_rejects_it_translates_error():
+    psycopg = pytest.importorskip("psycopg")
+
+    from orm_loader.mappers.materialised_view_errors import ConcurrentRefreshNotEligibleError
+    from orm_loader.mappers.materialised_view_contracts import MaterializedViewIndex
+
+    orig = psycopg.errors.ObjectNotInPrerequisiteState(
+        'cannot refresh materialized view "reporting.mv_test" concurrently\n'
+        "HINT:  Create a unique index with no WHERE clause on one or more "
+        "columns of the materialized view."
+    )
+    backend = PostgresBackend()
+    session = _FakeSession(
+        raise_on_execute=sa.exc.OperationalError("REFRESH ...", {}, orig),
+        schema_translate_map={Role.PRIMARY.value: "reporting"},
+    )
+    index = MaterializedViewIndex(name="mv_test_row_id_uq", columns=("row_id",), unique=True)
+
+    with pytest.raises(ConcurrentRefreshNotEligibleError, match="cannot refresh") as exc_info:
+        backend.refresh_materialized_view(
+            _sess(session),
+            "mv_test",
+            concurrently=True,
+            declared_indexes=(index,),
+        )
+
+    assert exc_info.value.failure.cause.orig is orig
+    assert session.statements == [
+        'REFRESH MATERIALIZED VIEW CONCURRENTLY reporting.mv_test;'
+    ]
+
+
+def test_postgres_backend_refresh_concurrently_unrelated_operational_error_propagates_unchanged():
+    psycopg = pytest.importorskip("psycopg")
+
+    from orm_loader.mappers.materialised_view_contracts import MaterializedViewIndex
+
+    orig = psycopg.errors.QueryCanceled("canceling statement due to statement timeout")
+    backend = PostgresBackend()
+    session = _FakeSession(
+        raise_on_execute=sa.exc.OperationalError("REFRESH ...", {}, orig),
+        schema_translate_map={Role.PRIMARY.value: "reporting"},
+    )
+    index = MaterializedViewIndex(name="mv_test_row_id_uq", columns=("row_id",), unique=True)
+
+    with pytest.raises(sa.exc.OperationalError) as exc_info:
+        backend.refresh_materialized_view(
+            _sess(session),
+            "mv_test",
+            concurrently=True,
+            declared_indexes=(index,),
+        )
+
+    assert exc_info.value.orig is orig
+
+
+def test_postgres_backend_refresh_concurrently_with_declared_index_emits_concurrently():
+    from orm_loader.mappers.materialised_view_contracts import MaterializedViewIndex
+
+    backend = PostgresBackend()
+    session = _FakeSession(schema_translate_map={Role.PRIMARY.value: "reporting"})
+    index = MaterializedViewIndex(name="mv_test_row_id_uq", columns=("row_id",), unique=True)
+
+    backend.refresh_materialized_view(
+        _sess(session),
+        "mv_test",
+        concurrently=True,
+        declared_indexes=(index,),
+    )
+
+    assert session.statements[-1] == (
+        'REFRESH MATERIALIZED VIEW CONCURRENTLY reporting.mv_test;'
+    )
+
+
+def test_postgres_backend_materialized_view_lifecycle_is_schema_isolated_with_adversarial_identifiers(
+    pg_db,
+):
+    """Two schemas, each addressed via its own scoped connection (role-based
+    resolution ties the schema to the connection, not to a per-call
+    override), must never bleed into each other even with adversarial,
+    quote-laden identifiers."""
+    from orm_loader.mappers.materialised_view_contracts import MaterializedViewIndex
+
+    backend = PostgresBackend()
+    left_schema, right_schema = 'mv "left" schema', 'mv "right" schema'
+    name = 'shared "view" name'
+    index = MaterializedViewIndex(name="shared_name_row_id_uq", columns=("row_id",), unique=True)
+    selectable = sa.select(sa.literal(1).label("row_id"))
+    engine = pg_db.connection.engine
+    preparer = postgresql.dialect().identifier_preparer
+
+    try:
+        with engine.begin() as setup_conn:
+            for schema in (left_schema, right_schema):
+                setup_conn.execute(sa.text(f"CREATE SCHEMA {preparer.quote_identifier(schema)}"))
+
+        left = engine.execution_options(schema_translate_map={Role.PRIMARY.value: left_schema})
+        right = engine.execution_options(schema_translate_map={Role.PRIMARY.value: right_schema})
+
+        for scoped in (left, right):
+            with scoped.begin() as conn:
+                backend.create_materialized_view(conn, name, selectable)
+                backend.create_materialized_view_index(conn, name, index)
+
+        with left.begin() as conn:
+            backend.refresh_materialized_view(conn, name, concurrently=True, declared_indexes=(index,))
+            backend.drop_materialized_view(conn, name)
+
+        with engine.connect() as conn:
+            assert conn.execute(
+                sa.text(
+                    "SELECT EXISTS (SELECT 1 FROM pg_matviews "
+                    "WHERE schemaname = :schema AND matviewname = :name)"
+                ),
+                {"schema": left_schema, "name": name},
+            ).scalar() is False
+            assert conn.execute(
+                sa.text(
+                    "SELECT EXISTS (SELECT 1 FROM pg_matviews "
+                    "WHERE schemaname = :schema AND matviewname = :name)"
+                ),
+                {"schema": right_schema, "name": name},
+            ).scalar() is True
+    finally:
+        with engine.begin() as cleanup_conn:
+            for schema in (left_schema, right_schema):
+                cleanup_conn.execute(
+                    sa.text(f"DROP SCHEMA IF EXISTS {preparer.quote_identifier(schema)} CASCADE")
+                )
+
+
+def test_postgres_backend_refresh_concurrently_raises_when_declared_index_was_never_created(pg_db):
+    from orm_loader.mappers.materialised_view_errors import ConcurrentRefreshNotEligibleError
+    from orm_loader.mappers.materialised_view_contracts import MaterializedViewIndex
+
+    backend = PostgresBackend()
+    index = MaterializedViewIndex(name="mv_missing_index_test_uq", columns=("row_id",), unique=True)
+    conn = pg_db.connection
+
+    backend.create_materialized_view(
+        conn, "mv_missing_index_test", sa.select(sa.literal(1).label("row_id"))
+    )
+
+    with pytest.raises(ConcurrentRefreshNotEligibleError) as exc_info:
+        backend.refresh_materialized_view(
+            conn,
+            "mv_missing_index_test",
+            concurrently=True,
+            declared_indexes=(index,),
+        )
+
+    assert "concurrently" in str(exc_info.value).lower()
+    assert isinstance(exc_info.value.__cause__, sa.exc.OperationalError)
+
+
+def test_postgres_backend_materialized_view_legacy_unqualified_path_still_round_trips(pg_db):
+    backend = PostgresBackend()
+    conn = pg_db.connection
+
+    backend.create_materialized_view(
+        conn, "mv_legacy_test", sa.select(sa.literal(1).label("n"))
+    )
+    backend.refresh_materialized_view(conn, "mv_legacy_test")
+    assert conn.execute(sa.text("SELECT n FROM mv_legacy_test")).scalar() == 1
+
+    backend.drop_materialized_view(conn, "mv_legacy_test")
+    with pytest.raises(sa.exc.ProgrammingError):
+        conn.execute(sa.text("SELECT n FROM mv_legacy_test"))
 
 
 def test_postgres_backend_normalize_fk_check_state():

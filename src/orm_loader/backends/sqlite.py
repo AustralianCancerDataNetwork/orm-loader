@@ -13,8 +13,6 @@ from sqlalchemy.dialects import sqlite as sqlite_dialect
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql.compiler import IdentifierPreparer
 
-from oa_configurator import Role
-
 from .base import BackendCapabilities, DatabaseBackend, Dialect
 
 if TYPE_CHECKING:
@@ -276,25 +274,6 @@ class SQLiteBackend(DatabaseBackend):
         session: so.Session,
     ) -> AbstractContextManager[None]:
         return self.bulk_load_context(session, disable_fk=True, no_autoflush=False)
-
-    def create_materialized_view(
-        self,
-        bind: "Engine | Connection",
-        name: str,
-        selectable: sa.sql.Select[Any],
-        *,
-        role: Role = Role.PRIMARY,
-    ) -> None:
-        self._require_capability("supports_materialized_views", "materialized views")
-
-    def refresh_materialized_view(
-        self,
-        bind: "Engine | Connection",
-        name: str,
-        *,
-        role: Role = Role.PRIMARY,
-    ) -> None:
-        self._require_capability("supports_materialized_views", "materialized views")
 
     def configure_dbapi_connection(self, dbapi_connection:  sa.engine.interfaces.DBAPIConnection) -> None:
         if dbapi_connection.__class__.__module__.startswith("sqlite3"):

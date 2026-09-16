@@ -6,20 +6,49 @@ from typing import TYPE_CHECKING, Any
 import sqlalchemy as sa
 import sqlalchemy.event as sae
 import sqlalchemy.orm as so
-from oa_configurator import autocommit_connection, qualified, Dialect, Role
+from oa_configurator import autocommit_connection, qualified, schema_of, Dialect, Role
 from ..helpers.sql import role_of_table
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.sql.compiler import IdentifierPreparer
 
-from .base import BackendCapabilities, DatabaseBackend
+from .base import BackendCapabilities, DatabaseBackend, requires_capability
+from ..mappers.materialised_view_errors import (
+    ConcurrentRefreshNotEligibleError,
+    MaterializationError,
+    MaterializationFailure,
+    MaterializationOperation,
+    UnsupportedMaterializationDialectError,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.engine import Connection, Engine
 
     from ..loaders.data_classes import LoaderContext
+    from ..mappers.materialised_view_contracts import MaterializedViewIndex
     from ..tables.typing import CSVTableProtocol
 
 _VALID_PG_REPLICATION_ROLES = frozenset({"origin", "local", "replica"})
+
+
+def _require_postgres_dialect(
+    conn: "Connection",
+    *,
+    operation: MaterializationOperation,
+    schema: str | None,
+    name: str,
+) -> None:
+    dialect = getattr(conn, "dialect", None)
+    if dialect is not None and dialect.name == "postgresql":
+        return
+    raise UnsupportedMaterializationDialectError(
+        MaterializationFailure(
+            operation=operation,
+            schema=schema,
+            name=name,
+            reason=f"received dialect {getattr(dialect, 'name', dialect)!r}",
+        )
+    )
 
 
 class PostgresBackend(DatabaseBackend):
@@ -279,6 +308,7 @@ class PostgresBackend(DatabaseBackend):
     ) -> AbstractContextManager[None]:
         return self.bulk_load_context(session, disable_fk=True, no_autoflush=False)
 
+    @requires_capability("supports_materialized_views", "materialized views")
     def create_materialized_view(
         self,
         bind: Engine | Connection,
@@ -286,23 +316,154 @@ class PostgresBackend(DatabaseBackend):
         selectable: sa.sql.Select[Any],
         *,
         role: Role = Role.PRIMARY,
+        with_data: bool = True,
+        if_not_exists: bool = True,
     ) -> None:
         from ..mappers.materialised_view_mixin import CreateMaterializedView
 
         with self._as_connection(bind) as conn:
-            qualified_name = qualified(conn, name, role=role)
-            conn.execute(CreateMaterializedView(qualified_name, selectable))
+            schema = schema_of(conn, role=role)
+            _require_postgres_dialect(
+                conn, operation=MaterializationOperation.CREATE, schema=schema, name=name
+            )
+            try:
+                conn.execute(
+                    CreateMaterializedView(
+                        qualified(conn, name, schema=schema),
+                        selectable,
+                        with_data=with_data,
+                        if_not_exists=if_not_exists,
+                    )
+                )
+            except Exception as error:
+                raise MaterializationError(
+                    MaterializationFailure(
+                        operation=MaterializationOperation.CREATE,
+                        schema=schema,
+                        name=name,
+                        reason=str(error),
+                        cause=error,
+                    )
+                ) from error
 
+    @requires_capability("supports_materialized_views", "materialized views")
     def refresh_materialized_view(
         self,
         bind: Engine | Connection,
         name: str,
         *,
         role: Role = Role.PRIMARY,
+        concurrently: bool = False,
+        declared_indexes: tuple["MaterializedViewIndex", ...] = (),
     ) -> None:
         with self._as_connection(bind) as conn:
-            safe_name = qualified(conn, name, role=role)
-            conn.execute(sa.text(f"REFRESH MATERIALIZED VIEW {safe_name};"))
+            schema = schema_of(conn, role=role)
+            _require_postgres_dialect(
+                conn, operation=MaterializationOperation.REFRESH, schema=schema, name=name
+            )
+            if concurrently:
+                if not any(index.unique for index in declared_indexes):
+                    raise ConcurrentRefreshNotEligibleError(
+                        MaterializationFailure(
+                            operation=MaterializationOperation.REFRESH,
+                            schema=schema,
+                            name=name,
+                            reason="no simple unique index is declared",
+                        )
+                    )
+
+            safe_name = qualified(conn, name, schema=schema)
+            concurrency = "CONCURRENTLY " if concurrently else ""
+            try:
+                conn.execute(sa.text(f"REFRESH MATERIALIZED VIEW {concurrency}{safe_name};"))
+            except OperationalError as error:
+                # Keep psycopg optional at import time; it is only needed when
+                # handling an actual PostgreSQL driver error.
+                try:
+                    from psycopg.errors import ObjectNotInPrerequisiteState
+                except ImportError:
+                    raise error from None
+
+                if not concurrently or not isinstance(error.orig, ObjectNotInPrerequisiteState):
+                    raise
+                raise ConcurrentRefreshNotEligibleError(
+                    MaterializationFailure(
+                        operation=MaterializationOperation.REFRESH,
+                        schema=schema,
+                        name=name,
+                        reason=str(error.orig).strip(),
+                        cause=error,
+                    )
+                ) from error
+
+    @requires_capability("supports_materialized_views", "materialized views")
+    def drop_materialized_view(
+        self,
+        bind: Engine | Connection,
+        name: str,
+        *,
+        role: Role = Role.PRIMARY,
+        if_exists: bool = True,
+        cascade: bool = False,
+    ) -> None:
+        from ..mappers.materialised_view_contracts import DropMaterializedView
+
+        with self._as_connection(bind) as conn:
+            schema = schema_of(conn, role=role)
+            _require_postgres_dialect(
+                conn, operation=MaterializationOperation.DROP, schema=schema, name=name
+            )
+            try:
+                conn.execute(
+                    DropMaterializedView(
+                        qualified(conn, name, schema=schema), if_exists=if_exists, cascade=cascade
+                    )
+                )
+            except Exception as error:
+                raise MaterializationError(
+                    MaterializationFailure(
+                        operation=MaterializationOperation.DROP,
+                        schema=schema,
+                        name=name,
+                        reason=str(error),
+                        cause=error,
+                    )
+                ) from error
+
+    @requires_capability("supports_materialized_views", "materialized views")
+    def create_materialized_view_index(
+        self,
+        bind: Engine | Connection,
+        name: str,
+        index: "MaterializedViewIndex",
+        *,
+        role: Role = Role.PRIMARY,
+        if_not_exists: bool = True,
+    ) -> None:
+        from ..mappers.materialised_view_contracts import CreateMaterializedViewIndex
+
+        with self._as_connection(bind) as conn:
+            schema = schema_of(conn, role=role)
+            _require_postgres_dialect(
+                conn, operation=MaterializationOperation.CREATE_INDEX, schema=schema, name=name
+            )
+            try:
+                conn.execute(
+                    CreateMaterializedViewIndex(
+                        qualified(conn, name, schema=schema), index, if_not_exists=if_not_exists
+                    )
+                )
+            except Exception as error:
+                raise MaterializationError(
+                    MaterializationFailure(
+                        operation=MaterializationOperation.CREATE_INDEX,
+                        schema=schema,
+                        name=name,
+                        index_name=index.name,
+                        reason=str(error),
+                        cause=error,
+                    )
+                ) from error
 
     @contextmanager
     def engine_with_replica_role(self, engine: "Engine"):
