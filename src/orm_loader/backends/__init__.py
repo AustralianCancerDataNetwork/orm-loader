@@ -12,7 +12,6 @@ from ..mappers.materialised_view_errors import (
     MaterializationError,
     MaterializationFailure,
     MaterializationOperation,
-    UnsupportedMaterializationDialectError,
 )
 
 __all__ = [
@@ -26,6 +25,5 @@ __all__ = [
     "PostgresBackend",
     "STAGING_SCHEMA",
     "SQLiteBackend",
-    "UnsupportedMaterializationDialectError",
     "resolve_backend",
 ]

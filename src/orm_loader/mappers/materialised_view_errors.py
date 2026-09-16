@@ -40,13 +40,6 @@ class MaterializationError(RuntimeError):
         )
 
 
-class UnsupportedMaterializationDialectError(MaterializationError):
-    """Raised before executing Postgres-only DDL/catalog SQL against a
-    non-Postgres connection. Defense in depth: the normal ``resolve_backend``
-    dispatch path already prevents this via ``_require_capability``; this
-    guards direct/manual ``PostgresBackend()`` use."""
-
-
 class ConcurrentRefreshNotEligibleError(MaterializationError):
     """Raised when a concurrent materialized-view refresh is not eligible.
 

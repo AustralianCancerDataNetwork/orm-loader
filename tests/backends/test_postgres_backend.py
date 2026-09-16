@@ -193,6 +193,38 @@ def test_postgres_backend_materialized_view_methods_emit_expected_sql():
     assert any('REFRESH MATERIALIZED VIEW mv_test;' == sql for sql in session.statements)
 
 
+def test_postgres_backend_rejects_mismatched_dialect_bind():
+    from sqlalchemy.dialects import sqlite
+
+    backend = PostgresBackend()
+    session = _FakeSession()
+    session.dialect = sqlite.dialect()
+    selectable = sa.select(sa.literal(1).label("n"))
+
+    with pytest.raises(TypeError, match="received a 'sqlite' connection; expected 'postgresql'"):
+        backend.create_materialized_view(_sess(session), "mv_test", selectable)
+
+    assert session.statements == []
+
+
+def test_postgres_backend_rejects_dialect_that_drifted_after_resolve_backend():
+    """A bind resolved to PostgresBackend, then a differently-dialected bind
+    handed to one of its methods, must not run Postgres-only DDL against it."""
+    from orm_loader.backends.resolve import resolve_backend
+    from sqlalchemy.dialects import sqlite
+
+    postgres_session = _FakeSession()
+    backend = resolve_backend(_sess(postgres_session))
+    assert isinstance(backend, PostgresBackend)
+
+    sqlite_session = _FakeSession()
+    sqlite_session.dialect = sqlite.dialect()
+    selectable = sa.select(sa.literal(1).label("n"))
+
+    with pytest.raises(TypeError, match="received a 'sqlite' connection; expected 'postgresql'"):
+        backend.create_materialized_view(_sess(sqlite_session), "mv_test", selectable)
+
+
 def test_postgres_backend_quotes_unqualified_materialized_view_name():
     from orm_loader.mappers.materialised_view_contracts import MaterializedViewIndex
 
@@ -207,39 +239,6 @@ def test_postgres_backend_quotes_unqualified_materialized_view_name():
 
     assert any('CREATE MATERIALIZED VIEW IF NOT EXISTS "mv name" as SELECT' in sql for sql in session.statements)
     assert any('ON "mv name" ("n")' in sql for sql in session.statements)
-
-
-def test_postgres_backend_create_materialized_view_rejects_non_postgres_connection():
-    from orm_loader.mappers.materialised_view_errors import (
-        UnsupportedMaterializationDialectError,
-    )
-    from sqlalchemy.dialects import sqlite
-
-    backend = PostgresBackend()
-    session = _FakeSession()
-    session.dialect = sqlite.dialect()
-    selectable = sa.select(sa.literal(1).label("n"))
-
-    with pytest.raises(UnsupportedMaterializationDialectError, match="received dialect 'sqlite'"):
-        backend.create_materialized_view(_sess(session), "mv_test", selectable)
-
-    assert session.statements == []
-
-
-def test_postgres_backend_refresh_materialized_view_rejects_non_postgres_connection():
-    from orm_loader.mappers.materialised_view_errors import (
-        UnsupportedMaterializationDialectError,
-    )
-    from sqlalchemy.dialects import sqlite
-
-    backend = PostgresBackend()
-    session = _FakeSession()
-    session.dialect = sqlite.dialect()
-
-    with pytest.raises(UnsupportedMaterializationDialectError, match="received dialect 'sqlite'"):
-        backend.refresh_materialized_view(_sess(session), "mv_test")
-
-    assert session.statements == []
 
 
 def test_postgres_backend_create_mv_quotes_name_for_legacy_search_path_resolution():

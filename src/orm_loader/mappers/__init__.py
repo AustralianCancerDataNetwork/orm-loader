@@ -25,7 +25,6 @@ from .materialised_view_errors import (
     MaterializationError,
     MaterializationFailure,
     MaterializationOperation,
-    UnsupportedMaterializationDialectError,
 )
 
 __all__ = [
@@ -38,7 +37,6 @@ __all__ = [
     "MaterializationOperation",
     "MaterializedViewIndex",
     "MaterializedViewMixin",
-    "UnsupportedMaterializationDialectError",
     "refresh_all_mvs",
     "resolve_mv_refresh_order",
 ]

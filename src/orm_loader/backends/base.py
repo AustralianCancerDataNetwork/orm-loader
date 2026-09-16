@@ -186,6 +186,41 @@ class DatabaseBackend(ABC):
         self,
         bind: Engine | Connection,
     ) -> Generator[Connection, None, None]:
+        """
+        Normalize a bind into an open connection, guarding its dialect.
+
+        Every backend method that takes a ``bind`` should route it through
+        this context manager rather than opening a connection itself, so the
+        dialect guard below applies uniformly.
+
+        Parameters
+        ----------
+        bind : Engine or Connection
+            An Engine opens a new connection and transaction scoped to this
+            context manager, committing on a clean exit. A Connection is
+            forwarded as-is; its transaction is owned by the caller, and
+            passing the same Connection into several backend calls groups
+            them into one shared transaction.
+
+        Yields
+        ------
+        Connection
+            An open connection whose dialect matches ``self.dialect``.
+
+        Raises
+        ------
+        TypeError
+            If ``bind``'s dialect does not match ``self.dialect``. Guards
+            against a bind resolved through a different backend being
+            passed directly into a method on this one.
+        """
+        if bind.dialect.name != self.dialect.value:
+            raise TypeError(
+                f"{self.name} backend received a {bind.dialect.name!r} connection; "
+                f"expected {self.dialect.value!r}. The bind passed to this method must "
+                "be the same one (or share the same dialect as) the bind resolve_backend() "
+                "was given."
+            )
         if isinstance(bind, Engine):
             with bind.begin() as conn:
                 yield conn

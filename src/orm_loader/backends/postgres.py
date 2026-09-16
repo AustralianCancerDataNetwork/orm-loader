@@ -18,7 +18,6 @@ from ..mappers.materialised_view_errors import (
     MaterializationError,
     MaterializationFailure,
     MaterializationOperation,
-    UnsupportedMaterializationDialectError,
 )
 
 if TYPE_CHECKING:
@@ -29,26 +28,6 @@ if TYPE_CHECKING:
     from ..tables.typing import CSVTableProtocol
 
 _VALID_PG_REPLICATION_ROLES = frozenset({"origin", "local", "replica"})
-
-
-def _require_postgres_dialect(
-    conn: "Connection",
-    *,
-    operation: MaterializationOperation,
-    schema: str | None,
-    name: str,
-) -> None:
-    dialect = getattr(conn, "dialect", None)
-    if dialect is not None and dialect.name == "postgresql":
-        return
-    raise UnsupportedMaterializationDialectError(
-        MaterializationFailure(
-            operation=operation,
-            schema=schema,
-            name=name,
-            reason=f"received dialect {getattr(dialect, 'name', dialect)!r}",
-        )
-    )
 
 
 class PostgresBackend(DatabaseBackend):
@@ -323,9 +302,6 @@ class PostgresBackend(DatabaseBackend):
 
         with self._as_connection(bind) as conn:
             schema = schema_of(conn, role=role)
-            _require_postgres_dialect(
-                conn, operation=MaterializationOperation.CREATE, schema=schema, name=name
-            )
             try:
                 conn.execute(
                     CreateMaterializedView(
@@ -358,9 +334,6 @@ class PostgresBackend(DatabaseBackend):
     ) -> None:
         with self._as_connection(bind) as conn:
             schema = schema_of(conn, role=role)
-            _require_postgres_dialect(
-                conn, operation=MaterializationOperation.REFRESH, schema=schema, name=name
-            )
             if concurrently:
                 if not any(index.unique for index in declared_indexes):
                     raise ConcurrentRefreshNotEligibleError(
@@ -410,9 +383,6 @@ class PostgresBackend(DatabaseBackend):
 
         with self._as_connection(bind) as conn:
             schema = schema_of(conn, role=role)
-            _require_postgres_dialect(
-                conn, operation=MaterializationOperation.DROP, schema=schema, name=name
-            )
             try:
                 conn.execute(
                     DropMaterializedView(
@@ -444,9 +414,6 @@ class PostgresBackend(DatabaseBackend):
 
         with self._as_connection(bind) as conn:
             schema = schema_of(conn, role=role)
-            _require_postgres_dialect(
-                conn, operation=MaterializationOperation.CREATE_INDEX, schema=schema, name=name
-            )
             try:
                 conn.execute(
                     CreateMaterializedViewIndex(
