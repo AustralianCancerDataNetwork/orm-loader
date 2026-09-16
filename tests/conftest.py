@@ -52,3 +52,14 @@ def pg_session(pg_db):
     conn.execute(sa.text(f"CREATE SCHEMA IF NOT EXISTS {STAGING_SCHEMA}"))
     Base.metadata.create_all(conn)
     return pg_db.session
+
+
+def schema_scoped_session(
+    conn: sa.Connection, table: sa.Table, schema_translate_map: dict
+) -> so.Session:
+    """A Session scoped to *schema_translate_map*, with *table* already
+    created through it.
+    """
+    scoped_conn = conn.execution_options(schema_translate_map=schema_translate_map)
+    table.create(scoped_conn, checkfirst=True)
+    return so.Session(bind=scoped_conn)

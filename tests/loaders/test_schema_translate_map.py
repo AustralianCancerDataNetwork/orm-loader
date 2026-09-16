@@ -22,13 +22,13 @@ import uuid
 
 import pandas as pd
 import sqlalchemy as sa
-import sqlalchemy.orm as so
 from oa_configurator import ensure_schema
 from oa_configurator import Role as SchemaRole
 
 from orm_loader.backends import STAGING_SCHEMA
 from orm_loader.loaders.loader_interface import PandasLoader
 
+from tests.conftest import schema_scoped_session
 from tests.models import SimpleTable, VocabRoleTable
 
 
@@ -42,9 +42,9 @@ def test_load_csv_respects_non_default_schema_end_to_end(pg_db, tmp_path):
     # is the caller-side setup a real deployment does once at engine
     # construction (ResolvedCDMDatabase.create_engine()), not a workaround
     # threaded through load_csv() itself.
-    scoped_conn = conn.execution_options(schema_translate_map={SchemaRole.PRIMARY.value: schema})
-    session = so.Session(bind=scoped_conn)
-    SimpleTable.__table__.create(scoped_conn, checkfirst=True)
+    session = schema_scoped_session(
+        conn, SimpleTable.__table__, {SchemaRole.PRIMARY.value: schema}
+    )
 
     csv_path = tmp_path / "test_table.csv"
     pd.DataFrame(
@@ -82,9 +82,9 @@ def test_replace_merge_respects_non_default_schema_end_to_end(pg_db, tmp_path):
     ensure_schema(conn, schema)
     ensure_schema(conn, STAGING_SCHEMA)
 
-    scoped_conn = conn.execution_options(schema_translate_map={SchemaRole.PRIMARY.value: schema})
-    session = so.Session(bind=scoped_conn)
-    SimpleTable.__table__.create(scoped_conn, checkfirst=True)
+    session = schema_scoped_session(
+        conn, SimpleTable.__table__, {SchemaRole.PRIMARY.value: schema}
+    )
 
     def _write_and_load(rows: list[dict], path_name: str) -> int:
         path = tmp_path / path_name
@@ -122,14 +122,11 @@ def test_load_csv_respects_non_primary_role_end_to_end(pg_db, tmp_path):
     ensure_schema(conn, vocab_schema)
     ensure_schema(conn, STAGING_SCHEMA)
 
-    scoped_conn = conn.execution_options(
-        schema_translate_map={
-            SchemaRole.PRIMARY.value: primary_schema,
-            SchemaRole.VOCAB.value: vocab_schema,
-        }
+    session = schema_scoped_session(
+        conn,
+        VocabRoleTable.__table__,
+        {SchemaRole.PRIMARY.value: primary_schema, SchemaRole.VOCAB.value: vocab_schema},
     )
-    session = so.Session(bind=scoped_conn)
-    VocabRoleTable.__table__.create(scoped_conn, checkfirst=True)
 
     csv_path = tmp_path / "test_vocab_role_table.csv"
     pd.DataFrame([{"id": 1, "name": "alpha"}, {"id": 2, "name": "beta"}]).to_csv(

@@ -7,13 +7,13 @@ import uuid
 
 import pandas as pd
 import sqlalchemy as sa
-import sqlalchemy.orm as so
 from oa_configurator import ensure_schema
 from oa_configurator import Role as SchemaRole
 
 from orm_loader.backends import STAGING_SCHEMA
 from orm_loader.loaders.loader_interface import PandasLoader
 
+from tests.conftest import schema_scoped_session
 from tests.models import SimpleTable, VocabRoleTable
 
 
@@ -26,9 +26,9 @@ def test_load_csv_across_two_genuinely_separate_connections(pg_db, session, tmp_
     conn = pg_db.connection
     ensure_schema(conn, primary_schema)
     ensure_schema(conn, STAGING_SCHEMA)
-    scoped_conn = conn.execution_options(schema_translate_map={SchemaRole.PRIMARY.value: primary_schema})
-    primary_session = so.Session(bind=scoped_conn)
-    SimpleTable.__table__.create(scoped_conn, checkfirst=True)
+    primary_session = schema_scoped_session(
+        conn, SimpleTable.__table__, {SchemaRole.PRIMARY.value: primary_schema}
+    )
 
     primary_csv = tmp_path / "test_table.csv"
     pd.DataFrame([{"id": 1, "name": "primary-alpha"}]).to_csv(primary_csv, index=False, sep="\t")
