@@ -12,6 +12,7 @@ import sqlalchemy as sa
 import sqlalchemy.orm as so
 from sqlalchemy.engine import Connection, Engine
 
+from oa_configurator import Role
 from orm_loader.backends import (
     BackendCapabilities,
     DatabaseBackend,
@@ -128,7 +129,7 @@ class FakeBackend(DatabaseBackend):
         name: str,
         selectable: sa.sql.Select[Any],
         *,
-        schema: str | None = None,
+        role: Role = Role.PRIMARY,
         with_data: bool = True,
         if_not_exists: bool = True,
     ) -> None:
@@ -139,7 +140,7 @@ class FakeBackend(DatabaseBackend):
         bind: Engine | Connection,
         name: str,
         *,
-        schema: str | None = None,
+        role: Role = Role.PRIMARY,
         concurrently: bool = False,
         declared_indexes: tuple = (),
     ) -> None:

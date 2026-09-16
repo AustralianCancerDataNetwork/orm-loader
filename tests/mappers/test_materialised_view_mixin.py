@@ -6,12 +6,46 @@ from typing import Any
 import pytest
 import sqlalchemy as sa
 
+from oa_configurator import Role
+from oa_configurator.testing import isolated_test_schema
 from orm_loader.mappers.materialised_view_contracts import MaterializedViewIndex
 from orm_loader.mappers.materialised_view_mixin import (
     MaterializedViewMixin,
     refresh_all_mvs,
     resolve_mv_refresh_order,
 )
+
+
+class _PrimaryRoleMV(MaterializedViewMixin):
+    __mv_name__ = "mv_primary_role_test"
+    __mv_select__ = sa.select(sa.literal(1).label("n"))
+
+
+class _VocabRoleMV(MaterializedViewMixin):
+    __mv_name__ = "mv_vocab_role_test"
+    __mv_select__ = sa.select(sa.literal(2).label("n"))
+    __mv_role__ = Role.VOCAB
+
+
+def test_refresh_all_mvs_resolves_each_views_own_role(pg_db) -> None:
+    engine = pg_db.connection.engine
+
+    with isolated_test_schema(engine, prefix="mv_primary") as primary_schema, \
+         isolated_test_schema(engine, prefix="mv_vocab") as vocab_schema:
+        scoped = engine.execution_options(
+            schema_translate_map={Role.PRIMARY.value: primary_schema, Role.VOCAB.value: vocab_schema}
+        )
+        with scoped.begin() as conn:
+            _PrimaryRoleMV.create_mv(conn)
+            _VocabRoleMV.create_mv(conn)
+            refresh_all_mvs(conn, [_PrimaryRoleMV, _VocabRoleMV])
+
+        with engine.connect() as conn:
+            inspector = sa.inspect(conn)
+            assert inspector.has_table("mv_primary_role_test", schema=primary_schema)
+            assert not inspector.has_table("mv_primary_role_test", schema=vocab_schema)
+            assert inspector.has_table("mv_vocab_role_test", schema=vocab_schema)
+            assert not inspector.has_table("mv_vocab_role_test", schema=primary_schema)
 
 
 class _FakeBackend:
@@ -71,7 +105,7 @@ def test_create_mv_forwards_default_args_to_backend(fake_backend: _FakeBackend, 
         (
             "create_materialized_view",
             (bind, "mv_no_index", _SELECT),
-            {"schema": None, "with_data": True, "if_not_exists": True},
+            {"role": Role.PRIMARY, "with_data": True, "if_not_exists": True},
         )
     ]
 
@@ -91,7 +125,7 @@ def test_create_mv_creates_declared_indexes_after_the_view(fake_backend: _FakeBa
         "create_materialized_view_index",
     ]
     assert fake_backend.calls[1][1] == (bind, "mv_indexed", _INDEX)
-    assert fake_backend.calls[1][2] == {"schema": None, "if_not_exists": True}
+    assert fake_backend.calls[1][2] == {"role": Role.PRIMARY, "if_not_exists": True}
 
 
 def test_create_mv_create_indexes_false_skips_index_creation(fake_backend: _FakeBackend, bind):
@@ -100,13 +134,13 @@ def test_create_mv_create_indexes_false_skips_index_creation(fake_backend: _Fake
     assert [call[0] for call in fake_backend.calls] == ["create_materialized_view"]
 
 
-def test_create_mv_forwards_schema_with_data_and_if_not_exists_overrides(
+def test_create_mv_forwards_role_with_data_and_if_not_exists_overrides(
     fake_backend: _FakeBackend, bind
 ):
-    _NoIndexMv.create_mv(bind, schema="reporting", with_data=False, if_not_exists=False)
+    _NoIndexMv.create_mv(bind, role=Role.VOCAB, with_data=False, if_not_exists=False)
 
     assert fake_backend.calls[0][2] == {
-        "schema": "reporting",
+        "role": Role.VOCAB,
         "with_data": False,
         "if_not_exists": False,
     }
@@ -115,7 +149,7 @@ def test_create_mv_forwards_schema_with_data_and_if_not_exists_overrides(
 def test_create_mv_forwards_if_not_exists_to_declared_indexes(fake_backend: _FakeBackend, bind):
     _IndexedMv.create_mv(bind, if_not_exists=False)
 
-    assert fake_backend.calls[1][2] == {"schema": None, "if_not_exists": False}
+    assert fake_backend.calls[1][2] == {"role": Role.PRIMARY, "if_not_exists": False}
 
 
 def test_create_mv_engine_uses_one_transaction_for_view_and_indexes(monkeypatch: pytest.MonkeyPatch):
@@ -177,16 +211,16 @@ def test_refresh_mv_forwards_default_args_and_declared_indexes(fake_backend: _Fa
         (
             "refresh_materialized_view",
             (bind, "mv_indexed"),
-            {"schema": None, "concurrently": False, "declared_indexes": (_INDEX,)},
+            {"role": Role.PRIMARY, "concurrently": False, "declared_indexes": (_INDEX,)},
         )
     ]
 
 
-def test_refresh_mv_forwards_schema_and_concurrently(fake_backend: _FakeBackend, bind):
-    _IndexedMv.refresh_mv(bind, schema="reporting", concurrently=True)
+def test_refresh_mv_forwards_role_and_concurrently(fake_backend: _FakeBackend, bind):
+    _IndexedMv.refresh_mv(bind, role=Role.VOCAB, concurrently=True)
 
     assert fake_backend.calls[0][2] == {
-        "schema": "reporting",
+        "role": Role.VOCAB,
         "concurrently": True,
         "declared_indexes": (_INDEX,),
     }
@@ -199,16 +233,16 @@ def test_drop_mv_forwards_default_args(fake_backend: _FakeBackend, bind):
         (
             "drop_materialized_view",
             (bind, "mv_no_index"),
-            {"schema": None, "if_exists": True, "cascade": False},
+            {"role": Role.PRIMARY, "if_exists": True, "cascade": False},
         )
     ]
 
 
-def test_drop_mv_forwards_schema_if_exists_and_cascade(fake_backend: _FakeBackend, bind):
-    _NoIndexMv.drop_mv(bind, schema="reporting", if_exists=False, cascade=True)
+def test_drop_mv_forwards_role_if_exists_and_cascade(fake_backend: _FakeBackend, bind):
+    _NoIndexMv.drop_mv(bind, role=Role.VOCAB, if_exists=False, cascade=True)
 
     assert fake_backend.calls[0][2] == {
-        "schema": "reporting",
+        "role": Role.VOCAB,
         "if_exists": False,
         "cascade": True,
     }

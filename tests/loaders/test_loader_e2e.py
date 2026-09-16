@@ -15,7 +15,17 @@ from orm_loader.loaders.data_classes import _clean_nulls
 from orm_loader.loaders.loader_interface import PandasLoader
 from orm_loader.tables.loadable_table import CSVLoadableTableInterface
 from orm_loader.tables.typing import CSVTableProtocol
-from tests.models import Base, CompositeTable, EnumTable, Flag, ImpliedEnumTable, RequiredTable, Role, SimpleTable
+from tests.models import (
+    Base,
+    CompositeTable,
+    EnumTable,
+    Flag,
+    ImpliedEnumTable,
+    RequiredTable,
+    Role,
+    SimpleTable,
+    VocabRoleTable,
+)
 
 # Typed aliases: Pylance cannot verify SQLAlchemy metaclass-generated attrs
 # satisfy CSVTableProtocol structurally, so we cast once per class here.
@@ -24,6 +34,7 @@ _RequiredTable = cast(Type[CSVTableProtocol], RequiredTable)
 _CompositeTable = cast(Type[CSVTableProtocol], CompositeTable)
 _EnumTable = cast(Type[CSVTableProtocol], EnumTable)
 _ImpliedEnumTable = cast(Type[CSVTableProtocol], ImpliedEnumTable)
+_VocabRoleTable = cast(Type[CSVTableProtocol], VocabRoleTable)
 
 
 @pytest.fixture(autouse=True)
@@ -63,6 +74,33 @@ def test_initial_csv_load(session, tmp_path):
         (2, "beta"),
         (3, "gamma"),
     ]
+
+
+def test_initial_csv_load_for_a_non_primary_role_table(session, tmp_path):
+    """SQLite has no real schema concept, so every Role folds to None 
+    on this connection (see oa_configurator's SQLiteTestStrategy).
+    A VOCAB-tagged table's load path must not error out just because
+    the table's declared role differs from primary. This is the SQLite
+    counterpart to test_schema_translate_map.py's Postgres-only, non-primary-
+    role coverage."""
+    csv_path = tmp_path / "test_vocab_role_table.csv"
+
+    pd.DataFrame(
+        [{"id": 1, "name": "alpha"}, {"id": 2, "name": "beta"}]
+    ).to_csv(csv_path, index=False, sep="\t")
+
+    inserted = _VocabRoleTable.load_csv(
+        session, csv_path, dedupe=False, loader=PandasLoader()
+    )
+    session.commit()
+
+    assert inserted == 2
+
+    rows = session.execute(
+        sa.select(VocabRoleTable).order_by(VocabRoleTable.id)
+    ).scalars().all()
+
+    assert [(r.id, r.name) for r in rows] == [(1, "alpha"), (2, "beta")]
 
 
 def test_replace_merge_strategy(session, tmp_path):

@@ -105,18 +105,22 @@ PatientSummaryMV.refresh_mv(engine, concurrently=True)
 
 This is fail-closed by design. An index created manually outside `__mv_indexes__` does not satisfy the mixin's declaration contract; declare it in the class even if another migration is responsible for creating it. Expressions, partial indexes, and other index forms are outside this simple contract and should not be represented as `MaterializedViewIndex` entries.
 
-By default, `schema=None` leaves the view name unqualified. PostgreSQL resolves that name through the connection's `search_path`, matching the behavior of existing callers. Pass `schema="reporting"` only when the caller intentionally wants an explicit schema-qualified target.
+The view's physical schema comes from the bound connection's own `schema_translate_map`, the same mechanism every other schema-aware table in this stack uses (`oa_configurator.schema_of`). `__mv_role__` declares which role a view resolves through (defaulting to `Role.PRIMARY`); pass `role=` to `create_mv()`/`refresh_mv()`/`drop_mv()` to override it for one call.
 
 ```python
-# Existing/default behavior: search_path resolves the target.
+class VocabSummaryMV(MaterializedViewMixin):
+    __mv_name__ = "vocab_summary"
+    __mv_select__ = ...
+    __mv_role__ = Role.VOCAB  # resolves via the connection's vocab schema
+
+# Uses __mv_role__ (Role.PRIMARY by default) via the connection's own schema_translate_map.
 RecentObservationMV.create_mv(engine)
 
-# Explicit schema: the target is quoted and schema-qualified.
-RecentObservationMV.create_mv(engine, schema="reporting")
-RecentObservationMV.refresh_mv(engine, schema="reporting")
+# Override for one call.
+RecentObservationMV.create_mv(engine, role=Role.VOCAB)
 ```
 
-Explicit schema targets are quoted component by component. This matters for embedded quotes, spaces, and mixed-case identifiers. It also means an unqualified mixed-case name and the same name passed with `schema=` can address different PostgreSQL relations. Keep schema selection at the call site and do not assume that this API provides `schema_translate_map`, role-token, or general multi-schema behavior.
+Every generated identifier is quoted through `oa_configurator.qualified()`, which quotes each component only when the dialect actually requires it (reserved words, mixed case, embedded quotes or spaces) — the same behavior every other Core-built query in this stack has.
 
 ## Failure handling and backend support
 
@@ -164,9 +168,5 @@ The built-in implementation is PostgreSQL-oriented. SQLite rejects materialized-
       members: true
 
 ::: orm_loader.mappers.ConcurrentRefreshNotEligibleError
-    options:
-      heading_level: 3
-
-::: orm_loader.mappers.UnsupportedMaterializationDialectError
     options:
       heading_level: 3

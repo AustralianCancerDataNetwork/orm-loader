@@ -1,4 +1,3 @@
-import time
 from pathlib import Path
 
 import pytest
@@ -6,7 +5,9 @@ import sqlalchemy as sa
 import sqlalchemy.orm as so
 from dotenv import load_dotenv
 
+from oa_configurator.testing import isolated_test_database
 from orm_loader.backends import STAGING_SCHEMA
+from orm_loader.config import OrmLoaderConfig
 from tests.models import Base
 
 load_dotenv(Path(__file__).parent.parent / ".env")
@@ -14,9 +15,12 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 
 @pytest.fixture
 def engine():
-    engine = sa.create_engine("sqlite:///:memory:", future=True)
-    Base.metadata.create_all(engine)
-    return engine
+    with isolated_test_database(
+        OrmLoaderConfig, "test_orm_db_sqlite", dialect="sqlite", future=True,
+    ) as db:
+        engine = db.connection.engine
+        Base.metadata.create_all(engine)
+        yield engine
 
 
 @pytest.fixture
@@ -29,51 +33,33 @@ def session(engine):
 # Postgres fixtures
 # ---------------------------------------------------------------------------
 
-@pytest.fixture(scope="session")
-def pg_engine():
-    from oa_configurator.pytest_plugin import ensure_test_db_exists, resolve_test_database
-    from orm_loader.config import OrmLoaderConfig
-
-    url = resolve_test_database(OrmLoaderConfig, "test_orm_db")
-
-    try:
-        ensure_test_db_exists(url)
-    except Exception as exc:
-        print(f"Could not ensure test DB exists, will try anyway: {exc}")
-
-    last_err = None
-    for i in range(20):
-        engine: sa.Engine | None = None
-        try:
-            engine = sa.create_engine(url, future=True)
-            with engine.connect() as conn:
-                conn.execute(sa.text("SELECT 1"))
-            print("Postgres connection established")
-            yield engine
-            engine.dispose()
-            return
-        except Exception as exc:
-            if engine is not None:
-                engine.dispose()
-            last_err = exc
-            print(f"[{i}] Postgres not ready:", repr(exc))
-            time.sleep(1)
-
-    pytest.skip(f"PostgreSQL never became available: {last_err}")
+@pytest.fixture
+def pg_db(request):
+    """Isolated PostgreSQL test database. Everything done through
+    ``pg_db.connection``/``pg_db.session`` happens inside one transaction
+    that's rolled back on exit, so concurrent test runs can't collide and
+    nothing needs manual cleanup."""
+    with isolated_test_database(OrmLoaderConfig, "test_orm_db_pg", request=request) as db:
+        yield db
 
 
 @pytest.fixture
-def pg_session(pg_engine):
-    Session = so.sessionmaker(pg_engine, future=True)
-    with pg_engine.begin() as conn:
-        conn.execute(sa.text(f"DROP SCHEMA IF EXISTS {STAGING_SCHEMA} CASCADE"))
-        conn.execute(sa.text(f"CREATE SCHEMA {STAGING_SCHEMA}"))
-        Base.metadata.drop_all(conn)
-        Base.metadata.create_all(conn)
+def pg_session(pg_db):
+    """The standard fixture for tests needing real tables ready to query:
+    creates the staging schema and Base.metadata inside pg_db's already-open,
+    rolled-back transaction, then returns pg_db.session."""
+    conn = pg_db.connection
+    conn.execute(sa.text(f"CREATE SCHEMA IF NOT EXISTS {STAGING_SCHEMA}"))
+    Base.metadata.create_all(conn)
+    return pg_db.session
 
-    session = Session()
-    try:
-        yield session
-    finally:
-        session.rollback()
-        session.close()
+
+def schema_scoped_session(
+    conn: sa.Connection, table: sa.Table, schema_translate_map: dict
+) -> so.Session:
+    """A Session scoped to *schema_translate_map*, with *table* already
+    created through it.
+    """
+    scoped_conn = conn.execution_options(schema_translate_map=schema_translate_map)
+    table.create(scoped_conn, checkfirst=True)
+    return so.Session(bind=scoped_conn)

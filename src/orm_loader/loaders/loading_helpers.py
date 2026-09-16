@@ -11,7 +11,7 @@ import pyarrow.compute as pc
 import pyarrow.csv as pv
 import io
 
-from ..helpers.sql import qualify_identifier
+from oa_configurator import qualified
 
 _SAFE_ENCODING = re.compile(r'^[A-Za-z][A-Za-z0-9_-]*$')
 
@@ -274,7 +274,7 @@ def quick_load_pg(
     if not hasattr(raw_conn, "cursor"):
         raise RuntimeError("Expected DB-API connection for COPY")
 
-    table_ref = qualify_identifier(tablename, schema, session.get_bind().dialect.identifier_preparer)
+    table_ref = qualified(session, tablename, schema=schema)
 
     encoding = infer_encoding(path)['encoding'] or 'utf-8'
     if not _SAFE_ENCODING.match(encoding):
