@@ -3,6 +3,7 @@ import pyarrow.parquet as pq
 import pandas as pd
 import sqlalchemy as sa
 import sqlalchemy.orm as so
+from oa_configurator import Role
 from sqlalchemy.orm import DeclarativeBase
 from typing import cast, Type
 
@@ -17,6 +18,7 @@ class Base(DeclarativeBase):
 
 class ParquetTable(Base, CSVLoadableTableInterface):
     __tablename__ = "parquet_table"
+    __table_args__ = {"schema": Role.PRIMARY.value}
 
     id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     value: so.Mapped[int] = so.mapped_column(sa.Integer, nullable=False)
@@ -54,6 +56,7 @@ class NullSentinelTable(Base, CSVLoadableTableInterface):
     treats text null sentinels the same way the scalar path does."""
 
     __tablename__ = "null_sentinel_table"
+    __table_args__ = {"schema": Role.PRIMARY.value}
 
     id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     name: so.Mapped[str | None] = so.mapped_column(sa.String, nullable=True)
@@ -130,6 +133,7 @@ def test_arrow_path_nulls_float_nan(session, engine, tmp_path):
 
     class FloatTable(Base, CSVLoadableTableInterface):
         __tablename__ = "float_sentinel_table"
+        __table_args__ = {"schema": Role.PRIMARY.value}
         id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
         score: so.Mapped[float | None] = so.mapped_column(sa.Float, nullable=True)
 
