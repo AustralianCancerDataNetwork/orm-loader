@@ -6,8 +6,14 @@ from typing import TYPE_CHECKING, Any
 import sqlalchemy as sa
 import sqlalchemy.event as sae
 import sqlalchemy.orm as so
-from oa_configurator import autocommit_connection, qualified, schema_of, Dialect, Role
-from ..helpers.sql import role_of_table
+from oa_configurator import (
+    autocommit_connection,
+    qualified,
+    role_of_table,
+    schema_of,
+    Dialect,
+    Role
+)
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.sql.compiler import IdentifierPreparer

@@ -7,6 +7,7 @@ import pytest
 import sqlalchemy as sa
 import sqlalchemy.event as sae
 import sqlalchemy.orm as so
+from oa_configurator import Role as SchemaRole
 
 from orm_loader.backends import resolve_backend
 from orm_loader.helpers import IngestError
@@ -539,6 +540,7 @@ def test_clean_nulls_passthrough():
 def test_nullable_column_with_nan_does_not_crash(session, engine, tmp_path):
     class NullableTable(Base, CSVLoadableTableInterface):
         __tablename__ = "nullable_table"
+        __table_args__ = {"schema": SchemaRole.PRIMARY.value}
 
         id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
         flag: so.Mapped[str | None] = so.mapped_column(sa.String, nullable=True)
@@ -575,6 +577,7 @@ def test_nullable_column_with_nan_does_not_crash(session, engine, tmp_path):
 def test_embedded_newline_in_field_is_preserved(session, engine, tmp_path):
     class TextTable(Base, CSVLoadableTableInterface):
         __tablename__ = "text_table"
+        __table_args__ = {"schema": SchemaRole.PRIMARY.value}
 
         id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
         name: so.Mapped[str] = so.mapped_column(sa.String)
@@ -602,6 +605,7 @@ def test_embedded_newline_in_field_is_preserved(session, engine, tmp_path):
 def test_embedded_tab_in_field(session, engine, tmp_path):
     class TextTable2(Base, CSVLoadableTableInterface):
         __tablename__ = "tab_table"
+        __table_args__ = {"schema": SchemaRole.PRIMARY.value}
 
         id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
         name: so.Mapped[str] = so.mapped_column(sa.String)

@@ -2,9 +2,8 @@
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 import logging
-from oa_configurator import schema_inspect
+from oa_configurator import role_of_table, schema_inspect
 
-from ..helpers.sql import role_of_table
 from sqlalchemy.exc import InvalidRequestError, UnboundExecutionError
 
 from typing import Type, Any, Iterator
