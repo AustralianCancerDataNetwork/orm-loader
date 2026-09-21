@@ -122,9 +122,9 @@ class CSVLoadableTableInterface(ORMTableBase):
         table_name = cls.__tablename__
 
         indices = list(cls.__table__.indexes) if resolved_index_strategy == "drop_rebuild" else []
-        inspector = schema_inspect(session, role=role_of_table(cls.__table__))
 
         if indices:
+            inspector = schema_inspect(session, role=role_of_table(cls.__table__))
             existing_in_db = {idx['name'] for idx in inspector.get_indexes(cls.__tablename__)}
             to_drop = [i for i in indices if i.name in existing_in_db]
             
@@ -180,7 +180,7 @@ class CSVLoadableTableInterface(ORMTableBase):
             if indices:
                 logger.info(f"Table `{table_name}`: Verifying/Rebuilding indices.")
                 rebuild_started = perf_counter()
-                inspector.clear_cache() # Required to ensure we get the current state of the database after potential changes
+                inspector = schema_inspect(session, role=role_of_table(cls.__table__))
                 existing_idx_names = {idx['name'] for idx in inspector.get_indexes(table_name)}
                
                 for idx in indices:
