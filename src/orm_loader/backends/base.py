@@ -12,7 +12,7 @@ import sqlalchemy.orm as so
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.sql.compiler import IdentifierPreparer
 
-from oa_configurator import Dialect, Role
+from oa_configurator import Dialect
 
 if TYPE_CHECKING:
     from ..loaders.data_classes import LoaderContext
@@ -371,16 +371,15 @@ class DatabaseBackend(ABC):
         name: str,
         selectable: sa.sql.Select[Any],
         *,
-        role: Role = Role.PRIMARY,
+        schema: str | None = None,
         with_data: bool = True,
         if_not_exists: bool = True,
     ) -> None:
         """Create a materialized view for the supplied selectable.
 
-        The view's schema is the bind's own ``schema_translate_map`` entry
-        for *role* (via ``oa_configurator.schema_of``), letting a view
-        built over vocab/results-role tables land in that role's own
-        schema instead of always primary.
+        *schema* is the view's already-resolved physical schema (or None for
+        the connection's own default); callers resolve which
+        schema_translate_map key to use before calling.
         """
         raise NotImplementedError(
             f"Backend '{self.name}' has not implemented create_materialized_view()"
@@ -392,16 +391,14 @@ class DatabaseBackend(ABC):
         bind: "Engine | Connection",
         name: str,
         *,
-        role: Role = Role.PRIMARY,
+        schema: str | None = None,
         concurrently: bool = False,
         declared_indexes: tuple["MaterializedViewIndex", ...] = (),
     ) -> None:
         """Refresh a materialized view.
 
-        The view's schema is the bind's own ``schema_translate_map`` entry
-        for *role* (via ``oa_configurator.schema_of``), letting a view
-        built over vocab/results-role tables land in that role's own
-        schema instead of always primary.
+        *schema* is the view's already-resolved physical schema, matching
+        ``create_materialized_view``.
 
         ``declared_indexes`` lets supporting backends validate a concurrent
         refresh request without defining a second catalog-based eligibility
@@ -417,18 +414,18 @@ class DatabaseBackend(ABC):
         bind: "Engine | Connection",
         name: str,
         *,
-        role: Role = Role.PRIMARY,
+        schema: str | None = None,
         if_exists: bool = True,
         cascade: bool = False,
     ) -> None:
         """Drop a materialized view.
 
-        The view's schema is the bind's own ``schema_translate_map`` entry
-        for *role*, matching ``create_materialized_view``. This is
-        deliberately non-abstract: the default implementation requires the
-        capability flag and then raises ``NotImplementedError``. Older
-        third-party backend subclasses need no override to receive a clear
-        error when they do not support this operation.
+        *schema* is the view's already-resolved physical schema, matching
+        ``create_materialized_view``. This is deliberately non-abstract: the
+        default implementation requires the capability flag and then raises
+        ``NotImplementedError``. Older third-party backend subclasses need
+        no override to receive a clear error when they do not support this
+        operation.
         """
         raise NotImplementedError(
             f"Backend '{self.name}' has not implemented drop_materialized_view()"
@@ -441,15 +438,14 @@ class DatabaseBackend(ABC):
         name: str,
         index: "MaterializedViewIndex",
         *,
-        role: Role = Role.PRIMARY,
+        schema: str | None = None,
         if_not_exists: bool = True,
     ) -> None:
         """Create an index on a materialized view.
 
-        The view's schema is the bind's own ``schema_translate_map`` entry
-        for *role*, matching ``create_materialized_view``. This is
-        deliberately non-abstract for the same compatibility reason as
-        :meth:`drop_materialized_view`.
+        *schema* is the view's already-resolved physical schema, matching
+        ``create_materialized_view``. This is deliberately non-abstract for
+        the same compatibility reason as :meth:`drop_materialized_view`.
         """
         raise NotImplementedError(
             f"Backend '{self.name}' has not implemented "

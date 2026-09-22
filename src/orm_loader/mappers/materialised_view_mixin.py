@@ -4,7 +4,7 @@ from typing import Any
 import sqlalchemy as sa
 from sqlalchemy.ext import compiler
 from sqlalchemy.schema import DDLElement
-from oa_configurator import Role
+from oa_configurator import Role, schema_of
 
 from .materialised_view_contracts import MaterializedViewIndex
 
@@ -85,9 +85,11 @@ class MaterializedViewMixin:
     - ``__mv_name__``: the name of the materialized view
     - ``__mv_select__``: a SQLAlchemy Select defining the view contents
     - optionally, ``__mv_dependencies__``: names of tables or materialized views this MV depends on
-    - optionally, ``__mv_role__``: the schema role the view itself lives under
-      (defaults to primary); set this on a vocab/results view so
-      :func:`refresh_all_mvs` resolves it to the right schema
+    - optionally, ``__mv_schema_tag__``: the schema_translate_map key a Core-only
+      declaration (no ``Base``/mapped ``Table``) resolves through.
+      When the class is also declaratively mapped, its own mapped
+      table's ``schema`` is used instead and ``__mv_schema_tag__`` is ignored
+      (see :meth:`_resolve_schema_tag`.)
 
     This mixin does not define ORM mappings; it is intended for schema-level
     helpers used during migrations, setup, or administrative workflows.
@@ -181,15 +183,28 @@ class MaterializedViewMixin:
     __mv_name__: str
     __mv_select__: sa.sql.Select[Any]
     __mv_dependencies__: set[str] = set()
-    __mv_role__: Role = Role.PRIMARY
+    __mv_schema_tag__: str = Role.PRIMARY.value
     __mv_indexes__: tuple[MaterializedViewIndex, ...] = ()
+
+    @classmethod
+    def _resolve_schema_tag(cls, schema_tag: str | None) -> str | None:
+        """Effective schema_tag for one lifecycle call.
+        A declratively mapped class's own mapped table's schema is authoritative, 
+        overriding any ``__mv_schema_tag__``.
+        """
+        if schema_tag is not None:
+            return schema_tag
+        table = getattr(cls, "__table__", None)
+        if table is not None:
+            return table.schema
+        return cls.__mv_schema_tag__
 
     @classmethod
     def create_mv(
         cls,
         bind: "sa.engine.Connection | sa.engine.Engine",
         *,
-        role: Role | None = None,
+        schema_tag: str | None = None,
         with_data: bool = True,
         if_not_exists: bool = True,
         create_indexes: bool = True,
@@ -201,12 +216,11 @@ class MaterializedViewMixin:
         ----------
         bind
             A SQLAlchemy Engine or Connection used to execute the DDL.
-        role
-            Schema role the view's own physical schema resolves through.
-            Defaults to ``cls.__mv_role__`` when omitted.
-            Set ``__mv_role__`` on a vocab/results view to ensure it resolves
-            to the correct schema and can be refreshed by :func:`refresh_all_mvs`
-            without caller needing to know the role.
+        schema_tag
+            schema_translate_map key the view's own physical schema resolves
+            through. See :meth:`_resolve_schema_tag` for the default when
+            omitted: the mapped table's own schema if the class is
+            declaratively mapped, else ``cls.__mv_schema_tag__``.
         create_indexes
             When True, create every index declared in ``__mv_indexes__``.
 
@@ -246,14 +260,15 @@ class MaterializedViewMixin:
         from ..backends.resolve import resolve_backend
 
         backend = resolve_backend(bind)
-        role_ = role if role is not None else cls.__mv_role__
+        tag = cls._resolve_schema_tag(schema_tag)
+        schema = schema_of(bind, schema_tag=tag)
 
         def create(connection: sa.engine.Connection | sa.engine.Engine) -> None:
             backend.create_materialized_view(
                 connection,
                 cls.__mv_name__,
                 cls.__mv_select__,
-                role=role_,
+                schema=schema,
                 with_data=with_data,
                 if_not_exists=if_not_exists,
             )
@@ -263,7 +278,7 @@ class MaterializedViewMixin:
                         connection,
                         cls.__mv_name__,
                         index,
-                        role=role_,
+                        schema=schema,
                         if_not_exists=if_not_exists,
                     )
 
@@ -280,7 +295,7 @@ class MaterializedViewMixin:
         cls,
         bind: "sa.engine.Connection | sa.engine.Engine",
         *,
-        role: Role | None = None,
+        schema_tag: str | None = None,
         concurrently: bool = False,
     ) -> None:
         """
@@ -290,9 +305,9 @@ class MaterializedViewMixin:
         ----------
         bind
             A SQLAlchemy Engine or Connection used to execute the refresh.
-        role
-            Schema role the view's own physical schema resolves through;
-            see :meth:`create_mv` for when to override the default.
+        schema_tag
+            schema_translate_map key the view's own physical schema resolves
+            through; see :meth:`_resolve_schema_tag` for the default.
         concurrently
             Request concurrent refresh, requiring a declared unique index.
 
@@ -312,11 +327,11 @@ class MaterializedViewMixin:
         from ..backends.resolve import resolve_backend
 
         backend = resolve_backend(bind)
-        role_ = role if role is not None else cls.__mv_role__
+        tag = cls._resolve_schema_tag(schema_tag)
         backend.refresh_materialized_view(
             bind,
             cls.__mv_name__,
-            role=role_,
+            schema=schema_of(bind, schema_tag=tag),
             concurrently=concurrently,
             declared_indexes=cls.__mv_indexes__,
         )
@@ -326,7 +341,7 @@ class MaterializedViewMixin:
         cls,
         bind: "sa.engine.Connection | sa.engine.Engine",
         *,
-        role: Role | None = None,
+        schema_tag: str | None = None,
         if_exists: bool = True,
         cascade: bool = False,
     ) -> None:
@@ -336,16 +351,17 @@ class MaterializedViewMixin:
         ----------
         bind
             A SQLAlchemy Engine or Connection used to execute the drop.
-        role
-            Schema role the view's own physical schema resolves through;
-            see :meth:`create_mv` for when to override the default.
+        schema_tag
+            schema_translate_map key the view's own physical schema resolves
+            through; see :meth:`_resolve_schema_tag` for the default.
         """
         from ..backends.resolve import resolve_backend
 
         backend = resolve_backend(bind)
-        role_ = role if role is not None else cls.__mv_role__
+        tag = cls._resolve_schema_tag(schema_tag)
         backend.drop_materialized_view(
-            bind, cls.__mv_name__, role=role_, if_exists=if_exists, cascade=cascade
+            bind, cls.__mv_name__, schema=schema_of(bind, schema_tag=tag),
+            if_exists=if_exists, cascade=cascade,
         )
 
 

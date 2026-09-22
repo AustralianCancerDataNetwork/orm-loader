@@ -274,7 +274,7 @@ def quick_load_pg(
     if not hasattr(raw_conn, "cursor"):
         raise RuntimeError("Expected DB-API connection for COPY")
 
-    table_ref = qualified(session, tablename, schema=schema)
+    table_ref = qualified(session, tablename, physical_schema=schema)
 
     encoding = infer_encoding(path)['encoding'] or 'utf-8'
     if not _SAFE_ENCODING.match(encoding):

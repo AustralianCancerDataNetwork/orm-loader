@@ -25,7 +25,7 @@ from tests.models import (
     RequiredTable,
     Role,
     SimpleTable,
-    VocabRoleTable,
+    VocabSchemaTable,
 )
 
 # Typed aliases: Pylance cannot verify SQLAlchemy metaclass-generated attrs
@@ -35,7 +35,7 @@ _RequiredTable = cast(Type[CSVTableProtocol], RequiredTable)
 _CompositeTable = cast(Type[CSVTableProtocol], CompositeTable)
 _EnumTable = cast(Type[CSVTableProtocol], EnumTable)
 _ImpliedEnumTable = cast(Type[CSVTableProtocol], ImpliedEnumTable)
-_VocabRoleTable = cast(Type[CSVTableProtocol], VocabRoleTable)
+_VocabSchemaTable = cast(Type[CSVTableProtocol], VocabSchemaTable)
 
 
 @pytest.fixture(autouse=True)
@@ -77,20 +77,20 @@ def test_initial_csv_load(session, tmp_path):
     ]
 
 
-def test_initial_csv_load_for_a_non_primary_role_table(session, tmp_path):
-    """SQLite has no real schema concept, so every Role folds to None 
+def test_initial_csv_load_for_a_non_primary_schema_table(session, tmp_path):
+    """SQLite has no real schema concept, so every Role folds to None
     on this connection (see oa_configurator's SQLiteTestStrategy).
     A VOCAB-tagged table's load path must not error out just because
-    the table's declared role differs from primary. This is the SQLite
+    the table's declared schema tag differs from primary. This is the SQLite
     counterpart to test_schema_translate_map.py's Postgres-only, non-primary-
-    role coverage."""
+    schema-tag coverage."""
     csv_path = tmp_path / "test_vocab_role_table.csv"
 
     pd.DataFrame(
         [{"id": 1, "name": "alpha"}, {"id": 2, "name": "beta"}]
     ).to_csv(csv_path, index=False, sep="\t")
 
-    inserted = _VocabRoleTable.load_csv(
+    inserted = _VocabSchemaTable.load_csv(
         session, csv_path, dedupe=False, loader=PandasLoader()
     )
     session.commit()
@@ -98,7 +98,7 @@ def test_initial_csv_load_for_a_non_primary_role_table(session, tmp_path):
     assert inserted == 2
 
     rows = session.execute(
-        sa.select(VocabRoleTable).order_by(VocabRoleTable.id)
+        sa.select(VocabSchemaTable).order_by(VocabSchemaTable.id)
     ).scalars().all()
 
     assert [(r.id, r.name) for r in rows] == [(1, "alpha"), (2, "beta")]

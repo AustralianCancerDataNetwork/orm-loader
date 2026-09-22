@@ -2,7 +2,7 @@
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 import logging
-from oa_configurator import role_of_table, schema_inspect
+from oa_configurator import schema_of, validate_schema_tag
 
 from sqlalchemy.exc import InvalidRequestError, UnboundExecutionError
 
@@ -124,8 +124,9 @@ class CSVLoadableTableInterface(ORMTableBase):
         indices = list(cls.__table__.indexes) if resolved_index_strategy == "drop_rebuild" else []
 
         if indices:
-            inspector = schema_inspect(session, role=role_of_table(cls.__table__))
-            existing_in_db = {idx['name'] for idx in inspector.get_indexes(cls.__tablename__)}
+            inspector = sa.inspect(session.connection())
+            schema = schema_of(session, schema_tag=validate_schema_tag(cls.__table__))
+            existing_in_db = {idx['name'] for idx in inspector.get_indexes(cls.__tablename__, schema=schema)}
             to_drop = [i for i in indices if i.name in existing_in_db]
             
             if to_drop:
@@ -180,8 +181,9 @@ class CSVLoadableTableInterface(ORMTableBase):
             if indices:
                 logger.info(f"Table `{table_name}`: Verifying/Rebuilding indices.")
                 rebuild_started = perf_counter()
-                inspector = schema_inspect(session, role=role_of_table(cls.__table__))
-                existing_idx_names = {idx['name'] for idx in inspector.get_indexes(table_name)}
+                inspector = sa.inspect(session.connection())
+                schema = schema_of(session, schema_tag=validate_schema_tag(cls.__table__))
+                existing_idx_names = {idx['name'] for idx in inspector.get_indexes(table_name, schema=schema)}
                
                 for idx in indices:
                     if idx.name not in existing_idx_names:

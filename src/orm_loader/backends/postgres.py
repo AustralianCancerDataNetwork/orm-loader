@@ -9,10 +9,9 @@ import sqlalchemy.orm as so
 from oa_configurator import (
     autocommit_connection,
     qualified,
-    role_of_table,
     schema_of,
+    validate_schema_tag,
     Dialect,
-    Role
 )
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import OperationalError
@@ -73,7 +72,9 @@ class PostgresBackend(DatabaseBackend):
         table = table_cls.__table__
         preparer = self.identifier_preparer
         staging_ref = self.qualified_staging_name(table_cls.__tablename__)
-        source_ref = qualified(session, table.name, role=role_of_table(table))
+        source_ref = qualified(
+            session, table.name, physical_schema=schema_of(session, schema_tag=validate_schema_tag(table))
+        )
         session.execute(sa.text(f'DROP TABLE IF EXISTS {staging_ref};'))
         session.execute(
             sa.text(
@@ -300,18 +301,17 @@ class PostgresBackend(DatabaseBackend):
         name: str,
         selectable: sa.sql.Select[Any],
         *,
-        role: Role = Role.PRIMARY,
+        schema: str | None = None,
         with_data: bool = True,
         if_not_exists: bool = True,
     ) -> None:
         from ..mappers.materialised_view_mixin import CreateMaterializedView
 
         with self._as_connection(bind) as conn:
-            schema = schema_of(conn, role=role)
             try:
                 conn.execute(
                     CreateMaterializedView(
-                        qualified(conn, name, schema=schema),
+                        qualified(conn, name, physical_schema=schema),
                         selectable,
                         with_data=with_data,
                         if_not_exists=if_not_exists,
@@ -334,12 +334,11 @@ class PostgresBackend(DatabaseBackend):
         bind: Engine | Connection,
         name: str,
         *,
-        role: Role = Role.PRIMARY,
+        schema: str | None = None,
         concurrently: bool = False,
         declared_indexes: tuple["MaterializedViewIndex", ...] = (),
     ) -> None:
         with self._as_connection(bind) as conn:
-            schema = schema_of(conn, role=role)
             if concurrently:
                 if not any(index.unique for index in declared_indexes):
                     raise ConcurrentRefreshNotEligibleError(
@@ -351,7 +350,7 @@ class PostgresBackend(DatabaseBackend):
                         )
                     )
 
-            safe_name = qualified(conn, name, schema=schema)
+            safe_name = qualified(conn, name, physical_schema=schema)
             concurrency = "CONCURRENTLY " if concurrently else ""
             try:
                 conn.execute(sa.text(f"REFRESH MATERIALIZED VIEW {concurrency}{safe_name};"))
@@ -381,18 +380,17 @@ class PostgresBackend(DatabaseBackend):
         bind: Engine | Connection,
         name: str,
         *,
-        role: Role = Role.PRIMARY,
+        schema: str | None = None,
         if_exists: bool = True,
         cascade: bool = False,
     ) -> None:
         from ..mappers.materialised_view_contracts import DropMaterializedView
 
         with self._as_connection(bind) as conn:
-            schema = schema_of(conn, role=role)
             try:
                 conn.execute(
                     DropMaterializedView(
-                        qualified(conn, name, schema=schema), if_exists=if_exists, cascade=cascade
+                        qualified(conn, name, physical_schema=schema), if_exists=if_exists, cascade=cascade
                     )
                 )
             except Exception as error:
@@ -413,17 +411,16 @@ class PostgresBackend(DatabaseBackend):
         name: str,
         index: "MaterializedViewIndex",
         *,
-        role: Role = Role.PRIMARY,
+        schema: str | None = None,
         if_not_exists: bool = True,
     ) -> None:
         from ..mappers.materialised_view_contracts import CreateMaterializedViewIndex
 
         with self._as_connection(bind) as conn:
-            schema = schema_of(conn, role=role)
             try:
                 conn.execute(
                     CreateMaterializedViewIndex(
-                        qualified(conn, name, schema=schema), index, if_not_exists=if_not_exists
+                        qualified(conn, name, physical_schema=schema), index, if_not_exists=if_not_exists
                     )
                 )
             except Exception as error:

@@ -105,19 +105,35 @@ PatientSummaryMV.refresh_mv(engine, concurrently=True)
 
 This is fail-closed by design. An index created manually outside `__mv_indexes__` does not satisfy the mixin's declaration contract; declare it in the class even if another migration is responsible for creating it. Expressions, partial indexes, and other index forms are outside this simple contract and should not be represented as `MaterializedViewIndex` entries.
 
-The view's physical schema comes from the bound connection's own `schema_translate_map`, the same mechanism every other schema-aware table in this stack uses (`oa_configurator.schema_of`). `__mv_role__` declares which role a view resolves through (defaulting to `Role.PRIMARY`); pass `role=` to `create_mv()`/`refresh_mv()`/`drop_mv()` to override it for one call.
+The view's physical schema comes from the bound connection's own `schema_translate_map`. `create_mv()`/`refresh_mv()`/`drop_mv()` resolve it via `oa_configurator.schema_of()` before ever reaching the backend, which only ever sees an already-resolved physical schema string.
+
+The schema tag itself comes from one of three places, in order:
+
+1. an explicit `schema_tag=` argument, for a one-off override;
+2. when the class is also declaratively mapped (combined with a `Base`, with a real `__table__`), that table's own `schema` -- set the schema the same way as any other mapped table, via `__table_args__ = {"schema": ...}`, and the materialized view follows it automatically;
+3. `__mv_schema_tag__` (defaults to `"primary"`), only consulted for a Core-only declaration with no mapped table to derive anything from.
 
 ```python
+# Core-only: no Base, no mapped table, so __mv_schema_tag__ is what resolves it.
 class VocabSummaryMV(MaterializedViewMixin):
     __mv_name__ = "vocab_summary"
     __mv_select__ = ...
-    __mv_role__ = Role.VOCAB  # resolves via the connection's vocab schema
+    __mv_schema_tag__ = Role.VOCAB.value  # resolves via the connection's vocab schema
 
-# Uses __mv_role__ (Role.PRIMARY by default) via the connection's own schema_translate_map.
+# Uses __mv_schema_tag__ ("primary" by default) via the connection's own schema_translate_map.
 RecentObservationMV.create_mv(engine)
 
 # Override for one call.
-RecentObservationMV.create_mv(engine, role=Role.VOCAB)
+RecentObservationMV.create_mv(engine, schema_tag=Role.VOCAB.value)
+
+# Declaratively mapped: the mapped table's own schema is authoritative, no
+# __mv_schema_tag__ needed (or consulted) at all.
+class VocabPatientSummaryMV(Base, MaterializedViewMixin):
+    __mv_name__ = "vocab_patient_summary"
+    __mv_select__ = ...
+    __tablename__ = "vocab_patient_summary"
+    __table_args__ = {"schema": Role.VOCAB.value}
+    patient_id = sa.Column(sa.Integer, primary_key=True)
 ```
 
 Every generated identifier is quoted through `oa_configurator.qualified()`, which quotes each component only when the dialect actually requires it (reserved words, mixed case, embedded quotes or spaces) — the same behavior every other Core-built query in this stack has.

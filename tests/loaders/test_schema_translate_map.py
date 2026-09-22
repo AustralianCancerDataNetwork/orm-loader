@@ -29,7 +29,7 @@ from orm_loader.backends import STAGING_SCHEMA
 from orm_loader.loaders.loader_interface import PandasLoader
 
 from tests.conftest import schema_scoped_session
-from tests.models import SimpleTable, VocabRoleTable
+from tests.models import SimpleTable, VocabSchemaTable
 
 
 def test_load_csv_respects_non_default_schema_end_to_end(pg_db, tmp_path):
@@ -112,9 +112,9 @@ def test_replace_merge_respects_non_default_schema_end_to_end(pg_db, tmp_path):
     assert rows == [(1, "alpha-updated"), (2, "beta")]
 
 
-def test_load_csv_respects_non_primary_role_end_to_end(pg_db, tmp_path):
-    """Checks if the derivation of the role from the table's own
-    __table_role__ attribute works correctly for each role."""
+def test_load_csv_respects_non_primary_schema_tag_end_to_end(pg_db, tmp_path):
+    """Checks that the schema tag is correctly derived from the table's own
+    schema (table.schema, via validate_schema_tag()) for a non-primary tag."""
     primary_schema = f"test_primary_{uuid.uuid4().hex[:8]}"
     vocab_schema = f"test_vocab_{uuid.uuid4().hex[:8]}"
     conn = pg_db.connection
@@ -124,7 +124,7 @@ def test_load_csv_respects_non_primary_role_end_to_end(pg_db, tmp_path):
 
     session = schema_scoped_session(
         conn,
-        VocabRoleTable.__table__,
+        VocabSchemaTable.__table__,
         {SchemaRole.PRIMARY.value: primary_schema, SchemaRole.VOCAB.value: vocab_schema},
     )
 
@@ -133,7 +133,7 @@ def test_load_csv_respects_non_primary_role_end_to_end(pg_db, tmp_path):
         csv_path, index=False, sep="\t"
     )
 
-    inserted = VocabRoleTable.load_csv(
+    inserted = VocabSchemaTable.load_csv(
         session, csv_path, dedupe=False, loader=PandasLoader(), staging_schema=STAGING_SCHEMA
     )
     session.commit()

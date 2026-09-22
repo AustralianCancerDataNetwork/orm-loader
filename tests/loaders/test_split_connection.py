@@ -14,14 +14,14 @@ from orm_loader.backends import STAGING_SCHEMA
 from orm_loader.loaders.loader_interface import PandasLoader
 
 from tests.conftest import schema_scoped_session
-from tests.models import SimpleTable, VocabRoleTable
+from tests.models import SimpleTable, VocabSchemaTable
 
 
 def test_load_csv_across_two_genuinely_separate_connections(pg_db, session, tmp_path):
-    """``pg_db`` (real Postgres, primary role) and ``session`` (real SQLite,
-    vocab role, via the module-level ``engine``/``session`` fixtures) are two
-    entirely different engines against two entirely different database
-    systems."""
+    """``pg_db`` (real Postgres, primary connection) and ``session`` (real
+    SQLite, vocab connection, via the module-level ``engine``/``session``
+    fixtures) are two entirely different engines against two entirely
+    different database systems."""
     primary_schema = f"test_primary_{uuid.uuid4().hex[:8]}"
     conn = pg_db.connection
     ensure_schema(conn, primary_schema)
@@ -42,7 +42,7 @@ def test_load_csv_across_two_genuinely_separate_connections(pg_db, session, tmp_
     SimpleTable.load_csv(primary_session, primary_csv, dedupe=False, loader=PandasLoader())
     primary_session.commit()
 
-    VocabRoleTable.load_csv(session, vocab_csv, dedupe=False, loader=PandasLoader())
+    VocabSchemaTable.load_csv(session, vocab_csv, dedupe=False, loader=PandasLoader())
     session.commit()
 
     primary_rows = conn.execute(
@@ -51,7 +51,7 @@ def test_load_csv_across_two_genuinely_separate_connections(pg_db, session, tmp_
     assert primary_rows == [(1, "primary-alpha")]
 
     vocab_rows = session.execute(
-        sa.select(VocabRoleTable).order_by(VocabRoleTable.id)
+        sa.select(VocabSchemaTable).order_by(VocabSchemaTable.id)
     ).scalars().all()
     assert [(r.id, r.name) for r in vocab_rows] == [(1, "vocab-alpha")]
 

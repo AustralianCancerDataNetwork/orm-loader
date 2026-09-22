@@ -154,30 +154,27 @@ def test_postgres_backend_materialized_view_methods_work_end_to_end(pg_db):
     assert conn.execute(sa.text("SELECT n FROM mv_test")).scalar() == 1
 
 
-def test_postgres_backend_materialized_view_respects_role(pg_db) -> None:
-    """create_materialized_view()/refresh_materialized_view() used to always
-    resolve schema=None -> schema_of(conn) with no role, which defaults to
-    Role.PRIMARY regardless of what role the view was actually built over.
-    A view over vocab-role tables must land in the vocab schema, not
-    wherever primary happens to be."""
+def test_postgres_backend_materialized_view_respects_schema(pg_db) -> None:
+    """Resolving a schema_tag to a physical schema is the caller's job
+    now (see MaterializedViewMixin.create_mv, which calls schema_of() before
+    ever reaching the backend). This proves the backend itself honors
+    whatever already-resolved schema it's given, placing the view there and
+    nowhere else."""
     backend = PostgresBackend()
     selectable = sa.select(sa.literal(1).label("n"))
     engine = pg_db.connection.engine
 
     with isolated_test_schema(engine, prefix="mv_primary") as primary_schema, \
          isolated_test_schema(engine, prefix="mv_vocab") as vocab_schema:
-        scoped = engine.execution_options(
-            schema_translate_map={Role.PRIMARY.value: primary_schema, "vocab": vocab_schema}
-        )
-        with scoped.begin() as conn:
-            backend.create_materialized_view(conn, "mv_role_test", selectable, role=Role.VOCAB)
-            backend.refresh_materialized_view(conn, "mv_role_test", role=Role.VOCAB)
+        with engine.begin() as conn:
+            backend.create_materialized_view(conn, "mv_schema_test", selectable, schema=vocab_schema)
+            backend.refresh_materialized_view(conn, "mv_schema_test", schema=vocab_schema)
 
         with engine.connect() as conn:
-            assert sa.inspect(conn).has_table("mv_role_test", schema=vocab_schema)
-            assert not sa.inspect(conn).has_table("mv_role_test", schema=primary_schema)
+            assert sa.inspect(conn).has_table("mv_schema_test", schema=vocab_schema)
+            assert not sa.inspect(conn).has_table("mv_schema_test", schema=primary_schema)
             assert conn.execute(
-                sa.text(f'SELECT n FROM "{vocab_schema}".mv_role_test')
+                sa.text(f'SELECT n FROM "{vocab_schema}".mv_schema_test')
             ).scalar() == 1
 
 
@@ -261,7 +258,7 @@ def test_postgres_backend_create_materialized_view_index_emits_expected_sql():
     session = _FakeSession(schema_translate_map={Role.PRIMARY.value: "reporting"})
     index = MaterializedViewIndex(name="mv_test_row_id_uq", columns=("row_id",), unique=True)
 
-    backend.create_materialized_view_index(_sess(session), "mv_test", index)
+    backend.create_materialized_view_index(_sess(session), "mv_test", index, schema="reporting")
 
     assert session.statements == [
         'CREATE UNIQUE INDEX IF NOT EXISTS "mv_test_row_id_uq" ON reporting.mv_test ("row_id")'
@@ -285,7 +282,7 @@ def test_postgres_backend_drop_materialized_view_default_args():
     backend = PostgresBackend()
     session = _FakeSession(schema_translate_map={Role.PRIMARY.value: "reporting"})
 
-    backend.drop_materialized_view(_sess(session), "mv_test")
+    backend.drop_materialized_view(_sess(session), "mv_test", schema="reporting")
 
     assert session.statements == ['DROP MATERIALIZED VIEW IF EXISTS reporting.mv_test']
 
@@ -294,7 +291,9 @@ def test_postgres_backend_drop_materialized_view_cascade_and_if_exists_false():
     backend = PostgresBackend()
     session = _FakeSession(schema_translate_map={Role.PRIMARY.value: "reporting"})
 
-    backend.drop_materialized_view(_sess(session), "mv_test", if_exists=False, cascade=True)
+    backend.drop_materialized_view(
+        _sess(session), "mv_test", schema="reporting", if_exists=False, cascade=True
+    )
 
     assert session.statements == ['DROP MATERIALIZED VIEW reporting.mv_test CASCADE']
 
@@ -367,6 +366,7 @@ def test_postgres_backend_refresh_concurrently_declared_but_database_rejects_it_
         backend.refresh_materialized_view(
             _sess(session),
             "mv_test",
+            schema="reporting",
             concurrently=True,
             declared_indexes=(index,),
         )
@@ -411,6 +411,7 @@ def test_postgres_backend_refresh_concurrently_with_declared_index_emits_concurr
     backend.refresh_materialized_view(
         _sess(session),
         "mv_test",
+        schema="reporting",
         concurrently=True,
         declared_indexes=(index,),
     )
@@ -423,10 +424,9 @@ def test_postgres_backend_refresh_concurrently_with_declared_index_emits_concurr
 def test_postgres_backend_materialized_view_lifecycle_is_schema_isolated_with_adversarial_identifiers(
     pg_db,
 ):
-    """Two schemas, each addressed via its own scoped connection (role-based
-    resolution ties the schema to the connection, not to a per-call
-    override), must never bleed into each other even with adversarial,
-    quote-laden identifiers."""
+    """Two identically-named views, each placed in its own schema via an
+    explicit schema= argument, must never bleed into each other even with
+    adversarial, quote-laden identifiers."""
     from orm_loader.mappers.materialised_view_contracts import MaterializedViewIndex
 
     backend = PostgresBackend()
@@ -442,17 +442,16 @@ def test_postgres_backend_materialized_view_lifecycle_is_schema_isolated_with_ad
             for schema in (left_schema, right_schema):
                 setup_conn.execute(sa.text(f"CREATE SCHEMA {preparer.quote_identifier(schema)}"))
 
-        left = engine.execution_options(schema_translate_map={Role.PRIMARY.value: left_schema})
-        right = engine.execution_options(schema_translate_map={Role.PRIMARY.value: right_schema})
+        for schema in (left_schema, right_schema):
+            with engine.begin() as conn:
+                backend.create_materialized_view(conn, name, selectable, schema=schema)
+                backend.create_materialized_view_index(conn, name, index, schema=schema)
 
-        for scoped in (left, right):
-            with scoped.begin() as conn:
-                backend.create_materialized_view(conn, name, selectable)
-                backend.create_materialized_view_index(conn, name, index)
-
-        with left.begin() as conn:
-            backend.refresh_materialized_view(conn, name, concurrently=True, declared_indexes=(index,))
-            backend.drop_materialized_view(conn, name)
+        with engine.begin() as conn:
+            backend.refresh_materialized_view(
+                conn, name, schema=left_schema, concurrently=True, declared_indexes=(index,)
+            )
+            backend.drop_materialized_view(conn, name, schema=left_schema)
 
         with engine.connect() as conn:
             assert conn.execute(
