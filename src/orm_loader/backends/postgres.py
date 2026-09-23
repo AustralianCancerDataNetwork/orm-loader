@@ -9,7 +9,7 @@ import sqlalchemy.orm as so
 from oa_configurator import (
     autocommit_connection,
     qualified,
-    schema_of,
+    physical_schema_of,
     validate_schema_tag,
     Dialect,
 )
@@ -73,7 +73,7 @@ class PostgresBackend(DatabaseBackend):
         preparer = self.identifier_preparer
         staging_ref = self.qualified_staging_name(table_cls.__tablename__)
         source_ref = qualified(
-            session, table.name, physical_schema=schema_of(session, schema_tag=validate_schema_tag(table))
+            session, table.name, physical_schema=physical_schema_of(session, schema_tag=validate_schema_tag(table))
         )
         session.execute(sa.text(f'DROP TABLE IF EXISTS {staging_ref};'))
         session.execute(

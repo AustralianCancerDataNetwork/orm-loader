@@ -7,7 +7,7 @@ from sqlalchemy.schema import DDLElement
 from oa_configurator import (
     Role, 
     open_connection, 
-    schema_of, 
+    physical_schema_of, 
     validate_schema_tag
 )
 
@@ -266,7 +266,7 @@ class MaterializedViewMixin:
 
         backend = resolve_backend(bind)
         tag = cls._resolve_schema_tag(schema_tag)
-        schema = schema_of(bind, schema_tag=tag)
+        schema = physical_schema_of(bind, schema_tag=tag)
 
         def create(connection: sa.engine.Connection | sa.engine.Engine) -> None:
             backend.create_materialized_view(
@@ -331,7 +331,7 @@ class MaterializedViewMixin:
         backend.refresh_materialized_view(
             bind,
             cls.__mv_name__,
-            schema=schema_of(bind, schema_tag=tag),
+            schema=physical_schema_of(bind, schema_tag=tag),
             concurrently=concurrently,
             declared_indexes=cls.__mv_indexes__,
         )
@@ -360,7 +360,7 @@ class MaterializedViewMixin:
         backend = resolve_backend(bind)
         tag = cls._resolve_schema_tag(schema_tag)
         backend.drop_materialized_view(
-            bind, cls.__mv_name__, schema=schema_of(bind, schema_tag=tag),
+            bind, cls.__mv_name__, schema=physical_schema_of(bind, schema_tag=tag),
             if_exists=if_exists, cascade=cascade,
         )
 

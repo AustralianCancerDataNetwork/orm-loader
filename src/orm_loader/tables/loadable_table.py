@@ -2,7 +2,7 @@
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 import logging
-from oa_configurator import schema_of, validate_schema_tag
+from oa_configurator import physical_schema_of, validate_schema_tag
 
 from sqlalchemy.exc import InvalidRequestError, UnboundExecutionError
 
@@ -125,7 +125,7 @@ class CSVLoadableTableInterface(ORMTableBase):
 
         if indices:
             inspector = sa.inspect(session.connection())
-            schema = schema_of(session, schema_tag=validate_schema_tag(cls.__table__))
+            schema = physical_schema_of(session, schema_tag=validate_schema_tag(cls.__table__))
             existing_in_db = {idx['name'] for idx in inspector.get_indexes(cls.__tablename__, schema=schema)}
             to_drop = [i for i in indices if i.name in existing_in_db]
             
@@ -182,7 +182,7 @@ class CSVLoadableTableInterface(ORMTableBase):
                 logger.info(f"Table `{table_name}`: Verifying/Rebuilding indices.")
                 rebuild_started = perf_counter()
                 inspector = sa.inspect(session.connection())
-                schema = schema_of(session, schema_tag=validate_schema_tag(cls.__table__))
+                schema = physical_schema_of(session, schema_tag=validate_schema_tag(cls.__table__))
                 existing_idx_names = {idx['name'] for idx in inspector.get_indexes(table_name, schema=schema)}
                
                 for idx in indices:

@@ -43,7 +43,7 @@ class _FakeSession:
         self._schema_translate_map = schema_translate_map
 
     def get_execution_options(self) -> dict:
-        """Minimal support for oa_configurator.schema_of(), which every
+        """Minimal support for oa_configurator.physical_schema_of(), which every
         materialized-view backend method resolves its target schema through."""
         if self._schema_translate_map is None:
             return {}
@@ -152,7 +152,7 @@ def test_postgres_backend_materialized_view_methods_work_end_to_end(pg_db):
 
 def test_postgres_backend_materialized_view_respects_schema(pg_db) -> None:
     """Resolving a schema_tag to a physical schema is the caller's job
-    now (see MaterializedViewMixin.create_mv, which calls schema_of() before
+    now (see MaterializedViewMixin.create_mv, which calls physical_schema_of() before
     ever reaching the backend). This proves the backend itself honors
     whatever already-resolved schema it's given, placing the view there and
     nowhere else."""

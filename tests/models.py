@@ -98,7 +98,7 @@ class ImpliedEnumTable(Base, CSVLoadableTableInterface):
 
 class VocabSchemaTable(Base, CSVLoadableTableInterface):
     """A VOCAB-tagged table, so tests can prove the staging/index schema
-    derivation (table.schema resolved via validate_schema_tag()/schema_of(),
+    derivation (table.schema resolved via validate_schema_tag()/physical_schema_of(),
     threaded through create_staging_table()/manage_indices()) actually
     resolves a non-primary schema tag correctly, instead of only ever
     exercising the PRIMARY-tagged default."""
