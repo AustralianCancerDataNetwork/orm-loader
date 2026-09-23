@@ -162,7 +162,7 @@ class _MappedVocabMv(_MappedMvBase, MaterializedViewMixin):
 
 
 class _MappedNoSchemaMv(_MappedMvBase, MaterializedViewMixin):
-    """Declaratively mapped, no schema set at all -- should resolve to None,
+    """Declaratively mapped, no schema set at all. Should resolve to None,
     not fall back to __mv_schema_tag__'s "primary" default."""
 
     __mv_name__ = "mv_mapped_no_schema"
