@@ -4,7 +4,12 @@ from typing import Any
 import sqlalchemy as sa
 from sqlalchemy.ext import compiler
 from sqlalchemy.schema import DDLElement
-from oa_configurator import Role, schema_of
+from oa_configurator import (
+    Role, 
+    open_connection, 
+    schema_of, 
+    validate_schema_tag
+)
 
 from .materialised_view_contracts import MaterializedViewIndex
 
@@ -196,7 +201,7 @@ class MaterializedViewMixin:
             return schema_tag
         table = getattr(cls, "__table__", None)
         if table is not None:
-            return table.schema
+            return validate_schema_tag(table)
         return cls.__mv_schema_tag__
 
     @classmethod
@@ -282,13 +287,8 @@ class MaterializedViewMixin:
                         if_not_exists=if_not_exists,
                     )
 
-        if isinstance(bind, sa.engine.Engine):
-            with bind.begin() as connection:
-                create(connection)
-        elif isinstance(bind, sa.engine.Connection):
-            create(bind)
-        else:  # pragma: no cover - guarded above; keeps the runtime contract explicit.
-            raise TypeError("bind must be a SQLAlchemy Engine or Connection")
+        with open_connection(bind) as connection:
+            create(connection)
 
     @classmethod
     def refresh_mv(

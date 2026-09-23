@@ -13,6 +13,8 @@ from sqlalchemy.dialects import sqlite as sqlite_dialect
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql.compiler import IdentifierPreparer
 
+from oa_configurator import schema_if_supported
+
 from .base import BackendCapabilities, DatabaseBackend, Dialect
 
 if TYPE_CHECKING:
@@ -40,7 +42,7 @@ class SQLiteBackend(DatabaseBackend):
         journal_mode: str = "WAL",
         defer_foreign_keys: bool = True,
     ) -> None:
-        if staging_schema is not None:
+        if staging_schema is not None and schema_if_supported(staging_schema, Dialect.SQLITE) is None:
             logger.warning(
                 "SQLite does not support schema-qualified staging tables; "
                 f"got staging_schema={staging_schema!r}. Setting staging_schema=None."

@@ -9,16 +9,15 @@ import sqlalchemy.orm as so
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import Engine
 
-from oa_configurator import SCHEMA_TRANSLATE_MAP_KEY, Role
+from oa_configurator import SCHEMA_TRANSLATE_MAP_KEY, Role, qualified
 from oa_configurator.testing import isolated_test_schema
 from orm_loader.backends import STAGING_SCHEMA, Dialect, PostgresBackend
-from orm_loader.helpers.sql import qualify_identifier
 from tests.models import ComputedColumnTable
 
 _TARGET_TABLE = ComputedColumnTable.__tablename__
 _STAGING_TABLE = f"_staging_{_TARGET_TABLE}"
 _PREPARER = postgresql.dialect().identifier_preparer
-_STAGING_TABLE_WITH_SCHEMA: str = qualify_identifier(_STAGING_TABLE, STAGING_SCHEMA, _PREPARER)
+_STAGING_TABLE_WITH_SCHEMA: str = qualified(_PREPARER, _STAGING_TABLE, physical_schema=STAGING_SCHEMA)
 
 _ComputedTableCls = cast("Type[CSVTableProtocol]", ComputedColumnTable)
 
@@ -91,16 +90,13 @@ def test_postgres_backend_identity_and_capabilities():
     assert backend.capabilities.supports_materialized_views is True
 
 
-def test_qualify_identifier_escapes_embedded_quotes():
-    assert qualify_identifier("table", 'schema"name', _PREPARER) == '"schema""name"."table"'
-    assert qualify_identifier('ta"ble', None, _PREPARER) == '"ta""ble"'
 
 
 def test_postgres_backend_default_staging_schema_is_none():
     backend = PostgresBackend()
 
     assert backend.staging_schema is None
-    assert backend.qualified_staging_name(_TARGET_TABLE) == _PREPARER.quote_identifier(_STAGING_TABLE)
+    assert backend.qualified_staging_name(_TARGET_TABLE) == qualified(_PREPARER, _STAGING_TABLE, physical_schema=None)
 
 
 def test_postgres_backend_create_staging_table_drops_computed_columns(pg_session):

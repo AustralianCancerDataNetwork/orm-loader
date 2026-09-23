@@ -12,7 +12,7 @@ import sqlalchemy.orm as so
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.sql.compiler import IdentifierPreparer
 
-from oa_configurator import Dialect
+from oa_configurator import Dialect, open_connection, qualified
 
 if TYPE_CHECKING:
     from ..loaders.data_classes import LoaderContext
@@ -120,10 +120,8 @@ class DatabaseBackend(ABC):
         str
             e.g. '"staging"."_staging_concept"' or '"_staging_concept"'.
         """
-        from ..helpers.sql import qualify_identifier
-
-        return qualify_identifier(
-            self.staging_name_for_table(tablename), self.staging_schema, self.identifier_preparer
+        return qualified(
+            self.identifier_preparer, self.staging_name_for_table(tablename), physical_schema=self.staging_schema
         )
 
     @property
@@ -221,11 +219,8 @@ class DatabaseBackend(ABC):
                 "be the same one (or share the same dialect as) the bind resolve_backend() "
                 "was given."
             )
-        if isinstance(bind, Engine):
-            with bind.begin() as conn:
-                yield conn
-        else:
-            yield bind
+        with open_connection(bind) as conn:
+            yield conn
 
     def _insertable_column_names(
         self,
