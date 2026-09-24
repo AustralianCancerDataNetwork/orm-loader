@@ -392,7 +392,9 @@ class CSVLoadableTableInterface(ORMTableBase):
             Merge strategy to apply (e.g. ``replace``, ``upsert``, or
             ``insert_if_empty``).
         quote_mode
-            Quoting mode used by the PostgreSQL fast-path loader.
+            Quoting mode. Governs parsing on both the PostgreSQL COPY
+            fast-path and the pandas ORM fallback, so a file that falls back
+            to the ORM path is still parsed identically.
         index_strategy
             Index handling strategy during merge. Use ``"auto"`` to let
             the backend choose a sensible default.
