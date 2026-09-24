@@ -105,7 +105,7 @@ PatientSummaryMV.refresh_mv(engine, concurrently=True)
 
 This is fail-closed by design. An index created manually outside `__mv_indexes__` does not satisfy the mixin's declaration contract; declare it in the class even if another migration is responsible for creating it. Expressions, partial indexes, and other index forms are outside this simple contract and should not be represented as `MaterializedViewIndex` entries.
 
-The view's physical schema comes from the bound connection's own `schema_translate_map`. `create_mv()`/`refresh_mv()`/`drop_mv()` resolve it via `oa_configurator.schema_of()` before ever reaching the backend, which only ever sees an already-resolved physical schema string.
+The view's physical schema comes from the bound connection's own `schema_translate_map`. `create_mv()`/`refresh_mv()`/`drop_mv()` resolve it via `oa_configurator.physical_schema_of()` before ever reaching the backend, which only ever sees an already-resolved physical schema string.
 
 The schema tag itself comes from one of three places, in order:
 
@@ -142,7 +142,7 @@ Every generated identifier is quoted through `oa_configurator.qualified()`, whic
 
 The built-in implementation is PostgreSQL-oriented. SQLite rejects materialized-view operations with `NotImplementedError`; this is intentional, not an emulation using ordinary views.
 
-`drop_mv()` and declared-index creation wrap execution failures in `MaterializationError`. 
+`create_mv()`, `drop_mv()`, and declared-index creation all wrap execution failures in `MaterializationError`.
 
 ## API reference
 

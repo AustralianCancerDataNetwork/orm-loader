@@ -45,3 +45,15 @@ Validates primary key presence, nullability, and alignment with specs.
 Validates structural correctness of foreign key definitions.
 
 ::: orm_loader.registry.validation.ForeignKeyShapeValidator
+
+---
+
+## `always_on_validators()`
+
+Returns the standard bundle of all four validators above
+(`ColumnPresenceValidator`, `ColumnNullabilityValidator`,
+`PrimaryKeyValidator`, `ForeignKeyShapeValidator`) as a ready-made list, for
+callers that want the default validation set without constructing each one
+individually.
+
+::: orm_loader.registry.validation_presets.always_on_validators
