@@ -105,24 +105,44 @@ PatientSummaryMV.refresh_mv(engine, concurrently=True)
 
 This is fail-closed by design. An index created manually outside `__mv_indexes__` does not satisfy the mixin's declaration contract; declare it in the class even if another migration is responsible for creating it. Expressions, partial indexes, and other index forms are outside this simple contract and should not be represented as `MaterializedViewIndex` entries.
 
-By default, `schema=None` leaves the view name unqualified. PostgreSQL resolves that name through the connection's `search_path`, matching the behavior of existing callers. Pass `schema="reporting"` only when the caller intentionally wants an explicit schema-qualified target.
+The view's physical schema comes from the bound connection's own `schema_translate_map`. `create_mv()`/`refresh_mv()`/`drop_mv()` resolve it via `oa_configurator.physical_schema_of()` before ever reaching the backend, which only ever sees an already-resolved physical schema string.
+
+The schema tag itself comes from one of three places, in order:
+
+1. an explicit `schema_tag=` argument, for a one-off override;
+2. when the class is also declaratively mapped (combined with a `Base`, with a real `__table__`), that table's own `schema` -- set the schema the same way as any other mapped table, via `__table_args__ = {"schema": ...}`, and the materialized view follows it automatically;
+3. `__mv_schema_tag__` (defaults to `"primary"`), only consulted for a Core-only declaration with no mapped table to derive anything from.
 
 ```python
-# Existing/default behavior: search_path resolves the target.
+# Core-only: no Base, no mapped table, so __mv_schema_tag__ is what resolves it.
+class VocabSummaryMV(MaterializedViewMixin):
+    __mv_name__ = "vocab_summary"
+    __mv_select__ = ...
+    __mv_schema_tag__ = Role.VOCAB.value  # resolves via the connection's vocab schema
+
+# Uses __mv_schema_tag__ ("primary" by default) via the connection's own schema_translate_map.
 RecentObservationMV.create_mv(engine)
 
-# Explicit schema: the target is quoted and schema-qualified.
-RecentObservationMV.create_mv(engine, schema="reporting")
-RecentObservationMV.refresh_mv(engine, schema="reporting")
+# Override for one call.
+RecentObservationMV.create_mv(engine, schema_tag=Role.VOCAB.value)
+
+# Declaratively mapped: the mapped table's own schema is authoritative, no
+# __mv_schema_tag__ needed (or consulted) at all.
+class VocabPatientSummaryMV(Base, MaterializedViewMixin):
+    __mv_name__ = "vocab_patient_summary"
+    __mv_select__ = ...
+    __tablename__ = "vocab_patient_summary"
+    __table_args__ = {"schema": Role.VOCAB.value}
+    patient_id = sa.Column(sa.Integer, primary_key=True)
 ```
 
-Explicit schema targets are quoted component by component. This matters for embedded quotes, spaces, and mixed-case identifiers. It also means an unqualified mixed-case name and the same name passed with `schema=` can address different PostgreSQL relations. Keep schema selection at the call site and do not assume that this API provides `schema_translate_map`, role-token, or general multi-schema behavior.
+Every generated identifier is quoted through `oa_configurator.qualified()`, which quotes each component only when the dialect actually requires it (reserved words, mixed case, embedded quotes or spaces) — the same behavior every other Core-built query in this stack has.
 
 ## Failure handling and backend support
 
 The built-in implementation is PostgreSQL-oriented. SQLite rejects materialized-view operations with `NotImplementedError`; this is intentional, not an emulation using ordinary views.
 
-`drop_mv()` and declared-index creation wrap execution failures in `MaterializationError`. 
+`create_mv()`, `drop_mv()`, and declared-index creation all wrap execution failures in `MaterializationError`.
 
 ## API reference
 
@@ -164,9 +184,5 @@ The built-in implementation is PostgreSQL-oriented. SQLite rejects materialized-
       members: true
 
 ::: orm_loader.mappers.ConcurrentRefreshNotEligibleError
-    options:
-      heading_level: 3
-
-::: orm_loader.mappers.UnsupportedMaterializationDialectError
     options:
       heading_level: 3

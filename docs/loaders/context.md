@@ -25,7 +25,7 @@ on globals or implicit configuration.
 | `chunksize` | Optional chunk size |
 | `normalise` | Whether to cast values to ORM types |
 | `dedupe` | Whether to deduplicate incoming data |
-| `quote_mode` | CSV quoting mode for PostgreSQL fast-path loading |
+| `quote_mode` | CSV quoting mode, resolved to the same concrete mode on both the PostgreSQL COPY fast-path and the pandas ORM fallback |
 
 ::: orm_loader.loaders.data_classes.LoaderContext
 

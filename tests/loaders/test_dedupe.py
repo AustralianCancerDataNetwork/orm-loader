@@ -1,5 +1,6 @@
 import pyarrow as pa
 from typing import cast, Type
+from oa_configurator import Role
 from orm_loader.loaders.loading_helpers import arrow_drop_duplicates
 import pandas as pd
 import sqlalchemy as sa
@@ -16,6 +17,7 @@ class Base(DeclarativeBase):
 
 class DedupTable(Base, CSVLoadableTableInterface):
     __tablename__ = "dedup_table"
+    __table_args__ = {"schema": Role.PRIMARY.value}
 
     id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     value: so.Mapped[str] = so.mapped_column(sa.String, nullable=False)

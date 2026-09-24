@@ -61,6 +61,9 @@ class LoaderContext:
         Whether to apply type casting / normalisation.
     dedupe
         Whether to perform deduplication (pre-insertion for source issues)
+    quote_mode
+        Quoting mode, resolved to the same concrete mode on both the
+        PostgreSQL COPY fast-path and the pandas ORM fallback.
     staging_schema
         Schema the staging table lives in, passed to resolve_backend() so
         every backend resolution within this load shares the same schema.

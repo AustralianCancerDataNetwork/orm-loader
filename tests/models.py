@@ -2,6 +2,7 @@
 from enum import Enum
 
 import sqlalchemy as sa
+from oa_configurator import Role as SchemaRole
 from sqlalchemy.orm import declarative_base
 import sqlalchemy.orm as so
 from orm_loader.tables import CSVLoadableTableInterface
@@ -20,6 +21,7 @@ class Flag(str, Enum):
 
 class PandasLoaderTable(CSVLoadableTableInterface, Base):
     __tablename__ = "test_pandas_loader"
+    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
     id = sa.Column(sa.Integer, primary_key=True)
     value = sa.Column(sa.String, nullable=False)
 
@@ -28,6 +30,7 @@ class SimpleTable(Base, CSVLoadableTableInterface):
     __tablename__ = "test_table"
     __table_args__ = (
         sa.Index("ix_test_table_name", "name"),
+        {"schema": SchemaRole.PRIMARY.value},
     )
 
     id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
@@ -36,6 +39,7 @@ class SimpleTable(Base, CSVLoadableTableInterface):
 
 class RequiredTable(Base, CSVLoadableTableInterface):
     __tablename__ = "required_table"
+    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
 
     id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     name: so.Mapped[str] = so.mapped_column(sa.String, nullable=False)
@@ -43,6 +47,7 @@ class RequiredTable(Base, CSVLoadableTableInterface):
 
 class CompositeTable(Base, CSVLoadableTableInterface):
     __tablename__ = "composite_table"
+    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
 
     a: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     b: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
@@ -58,9 +63,24 @@ class EnumTable(Base, CSVLoadableTableInterface):
     """
 
     __tablename__ = "enum_table"
+    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
 
     id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     role: so.Mapped[Role | None] = so.mapped_column(sa.Enum(Role), nullable=True)
+
+
+class ComputedColumnTable(Base, CSVLoadableTableInterface):
+    """A real, registered table with a computed column, for merge-method
+    tests that need get_staging_table() to work. Unlike a bare
+    __tablename__/__table__ pair, this actually implements
+    CSVLoadableTableInterface."""
+
+    __tablename__ = "computed_column_table"
+    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+
+    id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
+    name: so.Mapped[str] = so.mapped_column(sa.String)
+    slug: so.Mapped[str] = so.mapped_column(sa.String, sa.Computed("lower(name)"))
 
 
 class ImpliedEnumTable(Base, CSVLoadableTableInterface):
@@ -70,6 +90,24 @@ class ImpliedEnumTable(Base, CSVLoadableTableInterface):
     """
 
     __tablename__ = "implied_enum_table"
+    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
 
     id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     flag: so.Mapped[str | None] = so.mapped_column(sa.String(1), nullable=True)
+
+
+class VocabSchemaTable(Base, CSVLoadableTableInterface):
+    """A VOCAB-tagged table, so tests can prove the staging/index schema
+    derivation (table.schema resolved via validate_schema_tag()/physical_schema_of(),
+    threaded through create_staging_table()/manage_indices()) actually
+    resolves a non-primary schema tag correctly, instead of only ever
+    exercising the PRIMARY-tagged default."""
+
+    __tablename__ = "test_vocab_role_table"
+    __table_args__ = (
+        sa.Index("ix_test_vocab_role_table_name", "name"),
+        {"schema": SchemaRole.VOCAB.value},
+    )
+
+    id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
+    name: so.Mapped[str] = so.mapped_column(sa.String, nullable=False)

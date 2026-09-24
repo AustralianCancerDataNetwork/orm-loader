@@ -6,17 +6,23 @@ from typing import TYPE_CHECKING, Any
 import sqlalchemy as sa
 import sqlalchemy.event as sae
 import sqlalchemy.orm as so
+from oa_configurator import (
+    autocommit_connection,
+    qualified,
+    physical_schema_of,
+    validate_schema_tag,
+    Dialect,
+)
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.sql.compiler import IdentifierPreparer
 
-from .base import BackendCapabilities, DatabaseBackend, Dialect, requires_capability
+from .base import BackendCapabilities, DatabaseBackend, requires_capability
 from ..mappers.materialised_view_errors import (
     ConcurrentRefreshNotEligibleError,
     MaterializationError,
     MaterializationFailure,
     MaterializationOperation,
-    UnsupportedMaterializationDialectError,
 )
 
 if TYPE_CHECKING:
@@ -27,26 +33,6 @@ if TYPE_CHECKING:
     from ..tables.typing import CSVTableProtocol
 
 _VALID_PG_REPLICATION_ROLES = frozenset({"origin", "local", "replica"})
-
-
-def _require_postgres_dialect(
-    conn: "Connection",
-    *,
-    operation: MaterializationOperation,
-    schema: str | None,
-    name: str,
-) -> None:
-    dialect = getattr(conn, "dialect", None)
-    if dialect is not None and dialect.name == "postgresql":
-        return
-    raise UnsupportedMaterializationDialectError(
-        MaterializationFailure(
-            operation=operation,
-            schema=schema,
-            name=name,
-            reason=f"received dialect {getattr(dialect, 'name', dialect)!r}",
-        )
-    )
 
 
 class PostgresBackend(DatabaseBackend):
@@ -86,7 +72,9 @@ class PostgresBackend(DatabaseBackend):
         table = table_cls.__table__
         preparer = self.identifier_preparer
         staging_ref = self.qualified_staging_name(table_cls.__tablename__)
-        source_ref = preparer.quote_identifier(table.name)
+        source_ref = qualified(
+            session, table.name, physical_schema=physical_schema_of(session, schema_tag=validate_schema_tag(table))
+        )
         session.execute(sa.text(f'DROP TABLE IF EXISTS {staging_ref};'))
         session.execute(
             sa.text(
@@ -172,49 +160,46 @@ class PostgresBackend(DatabaseBackend):
         safe_state = self._normalize_fk_check_state(previous_state)
         session.execute(sa.text(f"SET session_replication_role = '{safe_state}'"))
 
+    def _staging_rownum_index(
+        self, table_cls: type["CSVTableProtocol"], staging: sa.Table, session: so.Session
+    ) -> None:
+        staging_name = self.staging_name_for_table(table_cls.__tablename__)
+        idx = sa.Index(f"{staging_name}_rownum_idx", staging.c._rownum)
+        idx.create(bind=session.connection(), checkfirst=True)
+        session.commit()
+
     def merge_replace(
         self,
         table_cls: type["CSVTableProtocol"],
         session: so.Session,
-        target_name: str,
         pk_cols: list[str],
         *,
         merge_batch_size: int | None = None,
     ) -> None:
-        preparer = self.identifier_preparer
-        staging_ref = self.qualified_staging_name(table_cls.__tablename__)
-        target_ref = preparer.quote_identifier(target_name)
-        pk_join = " AND ".join(
-            f't.{preparer.quote_identifier(c)} = s.{preparer.quote_identifier(c)}' for c in pk_cols
-        )
+        target = table_cls.__table__
+        staging = table_cls.get_staging_table(session, staging_schema=self.staging_schema)
+        pk_join = sa.and_(*(target.c[c] == staging.c[c] for c in pk_cols))
 
-        non_paginated_replace = sa.text(
-            f'DELETE FROM {target_ref} t USING {staging_ref} s WHERE {pk_join}'
-        )
+        non_paginated_replace = sa.delete(target).where(pk_join)
 
         if merge_batch_size is None:
             session.execute(non_paginated_replace)
             return
 
-        total = session.execute(sa.text(f'SELECT COUNT(*) FROM {staging_ref}')).scalar_one()
+        total = session.execute(sa.select(sa.func.count()).select_from(staging)).scalar_one()
         if total <= merge_batch_size:
             session.execute(non_paginated_replace)
             return
 
-        staging_name = self.staging_name_for_table(table_cls.__tablename__)
-        idx_ref = preparer.quote_identifier(f"{staging_name}_rownum_idx")
-        session.execute(sa.text(f'CREATE INDEX IF NOT EXISTS {idx_ref} ON {staging_ref} (_rownum)'))
-        session.commit()
+        self._staging_rownum_index(table_cls, staging, session)
 
         start = 0
         while start < total:
             end = start + merge_batch_size
             session.execute(
-                sa.text(
-                    f'DELETE FROM {target_ref} t USING {staging_ref} s'
-                    f' WHERE {pk_join} AND s._rownum > :start AND s._rownum <= :end'
-                ),
-                {"start": start, "end": end},
+                sa.delete(target).where(
+                    pk_join, staging.c._rownum > start, staging.c._rownum <= end
+                )
             )
             session.commit()
             start = end
@@ -223,50 +208,42 @@ class PostgresBackend(DatabaseBackend):
         self,
         table_cls: type["CSVTableProtocol"],
         session: so.Session,
-        target_name: str,
         pk_cols: list[str],
         *,
         merge_batch_size: int | None = None,
     ) -> None:
-        preparer = self.identifier_preparer
-        staging_ref = self.qualified_staging_name(table_cls.__tablename__)
-        target_ref = preparer.quote_identifier(target_name)
+        target = table_cls.__table__
+        staging = table_cls.get_staging_table(session, staging_schema=self.staging_schema)
         insertable_cols = self._insertable_column_names(table_cls)
-        cols_str = ", ".join(preparer.quote_identifier(c) for c in insertable_cols)
-        conflict_cols = ", ".join(preparer.quote_identifier(c) for c in pk_cols)
 
-        non_paginated_upsert = sa.text(
-            f'INSERT INTO {target_ref} ({cols_str})'
-            f' SELECT {cols_str} FROM {staging_ref}'
-            f' ON CONFLICT ({conflict_cols}) DO NOTHING'
-        )
+        def _upsert(select_: sa.sql.Select[Any]) -> sa.Insert:
+            # sa.insert() has no .on_conflict_do_nothing()
+            return (
+                postgresql.insert(target)
+                .from_select(insertable_cols, select_)
+                .on_conflict_do_nothing(index_elements=pk_cols)
+            )
+
+        non_paginated_select = sa.select(*(staging.c[c] for c in insertable_cols))
 
         if merge_batch_size is None:
-            session.execute(non_paginated_upsert)
+            session.execute(_upsert(non_paginated_select))
             return
 
-        total = session.execute(sa.text(f'SELECT COUNT(*) FROM {staging_ref}')).scalar_one()
+        total = session.execute(sa.select(sa.func.count()).select_from(staging)).scalar_one()
         if total <= merge_batch_size:
-            session.execute(non_paginated_upsert)
+            session.execute(_upsert(non_paginated_select))
             return
 
-        staging_name = self.staging_name_for_table(table_cls.__tablename__)
-        idx_ref = preparer.quote_identifier(f"{staging_name}_rownum_idx")
-        session.execute(sa.text(f'CREATE INDEX IF NOT EXISTS {idx_ref} ON {staging_ref} (_rownum)'))
-        session.commit()
+        self._staging_rownum_index(table_cls, staging, session)
 
         start = 0
         while start < total:
             end = start + merge_batch_size
-            session.execute(
-                sa.text(
-                    f'INSERT INTO {target_ref} ({cols_str})'
-                    f' SELECT {cols_str} FROM {staging_ref}'
-                    f' WHERE _rownum > :start AND _rownum <= :end'
-                    f' ON CONFLICT ({conflict_cols}) DO NOTHING'
-                ),
-                {"start": start, "end": end},
+            batch_select = non_paginated_select.where(
+                staging.c._rownum > start, staging.c._rownum <= end
             )
+            session.execute(_upsert(batch_select))
             session.commit()
             start = end
 
@@ -274,50 +251,39 @@ class PostgresBackend(DatabaseBackend):
         self,
         table_cls: type["CSVTableProtocol"],
         session: so.Session,
-        target_name: str,
         *,
         merge_batch_size: int | None = None,
     ) -> None:
-        preparer = self.identifier_preparer
-        staging_ref = self.qualified_staging_name(table_cls.__tablename__)
-        target_ref = preparer.quote_identifier(target_name)
+        target = table_cls.__table__
+        staging = table_cls.get_staging_table(session, staging_schema=self.staging_schema)
         insertable_cols = self._insertable_column_names(table_cls)
-        cols_str = ", ".join(preparer.quote_identifier(c) for c in insertable_cols)
+        non_paginated_select = sa.select(*(staging.c[c] for c in insertable_cols))
 
-        non_paginated_insert = sa.text(
-            f'INSERT INTO {target_ref} ({cols_str})'
-            f' SELECT {cols_str} FROM {staging_ref}'
-        )
+        def _insert(select_: sa.sql.Select[Any]) -> sa.Insert:
+            return sa.insert(target).from_select(insertable_cols, select_)
 
         if merge_batch_size is None:
-            session.execute(non_paginated_insert)
+            session.execute(_insert(non_paginated_select))
             return
 
-        total = session.execute(sa.text(f'SELECT COUNT(*) FROM {staging_ref}')).scalar_one()
+        total = session.execute(sa.select(sa.func.count()).select_from(staging)).scalar_one()
         if total <= merge_batch_size:
-            session.execute(non_paginated_insert)
+            session.execute(_insert(non_paginated_select))
             return
 
         # Paginated path: index _rownum for O(N log N) range scans then
         # INSERT in batch-sized transactions to bound WAL per commit.
         # session_replication_role='replica' is session-level and persists
         # across commits, so FK checks stay disabled for all batches.
-        staging_name = self.staging_name_for_table(table_cls.__tablename__)
-        idx_ref = preparer.quote_identifier(f"{staging_name}_rownum_idx")
-        session.execute(sa.text(f'CREATE INDEX IF NOT EXISTS {idx_ref} ON {staging_ref} (_rownum)'))
-        session.commit()
+        self._staging_rownum_index(table_cls, staging, session)
 
         start = 0
         while start < total:
             end = start + merge_batch_size
-            session.execute(
-                sa.text(
-                    f'INSERT INTO {target_ref} ({cols_str})'
-                    f' SELECT {cols_str} FROM {staging_ref}'
-                    f' WHERE _rownum > :start AND _rownum <= :end'
-                ),
-                {"start": start, "end": end},
+            batch_select = non_paginated_select.where(
+                staging.c._rownum > start, staging.c._rownum <= end
             )
+            session.execute(_insert(batch_select))
             session.commit()
             start = end
 
@@ -342,16 +308,10 @@ class PostgresBackend(DatabaseBackend):
         from ..mappers.materialised_view_mixin import CreateMaterializedView
 
         with self._as_connection(bind) as conn:
-            _require_postgres_dialect(
-                conn,
-                operation=MaterializationOperation.CREATE,
-                schema=schema,
-                name=name,
-            )
             try:
                 conn.execute(
                     CreateMaterializedView(
-                        self._mv_target(name, schema),
+                        qualified(conn, name, physical_schema=schema),
                         selectable,
                         with_data=with_data,
                         if_not_exists=if_not_exists,
@@ -379,12 +339,6 @@ class PostgresBackend(DatabaseBackend):
         declared_indexes: tuple["MaterializedViewIndex", ...] = (),
     ) -> None:
         with self._as_connection(bind) as conn:
-            _require_postgres_dialect(
-                conn,
-                operation=MaterializationOperation.REFRESH,
-                schema=schema,
-                name=name,
-            )
             if concurrently:
                 if not any(index.unique for index in declared_indexes):
                     raise ConcurrentRefreshNotEligibleError(
@@ -396,7 +350,7 @@ class PostgresBackend(DatabaseBackend):
                         )
                     )
 
-            safe_name = self._mv_target(name, schema)
+            safe_name = qualified(conn, name, physical_schema=schema)
             concurrency = "CONCURRENTLY " if concurrently else ""
             try:
                 conn.execute(sa.text(f"REFRESH MATERIALIZED VIEW {concurrency}{safe_name};"))
@@ -433,16 +387,10 @@ class PostgresBackend(DatabaseBackend):
         from ..mappers.materialised_view_contracts import DropMaterializedView
 
         with self._as_connection(bind) as conn:
-            _require_postgres_dialect(
-                conn,
-                operation=MaterializationOperation.DROP,
-                schema=schema,
-                name=name,
-            )
             try:
                 conn.execute(
                     DropMaterializedView(
-                        self._mv_target(name, schema), if_exists=if_exists, cascade=cascade
+                        qualified(conn, name, physical_schema=schema), if_exists=if_exists, cascade=cascade
                     )
                 )
             except Exception as error:
@@ -469,16 +417,10 @@ class PostgresBackend(DatabaseBackend):
         from ..mappers.materialised_view_contracts import CreateMaterializedViewIndex
 
         with self._as_connection(bind) as conn:
-            _require_postgres_dialect(
-                conn,
-                operation=MaterializationOperation.CREATE_INDEX,
-                schema=schema,
-                name=name,
-            )
             try:
                 conn.execute(
                     CreateMaterializedViewIndex(
-                        self._mv_target(name, schema), index, if_not_exists=if_not_exists
+                        qualified(conn, name, physical_schema=schema), index, if_not_exists=if_not_exists
                     )
                 )
             except Exception as error:
@@ -492,11 +434,6 @@ class PostgresBackend(DatabaseBackend):
                         cause=error,
                     )
                 ) from error
-
-    def _mv_target(self, name: str, schema: str | None) -> str:
-        from ..helpers.sql import qualify_identifier
-
-        return qualify_identifier(name, schema, self.identifier_preparer)
 
     @contextmanager
     def engine_with_replica_role(self, engine: "Engine"):
@@ -514,9 +451,8 @@ class PostgresBackend(DatabaseBackend):
             yield engine
         finally:
             sae.remove(engine, "connect", _set_replica_role)
-            with engine.connect() as conn:
-                conn = conn.execution_options(isolation_level="AUTOCOMMIT")
-                conn.execute(sa.text("SET session_replication_role = DEFAULT"))
-                role = conn.execute(sa.text("SHOW session_replication_role")).scalar()
+            with autocommit_connection(engine) as autocommit_conn:
+                autocommit_conn.execute(sa.text("SET session_replication_role = DEFAULT"))
+                role = autocommit_conn.execute(sa.text("SHOW session_replication_role")).scalar()
                 if role != "origin":
                     raise RuntimeError("Failed to restore session_replication_role")

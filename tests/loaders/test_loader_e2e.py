@@ -7,6 +7,7 @@ import pytest
 import sqlalchemy as sa
 import sqlalchemy.event as sae
 import sqlalchemy.orm as so
+from oa_configurator import Role as SchemaRole
 
 from orm_loader.backends import resolve_backend
 from orm_loader.helpers import IngestError
@@ -15,7 +16,17 @@ from orm_loader.loaders.data_classes import _clean_nulls
 from orm_loader.loaders.loader_interface import PandasLoader
 from orm_loader.tables.loadable_table import CSVLoadableTableInterface
 from orm_loader.tables.typing import CSVTableProtocol
-from tests.models import Base, CompositeTable, EnumTable, Flag, ImpliedEnumTable, RequiredTable, Role, SimpleTable
+from tests.models import (
+    Base,
+    CompositeTable,
+    EnumTable,
+    Flag,
+    ImpliedEnumTable,
+    RequiredTable,
+    Role,
+    SimpleTable,
+    VocabSchemaTable,
+)
 
 # Typed aliases: Pylance cannot verify SQLAlchemy metaclass-generated attrs
 # satisfy CSVTableProtocol structurally, so we cast once per class here.
@@ -24,6 +35,7 @@ _RequiredTable = cast(Type[CSVTableProtocol], RequiredTable)
 _CompositeTable = cast(Type[CSVTableProtocol], CompositeTable)
 _EnumTable = cast(Type[CSVTableProtocol], EnumTable)
 _ImpliedEnumTable = cast(Type[CSVTableProtocol], ImpliedEnumTable)
+_VocabSchemaTable = cast(Type[CSVTableProtocol], VocabSchemaTable)
 
 
 @pytest.fixture(autouse=True)
@@ -63,6 +75,33 @@ def test_initial_csv_load(session, tmp_path):
         (2, "beta"),
         (3, "gamma"),
     ]
+
+
+def test_initial_csv_load_for_a_non_primary_schema_table(session, tmp_path):
+    """SQLite has no real schema concept, so every Role folds to None
+    on this connection (see oa_configurator's SQLiteTestStrategy).
+    A VOCAB-tagged table's load path must not error out just because
+    the table's declared schema tag differs from primary. This is the SQLite
+    counterpart to test_schema_translate_map.py's Postgres-only, non-primary-
+    schema-tag coverage."""
+    csv_path = tmp_path / "test_vocab_role_table.csv"
+
+    pd.DataFrame(
+        [{"id": 1, "name": "alpha"}, {"id": 2, "name": "beta"}]
+    ).to_csv(csv_path, index=False, sep="\t")
+
+    inserted = _VocabSchemaTable.load_csv(
+        session, csv_path, dedupe=False, loader=PandasLoader()
+    )
+    session.commit()
+
+    assert inserted == 2
+
+    rows = session.execute(
+        sa.select(VocabSchemaTable).order_by(VocabSchemaTable.id)
+    ).scalars().all()
+
+    assert [(r.id, r.name) for r in rows] == [(1, "alpha"), (2, "beta")]
 
 
 def test_replace_merge_strategy(session, tmp_path):
@@ -501,6 +540,7 @@ def test_clean_nulls_passthrough():
 def test_nullable_column_with_nan_does_not_crash(session, engine, tmp_path):
     class NullableTable(Base, CSVLoadableTableInterface):
         __tablename__ = "nullable_table"
+        __table_args__ = {"schema": SchemaRole.PRIMARY.value}
 
         id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
         flag: so.Mapped[str | None] = so.mapped_column(sa.String, nullable=True)
@@ -537,6 +577,7 @@ def test_nullable_column_with_nan_does_not_crash(session, engine, tmp_path):
 def test_embedded_newline_in_field_is_preserved(session, engine, tmp_path):
     class TextTable(Base, CSVLoadableTableInterface):
         __tablename__ = "text_table"
+        __table_args__ = {"schema": SchemaRole.PRIMARY.value}
 
         id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
         name: so.Mapped[str] = so.mapped_column(sa.String)
@@ -564,6 +605,7 @@ def test_embedded_newline_in_field_is_preserved(session, engine, tmp_path):
 def test_embedded_tab_in_field(session, engine, tmp_path):
     class TextTable2(Base, CSVLoadableTableInterface):
         __tablename__ = "tab_table"
+        __table_args__ = {"schema": SchemaRole.PRIMARY.value}
 
         id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
         name: so.Mapped[str] = so.mapped_column(sa.String)
