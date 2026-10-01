@@ -6,6 +6,7 @@ from .base import (
     DatabaseBackend,
     Dialect,
     STAGING_SCHEMA,
+    staging_schema_claim,
 )
 from ..mappers.materialised_view_errors import (
     ConcurrentRefreshNotEligibleError,
@@ -26,4 +27,5 @@ __all__ = [
     "STAGING_SCHEMA",
     "SQLiteBackend",
     "resolve_backend",
+    "staging_schema_claim",
 ]

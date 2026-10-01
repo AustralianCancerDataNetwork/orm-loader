@@ -12,7 +12,7 @@ import sqlalchemy.orm as so
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.sql.compiler import IdentifierPreparer
 
-from oa_configurator import Dialect, open_connection, qualified
+from oa_configurator import Dialect, SchemaClaim, open_connection, qualified
 
 if TYPE_CHECKING:
     from ..loaders.data_classes import LoaderContext
@@ -36,6 +36,32 @@ class BackendCapabilities:
 
 
 STAGING_SCHEMA: str = "staging"
+
+
+def staging_schema_claim(physical_schema: str | None = None, *, reserved: bool = True) -> SchemaClaim:
+    """SchemaClaim reserving orm-loader's staging schema.
+    Since orm-loader doesn't have an engine creation step of its own,
+    this claim needs to be registered by the caller ingesting tables into 
+    the database through orm-loader.
+
+    Add to your own ``create_engine(schema_claims=[...])`` call before
+    handing a session into this package's staging path.
+
+    Parameters
+    ----------
+    physical_schema : str, optional
+        Physical schema to reserve. Defaults to ``STAGING_SCHEMA`` itself.
+    reserved : bool, optional
+        Whether no other owner may claim this physical schema on the same
+        connection. Defaults to True.
+    """
+    return SchemaClaim(
+        schema_tag=STAGING_SCHEMA,
+        physical_schema=physical_schema or STAGING_SCHEMA,
+        reserved=reserved,
+        owner="orm_loader",
+    )
+
 
 P = ParamSpec("P")
 R = TypeVar("R")

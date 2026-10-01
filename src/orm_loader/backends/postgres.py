@@ -10,14 +10,19 @@ from oa_configurator import (
     autocommit_connection,
     qualified,
     physical_schema_of,
-    validate_schema_tag,
     Dialect,
+    UnregisteredSchemaTagError,
 )
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.sql.compiler import IdentifierPreparer
 
-from .base import BackendCapabilities, DatabaseBackend, requires_capability
+from .base import (
+    STAGING_SCHEMA, 
+    BackendCapabilities, 
+    DatabaseBackend, 
+    requires_capability
+)
 from ..mappers.materialised_view_errors import (
     ConcurrentRefreshNotEligibleError,
     MaterializationError,
@@ -69,11 +74,20 @@ class PostgresBackend(DatabaseBackend):
         table_cls: type["CSVTableProtocol"],
         session: so.Session,
     ) -> None:
+        if self.staging_schema == STAGING_SCHEMA:
+            try:
+                physical_schema_of(session, schema_tag=STAGING_SCHEMA)
+            except UnregisteredSchemaTagError as exc:
+                raise UnregisteredSchemaTagError(
+                    "orm-loader needs its staging schema reserved on this engine. Add "
+                    "orm_loader.staging_schema_claim() to your own "
+                    "create_engine(schema_claims=[...]) call."
+                ) from exc
         table = table_cls.__table__
         preparer = self.identifier_preparer
         staging_ref = self.qualified_staging_name(table_cls.__tablename__)
         source_ref = qualified(
-            session, table.name, physical_schema=physical_schema_of(session, schema_tag=validate_schema_tag(table))
+            session, table.name, physical_schema=physical_schema_of(session, schema_tag=table.schema)
         )
         session.execute(sa.text(f'DROP TABLE IF EXISTS {staging_ref};'))
         session.execute(

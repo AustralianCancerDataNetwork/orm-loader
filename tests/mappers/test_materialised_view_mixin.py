@@ -49,6 +49,64 @@ def test_refresh_all_mvs_resolves_each_views_own_schema_tag(pg_db) -> None:
             assert not inspector.has_table("mv_vocab_role_test", schema=primary_schema)
 
 
+class _IndexedPgMv(MaterializedViewMixin):
+    __mv_name__ = "mv_indexed_pg_test"
+    __mv_select__ = sa.select(sa.literal(1).label("row_id"))
+    __mv_indexes__ = (MaterializedViewIndex(name="mv_indexed_pg_test_row_id_uq", columns=("row_id",), unique=True),)
+
+
+def test_create_mv_with_declared_index_against_postgres(pg_db) -> None:
+    """create_mv() through the mixin creates both the view and its declared
+    index against a real database.test_create_mv_creates_declared_indexes_after_the_view
+    only proves the right backend calls are made, via a fake backend."""
+    engine = pg_db.connection.engine
+
+    with isolated_test_schema(engine, prefix="mv_indexed") as schema:
+        scoped = engine.execution_options(schema_translate_map={Role.PRIMARY.value: schema})
+        with scoped.begin() as conn:
+            _IndexedPgMv.create_mv(conn)
+
+        with engine.connect() as conn:
+            inspector = sa.inspect(conn)
+            assert inspector.has_table("mv_indexed_pg_test", schema=schema)
+            index_names = {idx["name"] for idx in inspector.get_indexes("mv_indexed_pg_test", schema=schema)}
+            assert "mv_indexed_pg_test_row_id_uq" in index_names
+
+
+def test_drop_mv_cascade_against_postgres(pg_db) -> None:
+    """drop_mv() through the mixin actually drops the view against a real
+    database. test_drop_mv_forwards_default_args only proves the right
+    backend call is made, via a fake backend."""
+    engine = pg_db.connection.engine
+
+    with isolated_test_schema(engine, prefix="mv_drop") as schema:
+        scoped = engine.execution_options(schema_translate_map={Role.PRIMARY.value: schema})
+        with scoped.begin() as conn:
+            _PrimaryRoleMV.create_mv(conn)
+        with engine.connect() as conn:
+            assert sa.inspect(conn).has_table("mv_primary_role_test", schema=schema)
+
+        with scoped.begin() as conn:
+            _PrimaryRoleMV.drop_mv(conn, cascade=True)
+        with engine.connect() as conn:
+            assert not sa.inspect(conn).has_table("mv_primary_role_test", schema=schema)
+
+
+def test_refresh_mv_concurrently_against_postgres(pg_db) -> None:
+    """refresh_mv(concurrently=True) through the mixin succeeds against a
+    real database when a unique index is declared.
+    The eligibility check and error translation are already proven at the 
+    backend level directly in test_postgres_backend.py. 
+    This proves the mixin wires into that correctly end to end."""
+    engine = pg_db.connection.engine
+
+    with isolated_test_schema(engine, prefix="mv_refresh") as schema:
+        scoped = engine.execution_options(schema_translate_map={Role.PRIMARY.value: schema})
+        with scoped.begin() as conn:
+            _IndexedPgMv.create_mv(conn)
+            _IndexedPgMv.refresh_mv(conn, concurrently=True)
+
+
 class _FakeBackend:
     """Capture lifecycle calls without touching a real database."""
 
@@ -106,7 +164,8 @@ def test_create_mv_forwards_default_args_to_backend(fake_backend: _FakeBackend, 
         (
             "create_materialized_view",
             (bind, "mv_no_index", _SELECT),
-            {"schema": "primary", "with_data": True, "if_not_exists": True},
+            # sqlite has no schema concept, so physical_schema_of() always folds to None here.
+            {"schema": None, "with_data": True, "if_not_exists": True},
         )
     ]
 
@@ -126,7 +185,8 @@ def test_create_mv_creates_declared_indexes_after_the_view(fake_backend: _FakeBa
         "create_materialized_view_index",
     ]
     assert fake_backend.calls[1][1] == (bind, "mv_indexed", _INDEX)
-    assert fake_backend.calls[1][2] == {"schema": "primary", "if_not_exists": True}
+    # sqlite has no schema concept, so physical_schema_of() always folds to None here.
+    assert fake_backend.calls[1][2] == {"schema": None, "if_not_exists": True}
 
 
 def test_create_mv_create_indexes_false_skips_index_creation(fake_backend: _FakeBackend, bind):
@@ -140,8 +200,10 @@ def test_create_mv_forwards_schema_tag_with_data_and_if_not_exists_overrides(
 ):
     _NoIndexMv.create_mv(bind, schema_tag=Role.VOCAB, with_data=False, if_not_exists=False)
 
+    # sqlite has no schema concept, so physical_schema_of() always folds to None here,
+    # regardless of which schema_tag was requested
     assert fake_backend.calls[0][2] == {
-        "schema": "vocab",
+        "schema": None,
         "with_data": False,
         "if_not_exists": False,
     }
@@ -172,10 +234,19 @@ class _MappedNoSchemaMv(_MappedMvBase, MaterializedViewMixin):
     row_id = sa.Column(sa.Integer, primary_key=True)
 
 
-def test_create_mv_defers_to_the_mapped_tables_own_schema(fake_backend: _FakeBackend, bind):
+def test_create_mv_defers_to_the_mapped_tables_own_schema(
+    fake_backend: _FakeBackend, bind, monkeypatch: pytest.MonkeyPatch
+):
+    # sqlite folds every schema to None regardless of tag, which would make "mapped
+    # table's own schema" and "mixin default" indistinguishable here. Patch
+    # physical_schema_of() to pass the resolved tag through unchanged, isolating this
+    # test to the mixin's own schema_tag routing.
+    mixin_module = importlib.import_module("orm_loader.mappers.materialised_view_mixin")
+    monkeypatch.setattr(mixin_module, "physical_schema_of", lambda bind, schema_tag: schema_tag)
+
     _MappedVocabMv.create_mv(bind)
 
-    assert fake_backend.calls[0][2]["schema"] == "vocab"
+    assert fake_backend.calls[0][2]["schema"] == Role.VOCAB.value
 
 
 def test_create_mv_mapped_table_with_no_schema_resolves_to_none_not_primary(
@@ -187,17 +258,21 @@ def test_create_mv_mapped_table_with_no_schema_resolves_to_none_not_primary(
 
 
 def test_create_mv_explicit_schema_tag_overrides_the_mapped_tables_own_schema(
-    fake_backend: _FakeBackend, bind
+    fake_backend: _FakeBackend, bind, monkeypatch: pytest.MonkeyPatch
 ):
+    # See test_create_mv_defers_to_the_mapped_tables_own_schema for why this is patched.
+    mixin_module = importlib.import_module("orm_loader.mappers.materialised_view_mixin")
+    monkeypatch.setattr(mixin_module, "physical_schema_of", lambda bind, schema_tag: schema_tag)
+
     _MappedVocabMv.create_mv(bind, schema_tag=Role.PRIMARY)
 
-    assert fake_backend.calls[0][2]["schema"] == "primary"
+    assert fake_backend.calls[0][2]["schema"] == Role.VOCAB.value
 
 
 def test_create_mv_forwards_if_not_exists_to_declared_indexes(fake_backend: _FakeBackend, bind):
     _IndexedMv.create_mv(bind, if_not_exists=False)
 
-    assert fake_backend.calls[1][2] == {"schema": "primary", "if_not_exists": False}
+    assert fake_backend.calls[1][2] == {"schema": None, "if_not_exists": False}
 
 
 def test_create_mv_engine_uses_one_transaction_for_view_and_indexes(monkeypatch: pytest.MonkeyPatch):
@@ -259,7 +334,7 @@ def test_refresh_mv_forwards_default_args_and_declared_indexes(fake_backend: _Fa
         (
             "refresh_materialized_view",
             (bind, "mv_indexed"),
-            {"schema": "primary", "concurrently": False, "declared_indexes": (_INDEX,)},
+            {"schema": None, "concurrently": False, "declared_indexes": (_INDEX,)},
         )
     ]
 
@@ -268,7 +343,7 @@ def test_refresh_mv_forwards_schema_tag_and_concurrently(fake_backend: _FakeBack
     _IndexedMv.refresh_mv(bind, schema_tag=Role.VOCAB, concurrently=True)
 
     assert fake_backend.calls[0][2] == {
-        "schema": "vocab",
+        "schema": None,
         "concurrently": True,
         "declared_indexes": (_INDEX,),
     }
@@ -281,7 +356,8 @@ def test_drop_mv_forwards_default_args(fake_backend: _FakeBackend, bind):
         (
             "drop_materialized_view",
             (bind, "mv_no_index"),
-            {"schema": "primary", "if_exists": True, "cascade": False},
+            # sqlite has no schema concept, so physical_schema_of() always folds to None here.
+            {"schema": None, "if_exists": True, "cascade": False},
         )
     ]
 
@@ -290,7 +366,7 @@ def test_drop_mv_forwards_schema_tag_if_exists_and_cascade(fake_backend: _FakeBa
     _NoIndexMv.drop_mv(bind, schema_tag=Role.VOCAB, if_exists=False, cascade=True)
 
     assert fake_backend.calls[0][2] == {
-        "schema": "vocab",
+        "schema": None,
         "if_exists": False,
         "cascade": True,
     }

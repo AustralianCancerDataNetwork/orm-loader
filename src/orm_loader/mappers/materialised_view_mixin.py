@@ -5,10 +5,9 @@ import sqlalchemy as sa
 from sqlalchemy.ext import compiler
 from sqlalchemy.schema import DDLElement
 from oa_configurator import (
-    Role, 
-    open_connection, 
-    physical_schema_of, 
-    validate_schema_tag
+    Role,
+    open_connection,
+    physical_schema_of,
 )
 
 from .materialised_view_contracts import MaterializedViewIndex
@@ -201,7 +200,7 @@ class MaterializedViewMixin:
             return schema_tag
         table = getattr(cls, "__table__", None)
         if table is not None:
-            return validate_schema_tag(table)
+            return table.schema
         return cls.__mv_schema_tag__
 
     @classmethod

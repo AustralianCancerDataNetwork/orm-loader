@@ -5,8 +5,9 @@ import sqlalchemy as sa
 import sqlalchemy.orm as so
 from dotenv import load_dotenv
 
+from oa_configurator import ensure_schema
 from oa_configurator.testing import isolated_test_database
-from orm_loader.backends import STAGING_SCHEMA
+from orm_loader.backends import STAGING_SCHEMA, staging_schema_claim
 from orm_loader.config import OrmLoaderConfig
 from tests.models import Base
 
@@ -16,7 +17,7 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 @pytest.fixture
 def engine():
     with isolated_test_database(
-        OrmLoaderConfig, "test_orm_db_sqlite", dialect="sqlite", future=True,
+        OrmLoaderConfig, "test_orm_db_sqlite", dialect="sqlite",
     ) as db:
         engine = db.connection.engine
         Base.metadata.create_all(engine)
@@ -39,7 +40,9 @@ def pg_db(request):
     ``pg_db.connection``/``pg_db.session`` happens inside one transaction
     that's rolled back on exit, so concurrent test runs can't collide and
     nothing needs manual cleanup."""
-    with isolated_test_database(OrmLoaderConfig, "test_orm_db_pg", request=request) as db:
+    with isolated_test_database(
+        OrmLoaderConfig, "test_orm_db_pg", request=request, schema_claims=[staging_schema_claim()],
+    ) as db:
         yield db
 
 
@@ -49,7 +52,7 @@ def pg_session(pg_db):
     creates the staging schema and Base.metadata inside pg_db's already-open,
     rolled-back transaction, then returns pg_db.session."""
     conn = pg_db.connection
-    conn.execute(sa.text(f"CREATE SCHEMA IF NOT EXISTS {STAGING_SCHEMA}"))
+    ensure_schema(conn, STAGING_SCHEMA)
     Base.metadata.create_all(conn)
     return pg_db.session
 
