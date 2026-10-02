@@ -1,3 +1,5 @@
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -5,8 +7,8 @@ import sqlalchemy as sa
 import sqlalchemy.orm as so
 from dotenv import load_dotenv
 
-from oa_configurator import ensure_schema
-from oa_configurator.testing import isolated_test_database
+from oa_configurator import Role, ensure_schema
+from oa_configurator.testing import ScopedTestSchema, isolated_test_database, scoped_test_schema
 from orm_loader.backends import STAGING_SCHEMA, staging_schema_claim
 from orm_loader.config import OrmLoaderConfig
 from tests.models import Base
@@ -57,12 +59,17 @@ def pg_session(pg_db):
     return pg_db.session
 
 
+@contextmanager
 def schema_scoped_session(
-    conn: sa.Connection, table: sa.Table, schema_translate_map: dict
-) -> so.Session:
-    """A Session scoped to *schema_translate_map*, with *table* already
-    created through it.
-    """
-    scoped_conn = conn.execution_options(schema_translate_map=schema_translate_map)
-    table.create(scoped_conn, checkfirst=True)
-    return so.Session(bind=scoped_conn)
+    pg_db, table: sa.Table, *, prefix: str, split_roles: Iterable[Role] = ()
+) -> Iterator[tuple[ScopedTestSchema, so.Session]]:
+    """A Session on committed scoped test schemas, with the staging schema
+    claimed and *table* already created."""
+    with scoped_test_schema(
+        pg_db.resolved, prefix=prefix, split_roles=split_roles, schema_claims=[staging_schema_claim()]
+    ) as scoped:
+        with scoped.engine.begin() as conn:
+            ensure_schema(conn, STAGING_SCHEMA)
+            table.create(conn, checkfirst=True)
+        with so.Session(scoped.engine) as session:
+            yield scoped, session

@@ -8,7 +8,7 @@ import sqlalchemy as sa
 import sqlalchemy.orm as so
 
 from oa_configurator import Role
-from oa_configurator.testing import isolated_test_schema
+from oa_configurator.testing import scoped_test_schema
 from orm_loader.mappers.materialised_view_contracts import MaterializedViewIndex
 from orm_loader.mappers.materialised_view_mixin import (
     MaterializedViewMixin,
@@ -29,19 +29,15 @@ class _VocabRoleMV(MaterializedViewMixin):
 
 
 def test_refresh_all_mvs_resolves_each_views_own_schema_tag(pg_db) -> None:
-    engine = pg_db.connection.engine
-
-    with isolated_test_schema(engine, prefix="mv_primary") as primary_schema, \
-         isolated_test_schema(engine, prefix="mv_vocab") as vocab_schema:
-        scoped = engine.execution_options(
-            schema_translate_map={Role.PRIMARY.value: primary_schema, Role.VOCAB.value: vocab_schema}
-        )
-        with scoped.begin() as conn:
+    with scoped_test_schema(pg_db.resolved, prefix="mv", split_roles=[Role.VOCAB]) as scoped:
+        primary_schema = scoped.schemas[Role.PRIMARY]
+        vocab_schema = scoped.schemas[Role.VOCAB]
+        with scoped.engine.begin() as conn:
             _PrimaryRoleMV.create_mv(conn)
             _VocabRoleMV.create_mv(conn)
             refresh_all_mvs(conn, [_PrimaryRoleMV, _VocabRoleMV])
 
-        with engine.connect() as conn:
+        with scoped.engine.connect() as conn:
             inspector = sa.inspect(conn)
             assert inspector.has_table("mv_primary_role_test", schema=primary_schema)
             assert not inspector.has_table("mv_primary_role_test", schema=vocab_schema)
@@ -59,14 +55,12 @@ def test_create_mv_with_declared_index_against_postgres(pg_db) -> None:
     """create_mv() through the mixin creates both the view and its declared
     index against a real database.test_create_mv_creates_declared_indexes_after_the_view
     only proves the right backend calls are made, via a fake backend."""
-    engine = pg_db.connection.engine
-
-    with isolated_test_schema(engine, prefix="mv_indexed") as schema:
-        scoped = engine.execution_options(schema_translate_map={Role.PRIMARY.value: schema})
-        with scoped.begin() as conn:
+    with scoped_test_schema(pg_db.resolved, prefix="mv_indexed") as scoped:
+        schema = scoped.schemas[Role.PRIMARY]
+        with scoped.engine.begin() as conn:
             _IndexedPgMv.create_mv(conn)
 
-        with engine.connect() as conn:
+        with scoped.engine.connect() as conn:
             inspector = sa.inspect(conn)
             assert inspector.has_table("mv_indexed_pg_test", schema=schema)
             index_names = {idx["name"] for idx in inspector.get_indexes("mv_indexed_pg_test", schema=schema)}
@@ -77,18 +71,16 @@ def test_drop_mv_cascade_against_postgres(pg_db) -> None:
     """drop_mv() through the mixin actually drops the view against a real
     database. test_drop_mv_forwards_default_args only proves the right
     backend call is made, via a fake backend."""
-    engine = pg_db.connection.engine
-
-    with isolated_test_schema(engine, prefix="mv_drop") as schema:
-        scoped = engine.execution_options(schema_translate_map={Role.PRIMARY.value: schema})
-        with scoped.begin() as conn:
+    with scoped_test_schema(pg_db.resolved, prefix="mv_drop") as scoped:
+        schema = scoped.schemas[Role.PRIMARY]
+        with scoped.engine.begin() as conn:
             _PrimaryRoleMV.create_mv(conn)
-        with engine.connect() as conn:
+        with scoped.engine.connect() as conn:
             assert sa.inspect(conn).has_table("mv_primary_role_test", schema=schema)
 
-        with scoped.begin() as conn:
+        with scoped.engine.begin() as conn:
             _PrimaryRoleMV.drop_mv(conn, cascade=True)
-        with engine.connect() as conn:
+        with scoped.engine.connect() as conn:
             assert not sa.inspect(conn).has_table("mv_primary_role_test", schema=schema)
 
 
@@ -98,11 +90,8 @@ def test_refresh_mv_concurrently_against_postgres(pg_db) -> None:
     The eligibility check and error translation are already proven at the 
     backend level directly in test_postgres_backend.py. 
     This proves the mixin wires into that correctly end to end."""
-    engine = pg_db.connection.engine
-
-    with isolated_test_schema(engine, prefix="mv_refresh") as schema:
-        scoped = engine.execution_options(schema_translate_map={Role.PRIMARY.value: schema})
-        with scoped.begin() as conn:
+    with scoped_test_schema(pg_db.resolved, prefix="mv_refresh") as scoped:
+        with scoped.engine.begin() as conn:
             _IndexedPgMv.create_mv(conn)
             _IndexedPgMv.refresh_mv(conn, concurrently=True)
 
@@ -266,7 +255,7 @@ def test_create_mv_explicit_schema_tag_overrides_the_mapped_tables_own_schema(
 
     _MappedVocabMv.create_mv(bind, schema_tag=Role.PRIMARY)
 
-    assert fake_backend.calls[0][2]["schema"] == Role.VOCAB.value
+    assert fake_backend.calls[0][2]["schema"] == Role.PRIMARY.value
 
 
 def test_create_mv_forwards_if_not_exists_to_declared_indexes(fake_backend: _FakeBackend, bind):

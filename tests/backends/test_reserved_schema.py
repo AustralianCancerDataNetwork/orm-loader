@@ -19,16 +19,11 @@ from __future__ import annotations
 
 from oa_configurator import (
     CDMDatabaseConfig,
-    ConnectionConfig,
     GenericDatabaseConfig,
     Resolver,
     SchemaOwnershipError,
-    StackConfig,
 )
-from oa_configurator.domains.resources.schema_registry import SchemaRegistry
-from sqlalchemy.engine import make_url
-from sqlalchemy import Table
-from typing import cast
+from oa_configurator.testing import reset_schema_registry_rows
 import pytest
 
 from orm_loader.backends import STAGING_SCHEMA, staging_schema_claim
@@ -36,26 +31,15 @@ from orm_loader.backends import STAGING_SCHEMA, staging_schema_claim
 pytestmark = [pytest.mark.postgresql, pytest.mark.db_dialect]
 
 
-def _connection_config(pg_db) -> ConnectionConfig:
-    connection = pg_db.resolved.connection
-    url = make_url(connection.url)
-    return ConnectionConfig(
-        dialect=url.drivername, host=url.host, port=url.port,
-        user=url.username, password=url.password, database_name=url.database,
-        test_only=connection.test_only,
-    )
-
-
-def test_resolving_cdm_database_with_staging_schema_name_raises(pg_db) -> None:
-    connection_config = _connection_config(pg_db)
-    stack = StackConfig.for_session(
-        connections={"c": connection_config},
+def test_resolving_cdm_database_with_staging_schema_name_raises(pg_db, cleanup_after_test) -> None:
+    reset_schema_registry_rows(cleanup_after_test, pg_db.committing_engine, [STAGING_SCHEMA])
+    connection = pg_db.resolved.connection.name
+    resolver = Resolver.from_active_config().with_overrides(
         databases={
-            "loader": GenericDatabaseConfig(connection="c"),
-            "default": CDMDatabaseConfig(connection="c", cdm_schema=STAGING_SCHEMA),
+            "loader": GenericDatabaseConfig(connection=connection),
+            "default": CDMDatabaseConfig(connection=connection, cdm_schema=STAGING_SCHEMA),
         },
     )
-    resolver = Resolver(stack)
     engine = resolver.resolve_database("loader").create_engine(
         schema_claims=[staging_schema_claim()]
     )
@@ -64,6 +48,3 @@ def test_resolving_cdm_database_with_staging_schema_name_raises(pg_db) -> None:
             resolver.resolve_database("default").create_engine()
     finally:
         engine.dispose()
-        with pg_db.committing_engine.begin() as connection:
-            table = cast(Table, SchemaRegistry.__table__)
-            connection.execute(table.delete().where(table.c.physical_schema == STAGING_SCHEMA))
