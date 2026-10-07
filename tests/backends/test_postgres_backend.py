@@ -12,6 +12,7 @@ from sqlalchemy.engine import Engine
 from oa_configurator import SCHEMA_TRANSLATE_MAP_KEY, Role, qualified
 from oa_configurator.testing import isolated_test_schema
 from orm_loader.backends import STAGING_SCHEMA, Dialect, PostgresBackend
+from orm_loader.backends.resolve import resolve_backend
 from tests.models import ComputedColumnTable
 
 _TARGET_TABLE = ComputedColumnTable.__tablename__
@@ -100,7 +101,7 @@ def test_postgres_backend_default_staging_schema_is_none():
 
 
 def test_postgres_backend_create_staging_table_drops_computed_columns(pg_session):
-    backend = PostgresBackend(staging_schema=STAGING_SCHEMA)
+    backend = resolve_backend(pg_session, staging_schema_tag=STAGING_SCHEMA)
 
     backend.create_staging_table(_ComputedTableCls, pg_session)
 

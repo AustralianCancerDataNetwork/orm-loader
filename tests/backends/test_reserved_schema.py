@@ -32,12 +32,18 @@ pytestmark = [pytest.mark.postgresql, pytest.mark.db_dialect]
 
 
 def test_resolving_cdm_database_with_staging_schema_name_raises(pg_db, cleanup_after_test) -> None:
+    """
+    Notes
+    -----
+    Overrides pg_db's own CDM entry in place, since two
+    CDM entries sharing one physical connection is itself unconfigurable."""
     reset_schema_registry_rows(cleanup_after_test, pg_db.committing_engine, [STAGING_SCHEMA])
     connection = pg_db.resolved.connection.name
+    cdm_name = pg_db.resolved.name
     resolver = Resolver.from_active_config().with_overrides(
         databases={
             "loader": GenericDatabaseConfig(connection=connection),
-            "default": CDMDatabaseConfig(connection=connection, cdm_schema=STAGING_SCHEMA),
+            cdm_name: CDMDatabaseConfig(connection=connection, cdm_schema=STAGING_SCHEMA),
         },
     )
     engine = resolver.resolve_database("loader").create_engine(
@@ -45,6 +51,6 @@ def test_resolving_cdm_database_with_staging_schema_name_raises(pg_db, cleanup_a
     )
     try:
         with pytest.raises(SchemaOwnershipError, match=f"{STAGING_SCHEMA!r}.*orm_loader"):
-            resolver.resolve_database("default").create_engine()
+            resolver.resolve_database(cdm_name).create_engine()
     finally:
         engine.dispose()

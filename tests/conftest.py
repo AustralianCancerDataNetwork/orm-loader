@@ -7,9 +7,9 @@ import sqlalchemy as sa
 import sqlalchemy.orm as so
 from dotenv import load_dotenv
 
-from oa_configurator import Role, ensure_schema
+from oa_configurator import Role
 from oa_configurator.testing import ScopedTestSchema, isolated_test_database, scoped_test_schema
-from orm_loader.backends import STAGING_SCHEMA, staging_schema_claim
+from orm_loader.backends import staging_schema_claim
 from orm_loader.config import OrmLoaderConfig
 from tests.models import Base
 
@@ -54,7 +54,6 @@ def pg_session(pg_db):
     creates the staging schema and Base.metadata inside pg_db's already-open,
     rolled-back transaction, then returns pg_db.session."""
     conn = pg_db.connection
-    ensure_schema(conn, STAGING_SCHEMA)
     Base.metadata.create_all(conn)
     return pg_db.session
 
@@ -69,7 +68,6 @@ def schema_scoped_session(
         pg_db.resolved, prefix=prefix, split_roles=split_roles, schema_claims=[staging_schema_claim()]
     ) as scoped:
         with scoped.engine.begin() as conn:
-            ensure_schema(conn, STAGING_SCHEMA)
             table.create(conn, checkfirst=True)
         with so.Session(scoped.engine) as session:
             yield scoped, session

@@ -1,11 +1,13 @@
-from contextlib import ExitStack
 import logging
+from typing import cast
 
 import sqlalchemy as sa
 from oa_configurator import (
     ResolvedCDMDatabase,
     ResolvedDatabase,
-    guard_schema_provenance_for,
+    UnregisteredSchemaTagError,
+    claimed_schema_tags,
+    declared_schema_tags,
     is_ephemeral_url,
     open_connection,
 )
@@ -14,10 +16,15 @@ from .metadata import Base
 
 logger = logging.getLogger(__name__)
 
-Bindable = sa.engine.Engine | sa.engine.Connection
+# Narrower than oa_configurator.Bindable:
+# open_connection(), the one thing every bindable here is routed through,
+# only accepts Engine | Connection.
+_EngineOrConnection = sa.engine.Engine | sa.engine.Connection
 
 
-def _resolve_binds(resolved: ResolvedDatabase, bindable: Bindable | None) -> tuple[Bindable, Bindable]:
+def _resolve_binds(
+    resolved: ResolvedDatabase, bindable: _EngineOrConnection | None
+) -> tuple[_EngineOrConnection, _EngineOrConnection]:
     """Return (primary_bind, vocab_bind) to run DDL against.
 
     Built from resolved.create_engine()/create_engines() when bindable is
@@ -46,36 +53,66 @@ def _resolve_binds(resolved: ResolvedDatabase, bindable: Bindable | None) -> tup
     return engine, engine
 
 
-def create_db(resolved: ResolvedDatabase, *, bindable: Bindable | None = None) -> None:
+def create_db(resolved: ResolvedDatabase, *, bindable: _EngineOrConnection | None = None) -> None:
+    """Create every schema-tagged table in Base.metadata.
+
+    Schema creation (CREATE SCHEMA) happens inside create_engine() when
+    this function builds its own engine(s). This function's only job is
+    metadata.create_all() for the tables themselves, grouped by schema
+    tag. Because the engine(s) used here are always freshly built for this
+    one call (or explicitly handed in), there's no window for schema drift
+    between the engine's creation and this call's create_all(), so no
+    separate provenance guard is needed here, unlike a long-lived engine
+    reused across many later calls.
+    """
     logger.debug("Creating database schema")
+    owned = bindable is None
     primary_bind, vocab_bind = _resolve_binds(resolved, bindable)
 
-    tables_by_bind: dict[int, tuple[Bindable, dict[str, list[sa.Table]]]] = {}
+    tables_by_bind: dict[int, tuple[_EngineOrConnection, dict[str, list[sa.Table]]]] = {}
+    untagged: list[str] = []
     for table in Base.metadata.tables.values():
         schema_tag = table.schema
         if schema_tag is None:
+            untagged.append(table.name)
             continue
         bind = resolved.route_for_schema_tag(schema_tag, vocab=vocab_bind, primary=primary_bind)
         _, tables_by_tag = tables_by_bind.setdefault(id(bind), (bind, {}))
         tables_by_tag.setdefault(schema_tag, []).append(table)
 
-    with ExitStack() as guard_stack:
+    if untagged:
+        raise ValueError(
+            f"create_db() found table(s) with no schema tag (Table.schema is None): "
+            f"{sorted(untagged)}. Every table must declare its schema_tag; an untagged "
+            "table would otherwise be silently excluded from create_db()."
+        )
+
+    try:
         for bind, tables_by_tag in tables_by_bind.values():
-            connection = guard_stack.enter_context(open_connection(bind))
-            # One provenance guard per schema_tag on this connection; ExitStack defers every write until the block below succeeds.
-            for schema_tag in tables_by_tag:
-                guard_stack.enter_context(
-                    guard_schema_provenance_for(connection, resolved, schema_tag=schema_tag)
-                )
-            tables = [table for tables in tables_by_tag.values() for table in tables]
-            Base.metadata.create_all(connection, tables=tables, checkfirst=True)
+            with open_connection(bind) as connection:
+                tables = [table for tables in tables_by_tag.values() for table in tables]
+                missing = declared_schema_tags(tables) - claimed_schema_tags(connection)
+                if missing:
+                    raise UnregisteredSchemaTagError(
+                        f"create_db(): table(s) declare schema tag(s) {sorted(missing)} that "
+                        "aren't claimed on this connection. Add them to your own "
+                        "create_engine(schema_claims=[...]) call."
+                    )
+                Base.metadata.create_all(connection, tables=tables, checkfirst=True)
+    finally:
+        if owned:
+            # _resolve_binds() only returns Engine instances on this path
+            # (bindable is None): create_engine()/create_engines().
+            cast(sa.engine.Engine, primary_bind).dispose()
+            if vocab_bind is not primary_bind:
+                cast(sa.engine.Engine, vocab_bind).dispose()
 
 
 def bootstrap(
     resolved: ResolvedDatabase,
     *,
     create: bool = True,
-    bindable: Bindable | None = None,
+    bindable: _EngineOrConnection | None = None,
 ) -> None:
     logger.info("Bootstrapping schema (create=%s)", create)
     if create:

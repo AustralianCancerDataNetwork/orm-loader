@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 import sqlalchemy.orm as so
+
+from oa_configurator import Bindable, UnregisteredSchemaTagError, physical_schema_of
 
 from .base import DatabaseBackend, Dialect
 from .postgres import PostgresBackend
 from .sqlite import SQLiteBackend
-
-if TYPE_CHECKING:
-    from sqlalchemy.engine import Connection, Engine
 
 
 _BACKEND_TYPES: dict[Dialect, type[DatabaseBackend]] = {
@@ -17,7 +15,7 @@ _BACKEND_TYPES: dict[Dialect, type[DatabaseBackend]] = {
 }
 
 
-def _dialect(bindable: "so.Session | Engine | Connection") -> Dialect:
+def _dialect(bindable: Bindable) -> Dialect:
     if isinstance(bindable, so.Session):
         bind = bindable.get_bind()
         dialect_name = bind.dialect.name
@@ -34,10 +32,37 @@ def _dialect(bindable: "so.Session | Engine | Connection") -> Dialect:
         ) from exc
 
 
-def resolve_backend(bindable: "so.Session | Engine | Connection", **kwargs) -> DatabaseBackend:
-    """Resolve a concrete backend from a SQLAlchemy session, engine, or connection."""
+def resolve_backend(
+    bindable: Bindable,
+    *,
+    staging_schema_tag: str | None = None,
+    **kwargs,
+) -> DatabaseBackend:
+    """Resolve a concrete backend from a SQLAlchemy session, engine, or connection.
+
+    staging_schema_tag is resolved to its physical schema here, as it is the common
+    entry point for all backends.
+
+    Raises
+    ------
+    oa_configurator.UnregisteredSchemaTagError
+        If staging_schema_tag was never reserved on bindable via
+        ``create_engine(schema_claims=[staging_schema_claim()])``.
+    """
     dialect = _dialect(bindable)
+    staging_schema: str | None = None
+    if staging_schema_tag is not None:
+        try:
+            staging_schema = physical_schema_of(bindable, schema_tag=staging_schema_tag)
+        except UnregisteredSchemaTagError as exc:
+            raise UnregisteredSchemaTagError(
+                "orm-loader needs its staging schema reserved on this engine. Add "
+                "orm_loader.staging_schema_claim() to your own "
+                "create_engine(schema_claims=[...]) call."
+            ) from exc
     try:
-        return _BACKEND_TYPES[dialect](**kwargs)
+        return _BACKEND_TYPES[dialect](
+            staging_schema_tag=staging_schema_tag, staging_schema=staging_schema, **kwargs
+        )
     except KeyError:
         raise NotImplementedError(f"No backend registered for dialect '{dialect.value}'")

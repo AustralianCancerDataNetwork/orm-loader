@@ -11,16 +11,14 @@ from oa_configurator import (
     qualified,
     physical_schema_of,
     Dialect,
-    UnregisteredSchemaTagError,
 )
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.sql.compiler import IdentifierPreparer
 
 from .base import (
-    STAGING_SCHEMA, 
-    BackendCapabilities, 
-    DatabaseBackend, 
+    BackendCapabilities,
+    DatabaseBackend,
     requires_capability
 )
 from ..mappers.materialised_view_errors import (
@@ -41,8 +39,8 @@ _VALID_PG_REPLICATION_ROLES = frozenset({"origin", "local", "replica"})
 
 
 class PostgresBackend(DatabaseBackend):
-    def __init__(self, *, staging_schema: str | None = None) -> None:
-        super().__init__(staging_schema=staging_schema)
+    def __init__(self, *, staging_schema_tag: str | None = None, staging_schema: str | None = None) -> None:
+        super().__init__(staging_schema_tag=staging_schema_tag, staging_schema=staging_schema)
 
     @staticmethod
     def staging_name_for_table(tablename: str) -> str:
@@ -74,15 +72,6 @@ class PostgresBackend(DatabaseBackend):
         table_cls: type["CSVTableProtocol"],
         session: so.Session,
     ) -> None:
-        if self.staging_schema == STAGING_SCHEMA:
-            try:
-                physical_schema_of(session, schema_tag=STAGING_SCHEMA)
-            except UnregisteredSchemaTagError as exc:
-                raise UnregisteredSchemaTagError(
-                    "orm-loader needs its staging schema reserved on this engine. Add "
-                    "orm_loader.staging_schema_claim() to your own "
-                    "create_engine(schema_claims=[...]) call."
-                ) from exc
         table = table_cls.__table__
         preparer = self.identifier_preparer
         staging_ref = self.qualified_staging_name(table_cls.__tablename__)
@@ -191,7 +180,7 @@ class PostgresBackend(DatabaseBackend):
         merge_batch_size: int | None = None,
     ) -> None:
         target = table_cls.__table__
-        staging = table_cls.get_staging_table(session, staging_schema=self.staging_schema)
+        staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
         pk_join = sa.and_(*(target.c[c] == staging.c[c] for c in pk_cols))
 
         non_paginated_replace = sa.delete(target).where(pk_join)
@@ -227,7 +216,7 @@ class PostgresBackend(DatabaseBackend):
         merge_batch_size: int | None = None,
     ) -> None:
         target = table_cls.__table__
-        staging = table_cls.get_staging_table(session, staging_schema=self.staging_schema)
+        staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
         insertable_cols = self._insertable_column_names(table_cls)
 
         def _upsert(select_: sa.sql.Select[Any]) -> sa.Insert:
@@ -269,7 +258,7 @@ class PostgresBackend(DatabaseBackend):
         merge_batch_size: int | None = None,
     ) -> None:
         target = table_cls.__table__
-        staging = table_cls.get_staging_table(session, staging_schema=self.staging_schema)
+        staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
         insertable_cols = self._insertable_column_names(table_cls)
         non_paginated_select = sa.select(*(staging.c[c] for c in insertable_cols))
 

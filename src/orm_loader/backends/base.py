@@ -99,20 +99,24 @@ class DatabaseBackend(ABC):
     without changing existing loader orchestration yet.
     """
 
-    def __init__(self, staging_schema: str | None = None) -> None:
+    def __init__(self, *, staging_schema_tag: str | None = None, staging_schema: str | None = None) -> None:
         """
         Parameters
         ----------
+        staging_schema_tag
+            schema_translate_map tag the staging schema was resolved from.
+            ``None`` means no schema qualification was requested at all.
+            Stored so a caller re-resolving the backend later (e.g. after
+            the engine's claims may have changed) re-derives the same tag
+            rather than reusing an already-resolved physical name.
         staging_schema
-            Schema in which staging tables are created. ``None`` means no
-            schema qualification — staging tables land in whatever schema the
-            connection's search_path resolves to. Callers that want
-            schema-isolated staging can pass an explicit schema; backends must
-            not enable it implicitly because the schema may not have been
-            provisioned. ``STAGING_SCHEMA`` provides a shared convention for
-            callers that opt in. SQLite has no schema concept and always uses
-            ``None``.
+            Already-resolved physical schema staging tables are created in,
+            via ``resolve_backend()``. ``None`` means no schema
+            qualification — staging tables land in whatever schema the
+            connection's search_path resolves to. SQLite has no schema
+            concept and always resolves to ``None``.
         """
+        self.staging_schema_tag = staging_schema_tag
         self.staging_schema = staging_schema
 
     @staticmethod

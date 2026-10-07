@@ -64,9 +64,10 @@ class LoaderContext:
     quote_mode
         Quoting mode, resolved to the same concrete mode on both the
         PostgreSQL COPY fast-path and the pandas ORM fallback.
-    staging_schema
-        Schema the staging table lives in, passed to resolve_backend() so
-        every backend resolution within this load shares the same schema.
+    staging_schema_tag
+        schema_translate_map tag the staging table lives in, passed to
+        resolve_backend() so every backend resolution within this load
+        resolves the same schema.
     """
     tableclass: Type["CSVTableProtocol"]
     session: so.Session
@@ -77,7 +78,7 @@ class LoaderContext:
     normalise: bool = True
     dedupe: bool = True
     quote_mode: str = "auto"
-    staging_schema: str | None = None
+    staging_schema_tag: str | None = None
 
 class LoaderInterface:
 

@@ -13,8 +13,6 @@ from sqlalchemy.dialects import sqlite as sqlite_dialect
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql.compiler import IdentifierPreparer
 
-from oa_configurator import schema_if_supported
-
 from .base import BackendCapabilities, DatabaseBackend, Dialect
 
 if TYPE_CHECKING:
@@ -37,18 +35,18 @@ class SQLiteBackend(DatabaseBackend):
     def __init__(
         self,
         *,
+        staging_schema_tag: str | None = None,
         staging_schema: str | None = None,
         busy_timeout_ms: int = 60000,
         journal_mode: str = "WAL",
         defer_foreign_keys: bool = True,
     ) -> None:
-        if staging_schema is not None and schema_if_supported(staging_schema, Dialect.SQLITE) is None:
-            logger.warning(
-                "SQLite does not support schema-qualified staging tables; "
-                f"got staging_schema={staging_schema!r}. Setting staging_schema=None."
+        if staging_schema is not None:
+            raise ValueError(
+                "SQLite has no schema concept, so staging_schema must be None. "
+                "physical_schema_of() already resolves it to None for this dialect."
             )
-            staging_schema = None
-        super().__init__(staging_schema=staging_schema)
+        super().__init__(staging_schema_tag=staging_schema_tag, staging_schema=staging_schema)
         self.busy_timeout_ms = busy_timeout_ms
         self.journal_mode = self._validate_journal_mode(journal_mode)
         self.defer_foreign_keys = defer_foreign_keys
@@ -168,7 +166,7 @@ class SQLiteBackend(DatabaseBackend):
         merge_batch_size: int | None = None,
     ) -> None:
         target = table_cls.__table__
-        staging = table_cls.get_staging_table(session, staging_schema=self.staging_schema)
+        staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
         pk_match = sa.and_(*(target.c[c] == staging.c[c] for c in pk_cols))
 
         # SQLite's DELETE has no USING/multi-table support (confirmed
@@ -205,7 +203,7 @@ class SQLiteBackend(DatabaseBackend):
         merge_batch_size: int | None = None,
     ) -> None:
         target = table_cls.__table__
-        staging = table_cls.get_staging_table(session, staging_schema=self.staging_schema)
+        staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
         insertable_cols = self._insertable_column_names(table_cls)
 
         def _upsert(select_: sa.Select[Any]) -> sa.Insert:
@@ -245,7 +243,7 @@ class SQLiteBackend(DatabaseBackend):
         merge_batch_size: int | None = None,
     ) -> None:
         target = table_cls.__table__
-        staging = table_cls.get_staging_table(session, staging_schema=self.staging_schema)
+        staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
         insertable_cols = self._insertable_column_names(table_cls)
         non_paginated_select = sa.select(*(staging.c[c] for c in insertable_cols))
 

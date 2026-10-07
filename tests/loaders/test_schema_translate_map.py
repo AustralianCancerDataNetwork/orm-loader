@@ -38,7 +38,7 @@ def test_load_csv_respects_non_default_schema_end_to_end(pg_db, tmp_path):
         ).to_csv(csv_path, index=False, sep="\t")
 
         inserted = SimpleTable.load_csv(
-            session, csv_path, dedupe=False, loader=PandasLoader(), staging_schema=STAGING_SCHEMA
+            session, csv_path, dedupe=False, loader=PandasLoader(), staging_schema_tag=STAGING_SCHEMA
         )
         session.commit()
 
@@ -73,7 +73,7 @@ def test_replace_merge_respects_non_default_schema_end_to_end(pg_db, tmp_path):
                 dedupe=False,
                 loader=PandasLoader(),
                 merge_strategy="replace",
-                staging_schema=STAGING_SCHEMA,
+                staging_schema_tag=STAGING_SCHEMA,
             )
 
         _write_and_load([{"id": 1, "name": "alpha"}, {"id": 2, "name": "beta"}], "test_table.csv")
@@ -102,7 +102,7 @@ def test_load_csv_respects_non_primary_schema_tag_end_to_end(pg_db, tmp_path):
         )
 
         inserted = VocabSchemaTable.load_csv(
-            session, csv_path, dedupe=False, loader=PandasLoader(), staging_schema=STAGING_SCHEMA
+            session, csv_path, dedupe=False, loader=PandasLoader(), staging_schema_tag=STAGING_SCHEMA
         )
         session.commit()
 
