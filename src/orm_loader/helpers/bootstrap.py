@@ -53,13 +53,22 @@ def create_db(resolved: ResolvedDatabase, *, bindable: Bindable | None = None) -
     Schema creation (CREATE SCHEMA) happens inside create_engine() when
     this function builds its own engine(s). This function's only job is
     metadata.create_all() for the tables themselves, grouped by schema
-    tag. Because the engine(s) used here are always freshly built for this
+    tag. 
+    
+    Notes
+    -----
+    Because the engine(s) used here are always freshly built for this
     one call (or explicitly handed in), there's no window for schema drift
     between the engine's creation and this call's create_all(), so no
-    separate provenance guard is needed here, unlike a long-lived engine
-    reused across many later calls.
+    separate provenance guard is needed here.
     """
     logger.debug("Creating database schema")
+    if not Base.metadata.tables:
+        logger.warning(
+            "create_db(): Base.metadata declares no tables. If this is unexpected, "
+            "the module(s) defining your ORM models likely weren't imported yet. "
+            "SQLAlchemy only registers a model on Base when its module runs."
+        )
     owned = bindable is None
     primary_bind, vocab_bind = _resolve_binds(resolved, bindable)
 
