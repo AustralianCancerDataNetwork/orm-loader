@@ -3,6 +3,7 @@ from typing import cast
 
 import sqlalchemy as sa
 from oa_configurator import (
+    Bindable,
     ResolvedCDMDatabase,
     ResolvedDatabase,
     UnregisteredSchemaTagError,
@@ -16,15 +17,8 @@ from .metadata import Base
 
 logger = logging.getLogger(__name__)
 
-# Narrower than oa_configurator.Bindable:
-# open_connection(), the one thing every bindable here is routed through,
-# only accepts Engine | Connection.
-_EngineOrConnection = sa.engine.Engine | sa.engine.Connection
 
-
-def _resolve_binds(
-    resolved: ResolvedDatabase, bindable: _EngineOrConnection | None
-) -> tuple[_EngineOrConnection, _EngineOrConnection]:
+def _resolve_binds(resolved: ResolvedDatabase, bindable: Bindable | None) -> tuple[Bindable, Bindable]:
     """Return (primary_bind, vocab_bind) to run DDL against.
 
     Built from resolved.create_engine()/create_engines() when bindable is
@@ -53,7 +47,7 @@ def _resolve_binds(
     return engine, engine
 
 
-def create_db(resolved: ResolvedDatabase, *, bindable: _EngineOrConnection | None = None) -> None:
+def create_db(resolved: ResolvedDatabase, *, bindable: Bindable | None = None) -> None:
     """Create every schema-tagged table in Base.metadata.
 
     Schema creation (CREATE SCHEMA) happens inside create_engine() when
@@ -69,7 +63,7 @@ def create_db(resolved: ResolvedDatabase, *, bindable: _EngineOrConnection | Non
     owned = bindable is None
     primary_bind, vocab_bind = _resolve_binds(resolved, bindable)
 
-    tables_by_bind: dict[int, tuple[_EngineOrConnection, dict[str, list[sa.Table]]]] = {}
+    tables_by_bind: dict[int, tuple[Bindable, dict[str, list[sa.Table]]]] = {}
     untagged: list[str] = []
     for table in Base.metadata.tables.values():
         schema_tag = table.schema
@@ -112,7 +106,7 @@ def bootstrap(
     resolved: ResolvedDatabase,
     *,
     create: bool = True,
-    bindable: _EngineOrConnection | None = None,
+    bindable: Bindable | None = None,
 ) -> None:
     logger.info("Bootstrapping schema (create=%s)", create)
     if create:
