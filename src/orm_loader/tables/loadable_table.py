@@ -6,7 +6,7 @@ from oa_configurator import physical_schema_of
 
 from sqlalchemy.exc import InvalidRequestError, UnboundExecutionError
 
-from typing import Type, Any, Iterator
+from typing import Type, Any, Generator
 from pathlib import Path
 from contextlib import contextmanager
 from time import perf_counter
@@ -109,7 +109,7 @@ class CSVLoadableTableInterface(ORMTableBase):
         index_strategy: str = "auto",
         *,
         staging_schema_tag: str | None = None,
-    ) -> Iterator[None]:
+    ) -> Generator[None, None, None]:
         """
         Manage non-primary-key indexes around a staged merge.
 
