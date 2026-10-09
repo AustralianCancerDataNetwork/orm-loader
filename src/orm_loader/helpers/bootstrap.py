@@ -1,5 +1,5 @@
 import logging
-from typing import cast
+from typing import Iterable, cast
 
 import sqlalchemy as sa
 from oa_configurator import (
@@ -11,6 +11,8 @@ from oa_configurator import (
     declared_schema_tags,
     is_ephemeral_url,
     open_connection,
+    referred_schema_tag,
+    without_cross_engine_foreign_keys,
 )
 
 from .metadata import Base
@@ -21,7 +23,7 @@ logger = logging.getLogger(__name__)
 def _resolve_binds(resolved: ResolvedDatabase, bindable: Bindable | None) -> tuple[Bindable, Bindable]:
     """Return (primary_bind, vocab_bind) to run DDL against.
 
-    Built from resolved.create_engine()/create_engines() when bindable is
+    Built from resolved.create_engines()/create_engine() when bindable is
     omitted, keeping schema-claim registration and vocab/primary routing in
     one place. This is the default, enforced path for a real database!
 
@@ -47,14 +49,72 @@ def _resolve_binds(resolved: ResolvedDatabase, bindable: Bindable | None) -> tup
     return engine, engine
 
 
+def create_tables(
+    connection: sa.Connection,
+    tables: Iterable[sa.Table],
+    *,
+    resolved: ResolvedDatabase,
+) -> None:
+    """Create *tables* on *connection* as they can physically exist under *resolved*.
+
+    Foreign keys to a tag hosted on another database are left out, since no
+    dialect can express them. When none cross, this is plain
+    ``Base.metadata.create_all``. Otherwise every ``Base`` table on the same
+    database is copied alongside, so a kept foreign key to a table that
+    already exists still resolves.
+
+    Parameters
+    ----------
+    connection : sqlalchemy.Connection
+        Open connection on the database hosting every table in *tables*.
+    tables : Iterable[sqlalchemy.Table]
+        ``Base`` tables to create, all hosted on *connection*'s database.
+    resolved : ResolvedDatabase
+        Topology answering which foreign keys can exist.
+
+    Raises
+    ------
+    ValueError
+        If a table has no schema tag.
+    """
+    tagged = [(table, table.schema) for table in tables]
+    if not tagged:
+        return
+    untagged = sorted(table.name for table, tag in tagged if tag is None)
+    if untagged:
+        raise ValueError(f"create_tables() needs schema-tagged tables, got untagged {untagged}.")
+    tags = {table.key: tag for table, tag in tagged if tag is not None}
+    tables = [table for table, _ in tagged]
+    crossing = any(
+        not resolved.foreign_key_can_span(tags[table.key], referred_schema_tag(fk, tags[table.key]))
+        for table in tables
+        for fk in table.foreign_keys
+    )
+    if not crossing:
+        Base.metadata.create_all(connection, tables=tables, checkfirst=True)
+        return
+
+    own_tag = tags[tables[0].key]
+    local = [
+        table
+        for table in Base.metadata.tables.values()
+        if table.schema is not None and resolved.tags_share_a_transaction(table.schema, own_tag)
+    ]
+    wanted = {table.key for table in tables}
+    copies = without_cross_engine_foreign_keys(local, resolved=resolved)
+    copies[0].metadata.create_all(
+        connection, tables=[copy for copy in copies if copy.key in wanted], checkfirst=True
+    )
+
+
 def create_db(resolved: ResolvedDatabase, *, bindable: Bindable | None = None) -> None:
     """Create every schema-tagged table in Base.metadata.
 
-    Schema creation (CREATE SCHEMA) happens inside create_engine() when
+    Schema creation (CREATE SCHEMA) happens inside engine creation when
     this function builds its own engine(s). This function's only job is
     metadata.create_all() for the tables themselves, grouped by schema
-    tag. 
-    
+    tag, each group created through :func:`create_tables`.
+
     Notes
     -----
     Because the engine(s) used here are always freshly built for this
@@ -99,13 +159,13 @@ def create_db(resolved: ResolvedDatabase, *, bindable: Bindable | None = None) -
                     raise UnregisteredSchemaTagError(
                         f"create_db(): table(s) declare schema tag(s) {sorted(missing)} that "
                         "aren't claimed on this connection. Add them to your own "
-                        "create_engine(schema_claims=[...]) call."
+                        "create_engines(schema_claims=[...]) call."
                     )
-                Base.metadata.create_all(connection, tables=tables, checkfirst=True)
+                create_tables(connection, tables, resolved=resolved)
     finally:
         if owned:
             # _resolve_binds() only returns Engine instances on this path
-            # (bindable is None): create_engine()/create_engines().
+            # (bindable is None): create_engines()/create_engine().
             cast(sa.engine.Engine, primary_bind).dispose()
             if vocab_bind is not primary_bind:
                 cast(sa.engine.Engine, vocab_bind).dispose()

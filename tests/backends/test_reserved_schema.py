@@ -51,6 +51,6 @@ def test_resolving_cdm_database_with_staging_schema_name_raises(pg_db, cleanup_a
     )
     try:
         with pytest.raises(SchemaOwnershipError, match=f"{STAGING_SCHEMA!r}.*orm_loader"):
-            resolver.resolve_database(cdm_name).create_engine()
+            resolver.resolve_database(cdm_name).create_engines()
     finally:
         engine.dispose()

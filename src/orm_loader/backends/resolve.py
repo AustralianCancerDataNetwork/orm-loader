@@ -47,7 +47,7 @@ def resolve_backend(
     ------
     oa_configurator.UnregisteredSchemaTagError
         If staging_schema_tag was never reserved on bindable via
-        ``create_engine(schema_claims=[staging_schema_claim()])``.
+        ``create_engines(schema_claims=[staging_schema_claim()])``.
     """
     dialect = _dialect(bindable)
     staging_schema: str | None = None
@@ -58,7 +58,7 @@ def resolve_backend(
             raise UnregisteredSchemaTagError(
                 "orm-loader needs its staging schema reserved on this engine. Add "
                 "orm_loader.staging_schema_claim() to your own "
-                "create_engine(schema_claims=[...]) call."
+                "create_engines(schema_claims=[...]) call."
             ) from exc
     try:
         return _BACKEND_TYPES[dialect](

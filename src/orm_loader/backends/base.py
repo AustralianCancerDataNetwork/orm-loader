@@ -44,7 +44,7 @@ def staging_schema_claim(physical_schema: str | None = None, *, reserved: bool =
     this claim needs to be registered by the caller ingesting tables into 
     the database through orm-loader.
 
-    Add to your own ``create_engine(schema_claims=[...])`` call before
+    Add to your own ``create_engines(schema_claims=[...])`` call before
     handing a session into this package's staging path.
 
     Parameters
