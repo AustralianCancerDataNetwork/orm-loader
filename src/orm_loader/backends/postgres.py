@@ -171,6 +171,29 @@ class PostgresBackend(DatabaseBackend):
         idx.create(bind=session.connection(), checkfirst=True)
         session.commit()
 
+    @staticmethod
+    def _staging_rownum_bound(staging: sa.Table, session: so.Session) -> int:
+        """Highest ``_rownum`` in *staging*, as the pagination upper bound.
+
+        ``_rownum`` is an identity column whose values need not start at 1,
+        so the row count is not a valid upper bound.
+
+        Parameters
+        ----------
+        staging : sqlalchemy.Table
+            Staging table being paginated.
+        session : sqlalchemy.orm.Session
+            Session to query on.
+
+        Returns
+        -------
+        int
+            0 for an empty staging table.
+        """
+        return session.execute(
+            sa.select(sa.func.coalesce(sa.func.max(staging.c._rownum), 0))
+        ).scalar_one()
+
     def merge_replace(
         self,
         table_cls: type["CSVTableProtocol"],
@@ -179,6 +202,13 @@ class PostgresBackend(DatabaseBackend):
         *,
         merge_batch_size: int | None = None,
     ) -> None:
+        """Delete every target row whose primary key appears in staging.
+
+        Notes
+        -----
+        Each batch commits, so unlike SQLite's merge the delete phase is
+        already durable if a later insert phase fails.
+        """
         target = table_cls.__table__
         staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
         pk_join = sa.and_(*(target.c[c] == staging.c[c] for c in pk_cols))
@@ -196,8 +226,9 @@ class PostgresBackend(DatabaseBackend):
 
         self._staging_rownum_index(table_cls, staging, session)
 
+        bound = self._staging_rownum_bound(staging, session)
         start = 0
-        while start < total:
+        while start < bound:
             end = start + merge_batch_size
             session.execute(
                 sa.delete(target).where(
@@ -240,8 +271,9 @@ class PostgresBackend(DatabaseBackend):
 
         self._staging_rownum_index(table_cls, staging, session)
 
+        bound = self._staging_rownum_bound(staging, session)
         start = 0
-        while start < total:
+        while start < bound:
             end = start + merge_batch_size
             batch_select = non_paginated_select.where(
                 staging.c._rownum > start, staging.c._rownum <= end
@@ -280,8 +312,9 @@ class PostgresBackend(DatabaseBackend):
         # across commits, so FK checks stay disabled for all batches.
         self._staging_rownum_index(table_cls, staging, session)
 
+        bound = self._staging_rownum_bound(staging, session)
         start = 0
-        while start < total:
+        while start < bound:
             end = start + merge_batch_size
             batch_select = non_paginated_select.where(
                 staging.c._rownum > start, staging.c._rownum <= end

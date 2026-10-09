@@ -165,17 +165,31 @@ class SQLiteBackend(DatabaseBackend):
         *,
         merge_batch_size: int | None = None,
     ) -> None:
+        """Delete every target row whose primary key appears in staging.
+
+        Parameters
+        ----------
+        merge_batch_size : int or None, optional
+            Rows per statement. Bounds statement size only; the batches are
+            not committed individually, so the whole merge stays in the
+            caller's transaction and a later failure in the insert phase
+            cannot leave the target emptied.
+        """
         target = table_cls.__table__
         staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
-        pk_match = sa.and_(*(target.c[c] == staging.c[c] for c in pk_cols))
 
-        # SQLite's DELETE has no USING/multi-table support (confirmed
-        # empirically: NotImplementedError on a plain multi-table WHERE), so
-        # this needs an EXISTS correlated subquery instead of Postgres's
-        # DELETE ... USING.
+        # SQLite's DELETE has no USING, so staging keys go in a subquery. IN
+        # rather than a correlated EXISTS, which rescans the unindexed staging
+        # table once per target row.
         def _delete(extra: sa.ColumnElement[bool] | None = None) -> sa.Delete:
-            conditions = (pk_match,) if extra is None else (pk_match, extra)
-            return sa.delete(target).where(sa.exists().where(*conditions))
+            keys = sa.select(*(staging.c[c] for c in pk_cols))
+            if extra is not None:
+                keys = keys.where(extra)
+            if len(pk_cols) == 1:
+                return sa.delete(target).where(target.c[pk_cols[0]].in_(keys))
+            return sa.delete(target).where(
+                sa.tuple_(*(target.c[c] for c in pk_cols)).in_(keys)
+            )
 
         if merge_batch_size is None:
             session.execute(_delete())
@@ -191,7 +205,6 @@ class SQLiteBackend(DatabaseBackend):
         while start < total:
             end = start + merge_batch_size
             session.execute(_delete(sa.and_(rowid > start, rowid <= end)))
-            session.commit()
             start = end
 
     def merge_upsert(
@@ -232,7 +245,6 @@ class SQLiteBackend(DatabaseBackend):
             end = start + merge_batch_size
             batch_select = non_paginated_select.where(rowid > start, rowid <= end)
             session.execute(_upsert(batch_select))
-            session.commit()
             start = end
 
     def merge_insert(
@@ -265,7 +277,6 @@ class SQLiteBackend(DatabaseBackend):
             end = start + merge_batch_size
             batch_select = non_paginated_select.where(rowid > start, rowid <= end)
             session.execute(_insert(batch_select))
-            session.commit()
             start = end
 
     def merge_context(
