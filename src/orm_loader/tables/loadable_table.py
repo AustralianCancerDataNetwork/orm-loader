@@ -1,18 +1,19 @@
 # pyright: reportPrivateUsage=false
+import logging
+from contextlib import contextmanager
+from pathlib import Path
+from time import perf_counter
+from typing import Any, Generator, Type
+
 import sqlalchemy as sa
 import sqlalchemy.orm as so
-import logging
+from oa_configurator import Dialect, physical_schema_of
 from sqlalchemy.exc import InvalidRequestError, UnboundExecutionError
 
-from typing import Type, Any, Iterator
-from pathlib import Path
-from contextlib import contextmanager
-from time import perf_counter
-
+from ..backends.resolve import resolve_backend
+from ..loaders.loader_interface import LoaderContext, LoaderInterface, PandasLoader, ParquetLoader
 from .orm_table import ORMTableBase
 from .typing import CSVTableProtocol
-from ..backends.resolve import resolve_backend
-from ..loaders.loader_interface import LoaderInterface, LoaderContext, PandasLoader, ParquetLoader
 
 logger = logging.getLogger(__name__)
 
@@ -22,10 +23,10 @@ def _format_elapsed(seconds: float) -> str:
     return f"{seconds:.2f}s"
 
 
-def _require_bind(session: so.Session) -> sa.Engine | sa.Connection:
+def _require_bind(session: so.Session, mapper: Any | None = None) -> sa.Engine | sa.Connection:
     """Return a bound connectable or raise a stable runtime error."""
     try:
-        return session.get_bind()
+        return session.get_bind(mapper=mapper)
     except (InvalidRequestError, UnboundExecutionError) as exc:
         raise RuntimeError("Session is not bound to an engine") from exc
 
@@ -71,7 +72,7 @@ class CSVLoadableTableInterface(ORMTableBase):
         cls: Type[CSVTableProtocol],
         session: so.Session,
         *,
-        staging_schema: str | None = None,
+        staging_schema_tag: str | None = None,
     ):
         """
         Create a fresh staging table for ingestion.
@@ -83,9 +84,10 @@ class CSVLoadableTableInterface(ORMTableBase):
         ----------
         session
             An active SQLAlchemy session bound to an engine.
-        staging_schema
-            Schema the staging table should be created in. ``None`` means no
-            schema qualification (backend-default behavior).
+        staging_schema_tag
+            schema_translate_map tag the staging table should be created
+            under. ``None`` means no schema qualification (backend-default
+            behavior).
 
         Raises
         ------
@@ -94,8 +96,8 @@ class CSVLoadableTableInterface(ORMTableBase):
         NotImplementedError
             If the database dialect is unsupported.
         """
-        _require_bind(session)
-        backend = resolve_backend(session, staging_schema=staging_schema)
+        _require_bind(session, cls)
+        backend = resolve_backend(session, staging_schema_tag=staging_schema_tag, mapper=cls)
         backend.create_staging_table(cls, session)
 
     @classmethod
@@ -105,8 +107,8 @@ class CSVLoadableTableInterface(ORMTableBase):
         session: so.Session,
         index_strategy: str = "auto",
         *,
-        staging_schema: str | None = None,
-    ) -> Iterator[None]:
+        staging_schema_tag: str | None = None,
+    ) -> Generator[None, None, None]:
         """
         Manage non-primary-key indexes around a staged merge.
 
@@ -115,16 +117,17 @@ class CSVLoadableTableInterface(ORMTableBase):
         moment SQLite keeps indexes by default, while PostgreSQL drops
         and rebuilds them.
         """
-        backend = resolve_backend(session, staging_schema=staging_schema)
+        backend = resolve_backend(session, staging_schema_tag=staging_schema_tag, mapper=cls)
         resolved_index_strategy = backend.resolve_index_strategy(index_strategy)
         table_name = cls.__tablename__
 
         indices = list(cls.__table__.indexes) if resolved_index_strategy == "drop_rebuild" else []
-        inspector = sa.inspect(_require_bind(session))
-        assert inspector is not None, "Failed to create inspector for index management"
-    
+
         if indices:
-            existing_in_db = {idx['name'] for idx in inspector.get_indexes(cls.__tablename__)}
+            connection = session.connection(bind_arguments={"mapper": cls})
+            inspector = sa.inspect(connection)
+            schema = physical_schema_of(connection, schema_tag=cls.__table__.schema)
+            existing_in_db = {idx['name'] for idx in inspector.get_indexes(cls.__tablename__, schema=schema)}
             to_drop = [i for i in indices if i.name in existing_in_db]
             
             if to_drop:
@@ -179,8 +182,10 @@ class CSVLoadableTableInterface(ORMTableBase):
             if indices:
                 logger.info(f"Table `{table_name}`: Verifying/Rebuilding indices.")
                 rebuild_started = perf_counter()
-                inspector.clear_cache() # Required to ensure we get the current state of the database after potential changes
-                existing_idx_names = {idx['name'] for idx in inspector.get_indexes(table_name)}
+                connection = session.connection(bind_arguments={"mapper": cls})
+                inspector = sa.inspect(connection)
+                schema = physical_schema_of(connection, schema_tag=cls.__table__.schema)
+                existing_idx_names = {idx['name'] for idx in inspector.get_indexes(table_name, schema=schema)}
                
                 for idx in indices:
                     if idx.name not in existing_idx_names:
@@ -215,7 +220,7 @@ class CSVLoadableTableInterface(ORMTableBase):
         cls: Type[CSVTableProtocol],
         session: so.Session,
         *,
-        staging_schema: str | None = None,
+        staging_schema_tag: str | None = None,
     ) -> sa.Table:
         """
         Return the reflected staging table, creating it if necessary.
@@ -224,29 +229,47 @@ class CSVLoadableTableInterface(ORMTableBase):
         ----------
         session
             An active SQLAlchemy session bound to an engine.
-        staging_schema
-            Schema the staging table lives in. ``None`` means no schema
-            qualification (backend-default behavior).
+        staging_schema_tag
+            schema_translate_map tag the staging table lives in. ``None``
+            means no schema qualification (backend-default behavior).
 
         Returns
         -------
         sqlalchemy.Table
             The reflected staging table.
+
+        Notes
+        -----
+        Inspects and reflects via ``session.connection()``, not the bare
+        engine. Confirmed empirically: on SQLite's SingletonThreadPool, a
+        second connection opened straight from the engine is the same
+        underlying DBAPI connection, and closing that second wrapper resets
+        its perceived transaction state, silently discarding the session's
+        own uncommitted work. Using the session's own already-open
+        connection avoids ever opening a second one. Fetched fresh both
+        before and after the possible ``create_staging_table()`` call below,
+        since that call commits, which can invalidate an earlier reference.
         """
-        engine = _require_bind(session)
-        backend = resolve_backend(session, staging_schema=staging_schema)
-        inspector = sa.inspect(engine)
+        _require_bind(session, cls)
+        backend = resolve_backend(session, staging_schema_tag=staging_schema_tag, mapper=cls)
+        connection = session.connection(bind_arguments={"mapper": cls})
+        inspector = sa.inspect(connection)
         staging_name = backend.staging_name_for_table(cls.__tablename__)
 
+        staging_schema = backend.staging_schema
+        if staging_schema is None and backend.dialect == Dialect.SQLITE:
+            staging_schema = cls.__table__.schema
         if not inspector.has_table(staging_name, schema=backend.staging_schema):
             logger.debug(f"Staging table {staging_name} does not exist; recreating",)
-            cls.create_staging_table(session, staging_schema=staging_schema)
+            cls.create_staging_table(session, staging_schema_tag=staging_schema_tag)
+
+        connection = session.connection(bind_arguments={"mapper": cls})
 
         return sa.Table(
             staging_name,
             sa.MetaData(),  # throwaway — keeps staging table out of Base.metadata
-            autoload_with=engine,
-            schema=backend.staging_schema,
+            autoload_with=connection,
+            schema=staging_schema,
         )
 
     @classmethod
@@ -273,12 +296,14 @@ class CSVLoadableTableInterface(ORMTableBase):
         int
             Number of rows loaded into the staging table.
         """
-        _require_bind(loader_context.session)
+        _require_bind(loader_context.session, cls)
 
-        backend = resolve_backend(loader_context.session, staging_schema=loader_context.staging_schema)
+        backend = resolve_backend(
+            loader_context.session, staging_schema_tag=loader_context.staging_schema_tag, mapper=cls
+        )
         total = 0
 
-        cls.create_staging_table(loader_context.session, staging_schema=loader_context.staging_schema)
+        cls.create_staging_table(loader_context.session, staging_schema_tag=loader_context.staging_schema_tag)
 
         try:
             total = backend.load_staging_fast(loader_context=loader_context)
@@ -347,7 +372,7 @@ class CSVLoadableTableInterface(ORMTableBase):
         quote_mode: str = "auto",
         index_strategy: str = "auto",
         merge_batch_size: int | None = None,
-        staging_schema: str | None = None,
+        staging_schema_tag: str | None = None,
     ) -> int:
 
         """
@@ -377,15 +402,17 @@ class CSVLoadableTableInterface(ORMTableBase):
             Merge strategy to apply (e.g. ``replace``, ``upsert``, or
             ``insert_if_empty``).
         quote_mode
-            Quoting mode used by the PostgreSQL fast-path loader.
+            Quoting mode. Governs parsing on both the PostgreSQL COPY
+            fast-path and the pandas ORM fallback, so a file that falls back
+            to the ORM path is still parsed identically.
         index_strategy
             Index handling strategy during merge. Use ``"auto"`` to let
             the backend choose a sensible default.
-        staging_schema
-            Schema the staging table lives in. ``None`` means no schema
-            qualification (backend-default behavior). Threaded through
-            every internal step of the load lifecycle so they all resolve
-            the same backend/schema.
+        staging_schema_tag
+            schema_translate_map tag the staging table lives in. ``None``
+            means no schema qualification (backend-default behavior).
+            Threaded through every internal step of the load lifecycle so
+            they all resolve the same backend/schema.
 
         Returns
         -------
@@ -405,10 +432,7 @@ class CSVLoadableTableInterface(ORMTableBase):
                 f"Table `{cls.__tablename__}`: Checking whether target table is empty before staging load."
             )
             check_started = perf_counter()
-            has_rows = cls._target_has_rows(
-                session=session,
-                target=cls.__tablename__,
-            )
+            has_rows = cls._target_has_rows(session=session)
             logger.info(
                 f"Table `{cls.__tablename__}`: Pre-load empty-table check completed in "
                 f"{_format_elapsed(perf_counter() - check_started)}."
@@ -424,12 +448,12 @@ class CSVLoadableTableInterface(ORMTableBase):
             tableclass=cls,
             session=session,
             path=path,
-            staging_table=cls.get_staging_table(session, staging_schema=staging_schema),
+            staging_table=cls.get_staging_table(session, staging_schema_tag=staging_schema_tag),
             chunksize=chunksize,
             normalise=normalise,
             dedupe=dedupe,
             quote_mode=quote_mode,
-            staging_schema=staging_schema,
+            staging_schema_tag=staging_schema_tag,
         )
 
         if loader is None:
@@ -441,15 +465,15 @@ class CSVLoadableTableInterface(ORMTableBase):
 
         # Merge staging to target (Wrapped in our index dropper!)
         logger.info(f"Table `{cls.__tablename__}`: Merging staging data into target table")
-        with cls.manage_indices(session, index_strategy=index_strategy, staging_schema=staging_schema):
+        with cls.manage_indices(session, index_strategy=index_strategy, staging_schema_tag=staging_schema_tag):
             cls.merge_from_staging(
                 session,
                 merge_strategy=merge_strategy,
                 merge_batch_size=merge_batch_size,
-                staging_schema=staging_schema,
+                staging_schema_tag=staging_schema_tag,
             )
 
-        cls.drop_staging_table(session, staging_schema=staging_schema)
+        cls.drop_staging_table(session, staging_schema_tag=staging_schema_tag)
 
         logger.info(f"Table `{cls.__tablename__}`: Successfully finished ingestion. Total rows: {total}")
         return total
@@ -459,20 +483,13 @@ class CSVLoadableTableInterface(ORMTableBase):
     def _target_has_rows(
         cls: Type[CSVTableProtocol],
         session: so.Session,
-        target: str,
     ) -> bool:
         """
         Return whether the target table currently contains any rows.
         """
-        table = cls.__table__
-        if target not in {table.name, table.fullname}:
-            table = sa.Table(
-                target,
-                sa.MetaData(),
-                autoload_with=session.get_bind(),
-            )
         row = session.execute(
-             sa.select(sa.literal(1)).select_from(table).limit(1)
+            sa.select(sa.literal(1)).select_from(cls.__table__).limit(1),
+            bind_arguments={"mapper": cls},
         ).first()
         return row is not None
 
@@ -484,7 +501,7 @@ class CSVLoadableTableInterface(ORMTableBase):
         merge_strategy: str = "replace",
         *,
         merge_batch_size: int | None = None,
-        staging_schema: str | None = None,
+        staging_schema_tag: str | None = None,
     ):
         """
         Merge data from the staging table into the target table.
@@ -496,25 +513,22 @@ class CSVLoadableTableInterface(ORMTableBase):
         merge_strategy
             Merge strategy to apply (for example ``replace``,
             ``upsert``, or ``insert_if_empty``).
-        staging_schema
-            Schema the staging table lives in. ``None`` means no schema
-            qualification (backend-default behavior).
+        staging_schema_tag
+            schema_translate_map tag the staging table lives in. ``None``
+            means no schema qualification (backend-default behavior).
         """
         target = cls.__tablename__
         pk_cols = cls.pk_names()
 
-        _require_bind(session)
-        backend = resolve_backend(session, staging_schema=staging_schema)
+        _require_bind(session, cls)
+        backend = resolve_backend(session, staging_schema_tag=staging_schema_tag, mapper=cls)
         target_empty_confirmed = False
         if merge_strategy in {"replace", "upsert"}:
             logger.info(
                 f"Table `{target}`: Checking whether target table is empty for merge optimisation."
             )
             check_started = perf_counter()
-            has_rows = cls._target_has_rows(
-                session=session,
-                target=target,
-            )
+            has_rows = cls._target_has_rows(session=session)
             logger.info(
                 f"Table `{target}`: Empty-table optimisation check completed in "
                 f"{_format_elapsed(perf_counter() - check_started)}."
@@ -530,14 +544,14 @@ class CSVLoadableTableInterface(ORMTableBase):
         if merge_strategy == "replace":
             logger.info(f"Table `{target}`: Merge replace delete phase starting.")
             delete_started = perf_counter()
-            backend.merge_replace(cls, session, target, pk_cols, merge_batch_size=merge_batch_size)
+            backend.merge_replace(cls, session, pk_cols, merge_batch_size=merge_batch_size)
             logger.info(
                 f"Table `{target}`: Merge replace delete phase completed in "
                 f"{_format_elapsed(perf_counter() - delete_started)}."
             )
             logger.info(f"Table `{target}`: Merge insert phase starting.")
             insert_started = perf_counter()
-            backend.merge_insert(cls, session, target, merge_batch_size=merge_batch_size)
+            backend.merge_insert(cls, session, merge_batch_size=merge_batch_size)
             logger.info(
                 f"Table `{target}`: Merge insert phase completed in "
                 f"{_format_elapsed(perf_counter() - insert_started)}."
@@ -545,7 +559,7 @@ class CSVLoadableTableInterface(ORMTableBase):
         elif merge_strategy == "upsert":
             logger.info(f"Table `{target}`: Merge upsert phase starting.")
             upsert_started = perf_counter()
-            backend.merge_upsert(cls, session, target, pk_cols, merge_batch_size=merge_batch_size)
+            backend.merge_upsert(cls, session, pk_cols, merge_batch_size=merge_batch_size)
             logger.info(
                 f"Table `{target}`: Merge upsert phase completed in "
                 f"{_format_elapsed(perf_counter() - upsert_started)}."
@@ -554,10 +568,7 @@ class CSVLoadableTableInterface(ORMTableBase):
             if not target_empty_confirmed:
                 logger.info(f"Table `{target}`: Checking whether target table is empty.")
                 check_started = perf_counter()
-                has_rows = cls._target_has_rows(
-                    session=session,
-                    target=target,
-                )
+                has_rows = cls._target_has_rows(session=session)
                 logger.info(
                     f"Table `{target}`: Empty-table check completed in "
                     f"{_format_elapsed(perf_counter() - check_started)}."
@@ -571,7 +582,7 @@ class CSVLoadableTableInterface(ORMTableBase):
 
             logger.info(f"Table `{target}`: Merge insert-if-empty phase starting.")
             insert_started = perf_counter()
-            backend.merge_insert(cls, session, target, merge_batch_size=merge_batch_size)
+            backend.merge_insert(cls, session, merge_batch_size=merge_batch_size)
             logger.info(
                 f"Table `{target}`: Merge insert-if-empty phase completed in "
                 f"{_format_elapsed(perf_counter() - insert_started)}."
@@ -584,7 +595,7 @@ class CSVLoadableTableInterface(ORMTableBase):
         cls: Type[CSVTableProtocol],
         session: so.Session,
         *,
-        staging_schema: str | None = None,
+        staging_schema_tag: str | None = None,
     ):
         """
         Drop the staging table if it exists.
@@ -593,11 +604,11 @@ class CSVLoadableTableInterface(ORMTableBase):
         ----------
         session
             An active SQLAlchemy session bound to an engine.
-        staging_schema
-            Schema the staging table lives in. ``None`` means no schema
-            qualification (backend-default behavior).
+        staging_schema_tag
+            schema_translate_map tag the staging table lives in. ``None``
+            means no schema qualification (backend-default behavior).
         """
-        backend = resolve_backend(session, staging_schema=staging_schema)
+        backend = resolve_backend(session, staging_schema_tag=staging_schema_tag, mapper=cls)
         backend.drop_staging_table(cls, session)
 
     @classmethod

@@ -182,7 +182,8 @@ class PandasLoader(LoaderInterface):
             total += cls._load_chunk(
                 staging_cls=ctx.staging_table,
                 session=ctx.session,
-                dataframe=chunk
+                dataframe=chunk,
+                mapper=ctx.tableclass,
             )
         return total
 
@@ -292,6 +293,7 @@ class ParquetLoader(LoaderInterface):
                 staging_cls=ctx.staging_table,
                 session=ctx.session,
                 dataframe=df,
+                mapper=ctx.tableclass,
             )
 
         return total

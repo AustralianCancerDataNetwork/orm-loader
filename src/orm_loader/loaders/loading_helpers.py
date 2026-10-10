@@ -1,17 +1,19 @@
 from __future__ import annotations
-from pathlib import Path
-import chardet
+
 import csv as _csv
-import re
-import sqlalchemy as sa
-import sqlalchemy.orm as so
+import io
 import logging
+import re
+from pathlib import Path
+from typing import Any
+
+import chardet
 import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.csv as pv
-import io
-
-from ..helpers.sql import qualify_identifier
+import sqlalchemy as sa
+import sqlalchemy.orm as so
+from oa_configurator import qualified
 
 _SAFE_ENCODING = re.compile(r'^[A-Za-z][A-Za-z0-9_-]*$')
 
@@ -269,12 +271,15 @@ def quick_load_pg(
     tablename: str,
     schema: str | None = None,
     quote_mode: str = "auto",
+    mapper: Any | None = None,
 ) -> int:
-    raw_conn = session.connection().connection
+    connection_arguments = {"bind_arguments": {"mapper": mapper}} if mapper is not None else {}
+    connection = session.connection(**connection_arguments)
+    raw_conn = connection.connection
     if not hasattr(raw_conn, "cursor"):
         raise RuntimeError("Expected DB-API connection for COPY")
 
-    table_ref = qualify_identifier(tablename, schema, session.get_bind().dialect.identifier_preparer)
+    table_ref = qualified(connection, tablename, physical_schema=schema)
 
     encoding = infer_encoding(path)['encoding'] or 'utf-8'
     if not _SAFE_ENCODING.match(encoding):
@@ -331,7 +336,9 @@ def quick_load_pg(
                 while data := stream.read(COPY_BLOCK_SIZE):
                     copy.write(data)
         session.flush()
-        total = session.execute(sa.text(f'SELECT COUNT(*) FROM {table_ref}')).scalar_one()
+        total = session.execute(
+            sa.text(f'SELECT COUNT(*) FROM {table_ref}'), **connection_arguments
+        ).scalar_one()
         return total
     except Exception as e:
         logger.error(f"Error during bulk load via COPY: {e}")

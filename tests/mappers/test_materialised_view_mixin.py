@@ -5,13 +5,95 @@ from typing import Any
 
 import pytest
 import sqlalchemy as sa
+import sqlalchemy.orm as so
 
+from oa_configurator import Role
+from oa_configurator.testing import scoped_test_schema
 from orm_loader.mappers.materialised_view_contracts import MaterializedViewIndex
 from orm_loader.mappers.materialised_view_mixin import (
     MaterializedViewMixin,
     refresh_all_mvs,
     resolve_mv_refresh_order,
 )
+
+
+class _PrimaryRoleMV(MaterializedViewMixin):
+    __mv_name__ = "mv_primary_role_test"
+    __mv_select__ = sa.select(sa.literal(1).label("n"))
+
+
+class _VocabRoleMV(MaterializedViewMixin):
+    __mv_name__ = "mv_vocab_role_test"
+    __mv_select__ = sa.select(sa.literal(2).label("n"))
+    __mv_schema_tag__ = Role.VOCAB.value
+
+
+def test_refresh_all_mvs_resolves_each_views_own_schema_tag(pg_db) -> None:
+    with scoped_test_schema(pg_db.resolved, prefix="mv", split_roles=[Role.VOCAB]) as scoped:
+        primary_schema = scoped.schemas[Role.PRIMARY]
+        vocab_schema = scoped.schemas[Role.VOCAB]
+        with scoped.engine.begin() as conn:
+            _PrimaryRoleMV.create_mv(conn)
+            _VocabRoleMV.create_mv(conn)
+            refresh_all_mvs(conn, [_PrimaryRoleMV, _VocabRoleMV])
+
+        with scoped.engine.connect() as conn:
+            inspector = sa.inspect(conn)
+            assert inspector.has_table("mv_primary_role_test", schema=primary_schema)
+            assert not inspector.has_table("mv_primary_role_test", schema=vocab_schema)
+            assert inspector.has_table("mv_vocab_role_test", schema=vocab_schema)
+            assert not inspector.has_table("mv_vocab_role_test", schema=primary_schema)
+
+
+class _IndexedPgMv(MaterializedViewMixin):
+    __mv_name__ = "mv_indexed_pg_test"
+    __mv_select__ = sa.select(sa.literal(1).label("row_id"))
+    __mv_indexes__ = (MaterializedViewIndex(name="mv_indexed_pg_test_row_id_uq", columns=("row_id",), unique=True),)
+
+
+def test_create_mv_with_declared_index_against_postgres(pg_db) -> None:
+    """create_mv() through the mixin creates both the view and its declared
+    index against a real database.test_create_mv_creates_declared_indexes_after_the_view
+    only proves the right backend calls are made, via a fake backend."""
+    with scoped_test_schema(pg_db.resolved, prefix="mv_indexed") as scoped:
+        schema = scoped.schemas[Role.PRIMARY]
+        with scoped.engine.begin() as conn:
+            _IndexedPgMv.create_mv(conn)
+
+        with scoped.engine.connect() as conn:
+            inspector = sa.inspect(conn)
+            assert inspector.has_table("mv_indexed_pg_test", schema=schema)
+            index_names = {idx["name"] for idx in inspector.get_indexes("mv_indexed_pg_test", schema=schema)}
+            assert "mv_indexed_pg_test_row_id_uq" in index_names
+
+
+def test_drop_mv_cascade_against_postgres(pg_db) -> None:
+    """drop_mv() through the mixin actually drops the view against a real
+    database. test_drop_mv_forwards_default_args only proves the right
+    backend call is made, via a fake backend."""
+    with scoped_test_schema(pg_db.resolved, prefix="mv_drop") as scoped:
+        schema = scoped.schemas[Role.PRIMARY]
+        with scoped.engine.begin() as conn:
+            _PrimaryRoleMV.create_mv(conn)
+        with scoped.engine.connect() as conn:
+            assert sa.inspect(conn).has_table("mv_primary_role_test", schema=schema)
+
+        with scoped.engine.begin() as conn:
+            _PrimaryRoleMV.drop_mv(conn, cascade=True)
+        with scoped.engine.connect() as conn:
+            assert not sa.inspect(conn).has_table("mv_primary_role_test", schema=schema)
+
+
+def test_refresh_mv_concurrently_against_postgres(pg_db) -> None:
+    """refresh_mv(concurrently=True) through the mixin succeeds against a
+    real database when a unique index is declared.
+    The eligibility check and error translation are already proven at the 
+    backend level directly in test_postgres_backend.py. 
+    This proves the mixin wires into that correctly end to end."""
+    with scoped_test_schema(pg_db.resolved, prefix="mv_refresh") as scoped:
+        with scoped.engine.begin() as conn:
+            _IndexedPgMv.create_mv(conn)
+            _IndexedPgMv.refresh_mv(conn, concurrently=True)
 
 
 class _FakeBackend:
@@ -71,6 +153,7 @@ def test_create_mv_forwards_default_args_to_backend(fake_backend: _FakeBackend, 
         (
             "create_materialized_view",
             (bind, "mv_no_index", _SELECT),
+            # sqlite has no schema concept, so physical_schema_of() always folds to None here.
             {"schema": None, "with_data": True, "if_not_exists": True},
         )
     ]
@@ -91,6 +174,7 @@ def test_create_mv_creates_declared_indexes_after_the_view(fake_backend: _FakeBa
         "create_materialized_view_index",
     ]
     assert fake_backend.calls[1][1] == (bind, "mv_indexed", _INDEX)
+    # sqlite has no schema concept, so physical_schema_of() always folds to None here.
     assert fake_backend.calls[1][2] == {"schema": None, "if_not_exists": True}
 
 
@@ -100,16 +184,78 @@ def test_create_mv_create_indexes_false_skips_index_creation(fake_backend: _Fake
     assert [call[0] for call in fake_backend.calls] == ["create_materialized_view"]
 
 
-def test_create_mv_forwards_schema_with_data_and_if_not_exists_overrides(
+def test_create_mv_forwards_schema_tag_with_data_and_if_not_exists_overrides(
     fake_backend: _FakeBackend, bind
 ):
-    _NoIndexMv.create_mv(bind, schema="reporting", with_data=False, if_not_exists=False)
+    _NoIndexMv.create_mv(bind, schema_tag=Role.VOCAB, with_data=False, if_not_exists=False)
 
+    # sqlite has no schema concept, so physical_schema_of() always folds to None here,
+    # regardless of which schema_tag was requested
     assert fake_backend.calls[0][2] == {
-        "schema": "reporting",
+        "schema": None,
         "with_data": False,
         "if_not_exists": False,
     }
+
+
+_MappedMvBase = so.declarative_base()
+
+
+class _MappedVocabMv(_MappedMvBase, MaterializedViewMixin):
+    """Declaratively mapped, schema set via __table_args__ (not __mv_schema_tag__)."""
+
+    __mv_name__ = "mv_mapped_vocab"
+    __mv_select__ = _SELECT
+    __tablename__ = "mv_mapped_vocab"
+    __table_args__ = {"schema": Role.VOCAB.value}
+
+    row_id = sa.Column(sa.Integer, primary_key=True)
+
+
+class _MappedNoSchemaMv(_MappedMvBase, MaterializedViewMixin):
+    """Declaratively mapped, no schema set at all. Should resolve to None,
+    not fall back to __mv_schema_tag__'s "primary" default."""
+
+    __mv_name__ = "mv_mapped_no_schema"
+    __mv_select__ = _SELECT
+    __tablename__ = "mv_mapped_no_schema"
+
+    row_id = sa.Column(sa.Integer, primary_key=True)
+
+
+def test_create_mv_defers_to_the_mapped_tables_own_schema(
+    fake_backend: _FakeBackend, bind, monkeypatch: pytest.MonkeyPatch
+):
+    # sqlite folds every schema to None regardless of tag, which would make "mapped
+    # table's own schema" and "mixin default" indistinguishable here. Patch
+    # physical_schema_of() to pass the resolved tag through unchanged, isolating this
+    # test to the mixin's own schema_tag routing.
+    mixin_module = importlib.import_module("orm_loader.mappers.materialised_view_mixin")
+    monkeypatch.setattr(mixin_module, "physical_schema_of", lambda bind, schema_tag: schema_tag)
+
+    _MappedVocabMv.create_mv(bind)
+
+    assert fake_backend.calls[0][2]["schema"] == Role.VOCAB.value
+
+
+def test_create_mv_mapped_table_with_no_schema_resolves_to_none_not_primary(
+    fake_backend: _FakeBackend, bind
+):
+    _MappedNoSchemaMv.create_mv(bind)
+
+    assert fake_backend.calls[0][2]["schema"] is None
+
+
+def test_create_mv_explicit_schema_tag_overrides_the_mapped_tables_own_schema(
+    fake_backend: _FakeBackend, bind, monkeypatch: pytest.MonkeyPatch
+):
+    # See test_create_mv_defers_to_the_mapped_tables_own_schema for why this is patched.
+    mixin_module = importlib.import_module("orm_loader.mappers.materialised_view_mixin")
+    monkeypatch.setattr(mixin_module, "physical_schema_of", lambda bind, schema_tag: schema_tag)
+
+    _MappedVocabMv.create_mv(bind, schema_tag=Role.PRIMARY)
+
+    assert fake_backend.calls[0][2]["schema"] == Role.PRIMARY.value
 
 
 def test_create_mv_forwards_if_not_exists_to_declared_indexes(fake_backend: _FakeBackend, bind):
@@ -182,11 +328,11 @@ def test_refresh_mv_forwards_default_args_and_declared_indexes(fake_backend: _Fa
     ]
 
 
-def test_refresh_mv_forwards_schema_and_concurrently(fake_backend: _FakeBackend, bind):
-    _IndexedMv.refresh_mv(bind, schema="reporting", concurrently=True)
+def test_refresh_mv_forwards_schema_tag_and_concurrently(fake_backend: _FakeBackend, bind):
+    _IndexedMv.refresh_mv(bind, schema_tag=Role.VOCAB, concurrently=True)
 
     assert fake_backend.calls[0][2] == {
-        "schema": "reporting",
+        "schema": None,
         "concurrently": True,
         "declared_indexes": (_INDEX,),
     }
@@ -199,16 +345,17 @@ def test_drop_mv_forwards_default_args(fake_backend: _FakeBackend, bind):
         (
             "drop_materialized_view",
             (bind, "mv_no_index"),
+            # sqlite has no schema concept, so physical_schema_of() always folds to None here.
             {"schema": None, "if_exists": True, "cascade": False},
         )
     ]
 
 
-def test_drop_mv_forwards_schema_if_exists_and_cascade(fake_backend: _FakeBackend, bind):
-    _NoIndexMv.drop_mv(bind, schema="reporting", if_exists=False, cascade=True)
+def test_drop_mv_forwards_schema_tag_if_exists_and_cascade(fake_backend: _FakeBackend, bind):
+    _NoIndexMv.drop_mv(bind, schema_tag=Role.VOCAB, if_exists=False, cascade=True)
 
     assert fake_backend.calls[0][2] == {
-        "schema": "reporting",
+        "schema": None,
         "if_exists": False,
         "cascade": True,
     }

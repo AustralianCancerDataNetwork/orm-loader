@@ -2,7 +2,7 @@ import logging
 from contextlib import contextmanager
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session
-from typing import Iterator
+from typing import Generator
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ def bulk_load_context(
     *,
     disable_fk: bool = True,
     no_autoflush: bool = True,
-) -> Iterator[None]:
+) -> Generator[None, None, None]:
     """
     Wrap a trusted bulk operation in backend-aware session settings.
 
@@ -56,7 +56,7 @@ def bulk_load_context(
 
 
 @contextmanager
-def engine_with_replica_role(engine: Engine) -> Iterator[Engine]:
+def engine_with_replica_role(engine: Engine) -> Generator[Engine, None, None]:
     """
     Force ``session_replication_role=replica`` on PostgreSQL engine connections.
 

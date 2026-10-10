@@ -4,7 +4,6 @@ import logging
 import sqlite3
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from contextlib import AbstractContextManager
 
 import sqlalchemy as sa
 import sqlalchemy.orm as so
@@ -35,18 +34,18 @@ class SQLiteBackend(DatabaseBackend):
     def __init__(
         self,
         *,
+        staging_schema_tag: str | None = None,
         staging_schema: str | None = None,
         busy_timeout_ms: int = 60000,
         journal_mode: str = "WAL",
         defer_foreign_keys: bool = True,
     ) -> None:
         if staging_schema is not None:
-            logger.warning(
-                "SQLite does not support schema-qualified staging tables; "
-                f"got staging_schema={staging_schema!r}. Setting staging_schema=None."
+            raise ValueError(
+                "SQLite has no schema concept, so staging_schema must be None. "
+                "physical_schema_of() already resolves it to None for this dialect."
             )
-            staging_schema = None
-        super().__init__(staging_schema=staging_schema)
+        super().__init__(staging_schema_tag=staging_schema_tag, staging_schema=staging_schema)
         self.busy_timeout_ms = busy_timeout_ms
         self.journal_mode = self._validate_journal_mode(journal_mode)
         self.defer_foreign_keys = defer_foreign_keys
@@ -81,7 +80,7 @@ class SQLiteBackend(DatabaseBackend):
 
     @property
     def name(self) -> str:
-        return "sqlite"
+        return Dialect.SQLITE
 
     @property
     def dialect(self) -> Dialect:
@@ -110,15 +109,22 @@ class SQLiteBackend(DatabaseBackend):
         session: so.Session,
     ) -> None:
         staging_name = self.staging_name_for_table(table_cls.__tablename__)
-        session.execute(sa.text(f'DROP TABLE IF EXISTS {self.identifier_preparer.quote_identifier(staging_name)};'))
+        session.execute(
+            sa.text(f'DROP TABLE IF EXISTS {self.identifier_preparer.quote_identifier(staging_name)};'),
+            bind_arguments={"mapper": table_cls},
+        )
 
         metadata = sa.MetaData()
         staging_columns = [
             sa.Column(col.name, col.type, nullable=True)
             for col in table_cls.__table__.columns
         ]
-        staging_table = sa.Table(staging_name, metadata, *staging_columns)
-        metadata.create_all(bind=session.connection(), tables=[staging_table])
+        staging_table = sa.Table(
+            staging_name, metadata, *staging_columns, schema=table_cls.__table__.schema
+        )
+        metadata.create_all(
+            bind=session.connection(bind_arguments={"mapper": table_cls}), tables=[staging_table]
+        )
         session.commit()
 
     def drop_staging_table(
@@ -127,18 +133,23 @@ class SQLiteBackend(DatabaseBackend):
         session: so.Session,
     ) -> None:
         staging_ref = self.identifier_preparer.quote_identifier(self.staging_name_for_table(table_cls.__tablename__))
-        session.execute(sa.text(f'DROP TABLE IF EXISTS {staging_ref}'))
+        session.execute(
+            sa.text(f'DROP TABLE IF EXISTS {staging_ref}'),
+            bind_arguments={"mapper": table_cls},
+        )
 
-    def disable_fk_check(self, session: so.Session) -> str | int:
-        previous_state = session.execute(text("PRAGMA foreign_keys")).scalar()
-        session.execute(text("PRAGMA foreign_keys = OFF"))
+    def disable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int:
+        execute_options = {"bind_arguments": {"mapper": mapper}} if mapper is not None else {}
+        previous_state = session.execute(text("PRAGMA foreign_keys"), **execute_options).scalar()
+        session.execute(text("PRAGMA foreign_keys = OFF"), **execute_options)
         if not isinstance(previous_state, int):
             raise RuntimeError("Expected SQLite FK state to be an int")
         return previous_state
 
-    def enable_fk_check(self, session: so.Session) -> str | int:
-        previous_state = session.execute(text("PRAGMA foreign_keys")).scalar()
-        session.execute(text("PRAGMA foreign_keys = ON"))
+    def enable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int:
+        execute_options = {"bind_arguments": {"mapper": mapper}} if mapper is not None else {}
+        previous_state = session.execute(text("PRAGMA foreign_keys"), **execute_options).scalar()
+        session.execute(text("PRAGMA foreign_keys = ON"), **execute_options)
         if not isinstance(previous_state, int):
             raise RuntimeError("Expected SQLite FK state to be an int")
         return previous_state
@@ -147,104 +158,143 @@ class SQLiteBackend(DatabaseBackend):
         self,
         session: so.Session,
         previous_state: str | int,
+        *,
+        mapper: Any | None = None,
     ) -> None:
         safe_state = self._normalize_fk_check_state(previous_state)
-        session.execute(text(f"PRAGMA foreign_keys = {safe_state}"))
+        execute_options = {"bind_arguments": {"mapper": mapper}} if mapper is not None else {}
+        session.execute(text(f"PRAGMA foreign_keys = {safe_state}"), **execute_options)
+
+    @staticmethod
+    def _staging_rowid() -> sa.ColumnElement[int]:
+        """SQLite's implicit rowid: already gapless and indexed, so it needs
+        no added column or index the way Postgres's _rownum does."""
+        return sa.literal_column("rowid")
 
     def merge_replace(
         self,
         table_cls: type["CSVTableProtocol"],
         session: so.Session,
-        target_name: str,
         pk_cols: list[str],
         *,
         merge_batch_size: int | None = None,
     ) -> None:
-        preparer = self.identifier_preparer
-        staging_name = self.staging_name_for_table(table_cls.__tablename__)
-        target_ref = preparer.quote_identifier(target_name)
-        staging_ref = preparer.quote_identifier(staging_name)
-        if len(pk_cols) == 1:
-            pk_ref = preparer.quote_identifier(pk_cols[0])
-            session.execute(
-                sa.text(
-                    f"""
-                    DELETE FROM {target_ref}
-                    WHERE {pk_ref} IN (
-                        SELECT {pk_ref} FROM {staging_ref}
-                    );
-                    """
-                )
+        """Delete every target row whose primary key appears in staging.
+
+        Parameters
+        ----------
+        merge_batch_size : int or None, optional
+            Rows per statement. Bounds statement size only; the batches are
+            not committed individually, so the whole merge stays in the
+            caller's transaction and a later failure in the insert phase
+            cannot leave the target emptied.
+        """
+        self._validate_merge_batch_size(merge_batch_size)
+        target = table_cls.__table__
+        staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
+
+        # SQLite's DELETE has no USING, so staging keys go in a subquery. IN
+        # rather than a correlated EXISTS, which rescans the unindexed staging
+        # table once per target row.
+        def _delete(extra: sa.ColumnElement[bool] | None = None) -> sa.Delete:
+            keys = sa.select(*(staging.c[c] for c in pk_cols))
+            if extra is not None:
+                keys = keys.where(extra)
+            if len(pk_cols) == 1:
+                return sa.delete(target).where(target.c[pk_cols[0]].in_(keys))
+            return sa.delete(target).where(
+                sa.tuple_(*(target.c[c] for c in pk_cols)).in_(keys)
             )
+
+        if merge_batch_size is None:
+            session.execute(_delete())
             return
 
-        pk_match = " AND ".join(
-            f'{target_ref}.{preparer.quote_identifier(c)} = {staging_ref}.{preparer.quote_identifier(c)}'
-            for c in pk_cols
-        )
-        session.execute(
-            sa.text(
-                f"""
-                DELETE FROM {target_ref}
-                WHERE EXISTS (
-                    SELECT 1 FROM {staging_ref}
-                    WHERE {pk_match}
-                );
-                """
-            )
-        )
+        total = session.execute(sa.select(sa.func.count()).select_from(staging)).scalar_one()
+        if total <= merge_batch_size:
+            session.execute(_delete())
+            return
+
+        rowid = self._staging_rowid()
+        start = 0
+        while start < total:
+            end = start + merge_batch_size
+            session.execute(_delete(sa.and_(rowid > start, rowid <= end)))
+            start = end
 
     def merge_upsert(
         self,
         table_cls: type["CSVTableProtocol"],
         session: so.Session,
-        target_name: str,
         pk_cols: list[str],
         *,
         merge_batch_size: int | None = None,
     ) -> None:
-        preparer = self.identifier_preparer
-        staging_ref = preparer.quote_identifier(self.staging_name_for_table(table_cls.__tablename__))
-        target_ref = preparer.quote_identifier(target_name)
+        self._validate_merge_batch_size(merge_batch_size)
+        target = table_cls.__table__
+        staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
         insertable_cols = self._insertable_column_names(table_cls)
-        cols_str = ", ".join(preparer.quote_identifier(c) for c in insertable_cols)
-        session.execute(
-            sa.text(
-                f"""
-                INSERT OR IGNORE INTO {target_ref} ({cols_str})
-                SELECT {cols_str} FROM {staging_ref};
-                """
+
+        def _upsert(select_: Any) -> sa.Insert:
+            return (
+                sqlite_dialect.insert(target)
+                .from_select(insertable_cols, select_)
+                .on_conflict_do_nothing(index_elements=pk_cols)
             )
-        )
+
+        non_paginated_select = sa.select(*(staging.c[c] for c in insertable_cols))
+
+        if merge_batch_size is None:
+            # SQLite's grammar rejects INSERT...SELECT...ON CONFLICT with no
+            # WHERE on the SELECT (confirmed empirically); sa.true() supplies one.
+            session.execute(_upsert(non_paginated_select.where(sa.true())))
+            return
+
+        total = session.execute(sa.select(sa.func.count()).select_from(staging)).scalar_one()
+        if total <= merge_batch_size:
+            session.execute(_upsert(non_paginated_select.where(sa.true())))
+            return
+
+        rowid = self._staging_rowid()
+        start = 0
+        while start < total:
+            end = start + merge_batch_size
+            batch_select = non_paginated_select.where(rowid > start, rowid <= end)
+            session.execute(_upsert(batch_select))
+            start = end
 
     def merge_insert(
         self,
         table_cls: type["CSVTableProtocol"],
         session: so.Session,
-        target_name: str,
         *,
         merge_batch_size: int | None = None,
     ) -> None:
-        preparer = self.identifier_preparer
-        staging_ref = preparer.quote_identifier(self.staging_name_for_table(table_cls.__tablename__))
-        target_ref = preparer.quote_identifier(target_name)
+        self._validate_merge_batch_size(merge_batch_size)
+        target = table_cls.__table__
+        staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
         insertable_cols = self._insertable_column_names(table_cls)
-        cols_str = ", ".join(preparer.quote_identifier(c) for c in insertable_cols)
-        session.execute(
-            sa.text(
-                f"""
-                INSERT INTO {target_ref} ({cols_str})
-                SELECT {cols_str} FROM {staging_ref};
-                """
-            )
-        )
+        non_paginated_select = sa.select(*(staging.c[c] for c in insertable_cols))
 
-    def merge_context(
-        self,
-        table_cls: type["CSVTableProtocol"],
-        session: so.Session,
-    ) -> AbstractContextManager[None]:
-        return self.bulk_load_context(session, disable_fk=True, no_autoflush=False)
+        def _insert(select_: Any) -> sa.Insert:
+            return sa.insert(target).from_select(insertable_cols, select_)
+
+        if merge_batch_size is None:
+            session.execute(_insert(non_paginated_select))
+            return
+
+        total = session.execute(sa.select(sa.func.count()).select_from(staging)).scalar_one()
+        if total <= merge_batch_size:
+            session.execute(_insert(non_paginated_select))
+            return
+
+        rowid = self._staging_rowid()
+        start = 0
+        while start < total:
+            end = start + merge_batch_size
+            batch_select = non_paginated_select.where(rowid > start, rowid <= end)
+            session.execute(_insert(batch_select))
+            start = end
 
     def configure_dbapi_connection(self, dbapi_connection:  sa.engine.interfaces.DBAPIConnection) -> None:
         if dbapi_connection.__class__.__module__.startswith("sqlite3"):
@@ -269,10 +319,11 @@ class SQLiteBackend(DatabaseBackend):
         session: so.Session,
         exc: IntegrityError,
         *,
+        mapper: Any | None = None,
         raise_error: bool = True,
     ) -> None:
-        bind: Engine | Connection = session.get_bind()
-        if bind.dialect.name != "sqlite":
+        bind: Engine | Connection = session.get_bind(mapper=mapper)
+        if bind.dialect.name != Dialect.SQLITE:
             raise exc
 
         with self._as_connection(bind) as conn:

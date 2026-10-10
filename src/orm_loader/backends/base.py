@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from contextlib import AbstractContextManager, contextmanager, nullcontext
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
-from enum import Enum
 from collections.abc import Generator
 from functools import wraps
 from typing import TYPE_CHECKING, Any, Callable, ParamSpec, Type, TypeVar, cast
@@ -12,6 +11,8 @@ import sqlalchemy as sa
 import sqlalchemy.orm as so
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.sql.compiler import IdentifierPreparer
+
+from oa_configurator import Dialect, SchemaClaim, open_connection, qualified
 
 if TYPE_CHECKING:
     from ..loaders.data_classes import LoaderContext
@@ -34,14 +35,33 @@ class BackendCapabilities:
     supports_materialized_views: bool = False
 
 
-class Dialect(str, Enum):
-    """Supported SQLAlchemy dialect names."""
-
-    SQLITE = "sqlite"
-    POSTGRESQL = "postgresql"
-
-
 STAGING_SCHEMA: str = "staging"
+
+
+def staging_schema_claim(physical_schema: str | None = None, *, reserved: bool = True) -> SchemaClaim:
+    """SchemaClaim reserving orm-loader's staging schema.
+    Since orm-loader doesn't have an engine creation step of its own,
+    this claim needs to be registered by the caller ingesting tables into 
+    the database through orm-loader.
+
+    Add to your own ``create_engines(schema_claims=[...])`` call before
+    handing a session into this package's staging path.
+
+    Parameters
+    ----------
+    physical_schema : str, optional
+        Physical schema to reserve. Defaults to ``STAGING_SCHEMA`` itself.
+    reserved : bool, optional
+        Whether no other owner may claim this physical schema on the same
+        connection. Defaults to True.
+    """
+    return SchemaClaim(
+        schema_tag=STAGING_SCHEMA,
+        physical_schema=physical_schema or STAGING_SCHEMA,
+        reserved=reserved,
+        owner="orm_loader",
+    )
+
 
 P = ParamSpec("P")
 R = TypeVar("R")
@@ -79,21 +99,30 @@ class DatabaseBackend(ABC):
     without changing existing loader orchestration yet.
     """
 
-    def __init__(self, staging_schema: str | None = None) -> None:
+    def __init__(self, *, staging_schema_tag: str | None = None, staging_schema: str | None = None) -> None:
         """
         Parameters
         ----------
+        staging_schema_tag
+            schema_translate_map tag the staging schema was resolved from.
+            ``None`` means no schema qualification was requested at all.
+            Stored so a caller re-resolving the backend later (e.g. after
+            the engine's claims may have changed) re-derives the same tag
+            rather than reusing an already-resolved physical name.
         staging_schema
-            Schema in which staging tables are created. ``None`` means no
-            schema qualification — staging tables land in whatever schema the
-            connection's search_path resolves to. Callers that want
-            schema-isolated staging can pass an explicit schema; backends must
-            not enable it implicitly because the schema may not have been
-            provisioned. ``STAGING_SCHEMA`` provides a shared convention for
-            callers that opt in. SQLite has no schema concept and always uses
-            ``None``.
+            Already-resolved physical schema staging tables are created in,
+            via ``resolve_backend()``. ``None`` means no schema
+            qualification — staging tables land in whatever schema the
+            connection's search_path resolves to. SQLite has no schema
+            concept and always resolves to ``None``.
         """
+        self.staging_schema_tag = staging_schema_tag
         self.staging_schema = staging_schema
+
+    @staticmethod
+    def _validate_merge_batch_size(merge_batch_size: int | None) -> None:
+        if merge_batch_size is not None and merge_batch_size < 1:
+            raise ValueError("merge_batch_size must be a positive integer or None")
 
     @staticmethod
     @abstractmethod
@@ -126,10 +155,8 @@ class DatabaseBackend(ABC):
         str
             e.g. '"staging"."_staging_concept"' or '"_staging_concept"'.
         """
-        from ..helpers.sql import qualify_identifier
-
-        return qualify_identifier(
-            self.staging_name_for_table(tablename), self.staging_schema, self.identifier_preparer
+        return qualified(
+            self.identifier_preparer, self.staging_name_for_table(tablename), physical_schema=self.staging_schema
         )
 
     @property
@@ -192,11 +219,43 @@ class DatabaseBackend(ABC):
         self,
         bind: Engine | Connection,
     ) -> Generator[Connection, None, None]:
-        if isinstance(bind, Engine):
-            with bind.begin() as conn:
-                yield conn
-        else:
-            yield bind
+        """
+        Normalize a bind into an open connection, guarding its dialect.
+
+        Every backend method that takes a ``bind`` should route it through
+        this context manager rather than opening a connection itself, so the
+        dialect guard below applies uniformly.
+
+        Parameters
+        ----------
+        bind : Engine or Connection
+            An Engine opens a new connection and transaction scoped to this
+            context manager, committing on a clean exit. A Connection is
+            forwarded as-is; its transaction is owned by the caller, and
+            passing the same Connection into several backend calls groups
+            them into one shared transaction.
+
+        Yields
+        ------
+        Connection
+            An open connection whose dialect matches ``self.dialect``.
+
+        Raises
+        ------
+        TypeError
+            If ``bind``'s dialect does not match ``self.dialect``. Guards
+            against a bind resolved through a different backend being
+            passed directly into a method on this one.
+        """
+        if bind.dialect.name != self.dialect.value:
+            raise TypeError(
+                f"{self.name} backend received a {bind.dialect.name!r} connection; "
+                f"expected {self.dialect.value!r}. The bind passed to this method must "
+                "be the same one (or share the same dialect as) the bind resolve_backend() "
+                "was given."
+            )
+        with open_connection(bind) as conn:
+            yield conn
 
     def _insertable_column_names(
         self,
@@ -248,11 +307,11 @@ class DatabaseBackend(ABC):
         """
 
     @abstractmethod
-    def disable_fk_check(self, session: so.Session) -> str | int:
+    def disable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int:
         """Disable FK checks and return the previous backend-specific state."""
 
     @abstractmethod
-    def enable_fk_check(self, session: so.Session) -> str | int:
+    def enable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int:
         """Explicitly enable FK checks and return the previous backend-specific state."""
 
     @abstractmethod
@@ -260,6 +319,8 @@ class DatabaseBackend(ABC):
         self,
         session: so.Session,
         previous_state: str | int,
+        *,
+        mapper: Any | None = None,
     ) -> None:
         """Restore FK checks to a previously returned backend-specific state."""
 
@@ -268,7 +329,6 @@ class DatabaseBackend(ABC):
         self,
         table_cls: Type["CSVTableProtocol"],
         session: so.Session,
-        target_name: str,
         pk_cols: list[str],
         *,
         merge_batch_size: int | None = None,
@@ -280,7 +340,6 @@ class DatabaseBackend(ABC):
         self,
         table_cls: Type["CSVTableProtocol"],
         session: so.Session,
-        target_name: str,
         pk_cols: list[str],
         *,
         merge_batch_size: int | None = None,
@@ -292,7 +351,6 @@ class DatabaseBackend(ABC):
         self,
         table_cls: Type["CSVTableProtocol"],
         session: so.Session,
-        target_name: str,
         *,
         merge_batch_size: int | None = None,
     ) -> None:
@@ -303,14 +361,17 @@ class DatabaseBackend(ABC):
         table_cls: Type["CSVTableProtocol"],
         session: so.Session,
     ) -> AbstractContextManager[None]:
-        """Return a context manager for merge-time backend operations."""
-        return nullcontext()
+        """Disable backend FK checks for a table's merge and restore them afterward."""
+        return self.bulk_load_context(
+            session, mapper=table_cls, disable_fk=True, no_autoflush=False
+        )
 
     @contextmanager
     def bulk_load_context(
         self,
         session: so.Session,
         *,
+        mapper: Any | None = None,
         disable_fk: bool = True,
         no_autoflush: bool = True,
     ):
@@ -321,7 +382,11 @@ class DatabaseBackend(ABC):
         try:
             if disable_fk:
                 self._require_capability("supports_fk_toggle", "foreign key toggling")
-                raw_state = self.disable_fk_check(session)
+                raw_state = (
+                    self.disable_fk_check(session)
+                    if mapper is None
+                    else self.disable_fk_check(session, mapper=mapper)
+                )
                 previous_fk_state = self._normalize_fk_check_state(raw_state)
 
             if no_autoflush:
@@ -336,7 +401,10 @@ class DatabaseBackend(ABC):
 
         finally:
             if previous_fk_state is not None:
-                self.restore_fk_check(session, previous_fk_state)
+                if mapper is None:
+                    self.restore_fk_check(session, previous_fk_state)
+                else:
+                    self.restore_fk_check(session, previous_fk_state, mapper=mapper)
 
     @requires_capability("supports_materialized_views", "materialized views")
     def create_materialized_view(
@@ -351,8 +419,9 @@ class DatabaseBackend(ABC):
     ) -> None:
         """Create a materialized view for the supplied selectable.
 
-        ``schema`` defaults to ``None``, leaving the target unqualified for
-        the connection's ``search_path`` to resolve.
+        *schema* is the view's already-resolved physical schema (or None for
+        the connection's own default); callers resolve which
+        schema_translate_map key to use before calling.
         """
         raise NotImplementedError(
             f"Backend '{self.name}' has not implemented create_materialized_view()"
@@ -369,6 +438,9 @@ class DatabaseBackend(ABC):
         declared_indexes: tuple["MaterializedViewIndex", ...] = (),
     ) -> None:
         """Refresh a materialized view.
+
+        *schema* is the view's already-resolved physical schema, matching
+        ``create_materialized_view``.
 
         ``declared_indexes`` lets supporting backends validate a concurrent
         refresh request without defining a second catalog-based eligibility
@@ -390,10 +462,12 @@ class DatabaseBackend(ABC):
     ) -> None:
         """Drop a materialized view.
 
-        This is deliberately non-abstract: the default implementation
-        requires the capability flag and then raises ``NotImplementedError``.
-        Older third-party backend subclasses need no override to receive a
-        clear error when they do not support this operation.
+        *schema* is the view's already-resolved physical schema, matching
+        ``create_materialized_view``. This is deliberately non-abstract: the
+        default implementation requires the capability flag and then raises
+        ``NotImplementedError``. Older third-party backend subclasses need
+        no override to receive a clear error when they do not support this
+        operation.
         """
         raise NotImplementedError(
             f"Backend '{self.name}' has not implemented drop_materialized_view()"
@@ -411,8 +485,9 @@ class DatabaseBackend(ABC):
     ) -> None:
         """Create an index on a materialized view.
 
-        This is deliberately non-abstract for the same compatibility reason
-        as :meth:`drop_materialized_view`.
+        *schema* is the view's already-resolved physical schema, matching
+        ``create_materialized_view``. This is deliberately non-abstract for
+        the same compatibility reason as :meth:`drop_materialized_view`.
         """
         raise NotImplementedError(
             f"Backend '{self.name}' has not implemented "

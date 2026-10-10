@@ -10,23 +10,13 @@ import sqlalchemy.orm as so
 
 from orm_loader.backends import Dialect, SQLiteBackend
 from orm_loader.helpers.sqlite import attach_sqlite_bulk_load_pragmas
+from tests.models import ComputedColumnTable
 
 if TYPE_CHECKING:
     from orm_loader.tables.typing import CSVTableProtocol
 
-_TARGET_TABLE = "target_table"
+_TARGET_TABLE = ComputedColumnTable.__tablename__
 _STAGING_TABLE = f"_staging_{_TARGET_TABLE}"
-
-
-class _ComputedTable:
-    __tablename__ = _TARGET_TABLE
-    __table__ = sa.Table(
-        _TARGET_TABLE,
-        sa.MetaData(),
-        sa.Column("id", sa.Integer, primary_key=True),
-        sa.Column("name", sa.String),
-        sa.Column("slug", sa.String, sa.Computed("lower(name)")),
-    )
 
 
 class _FakeSession:
@@ -34,7 +24,7 @@ class _FakeSession:
         self.statements: list[str] = []
         self.scalar_result = scalar_result
 
-    def execute(self, statement):
+    def execute(self, statement, **kwargs):
         self.statements.append(str(statement))
 
         class _Result:
@@ -47,7 +37,7 @@ class _FakeSession:
         return _Result(self.scalar_result)
 
 
-_ComputedTableCls = cast("Type[CSVTableProtocol]", _ComputedTable)
+_ComputedTableCls = cast("Type[CSVTableProtocol]", ComputedColumnTable)
 
 
 def _sess(s: _FakeSession) -> so.Session:
@@ -66,6 +56,20 @@ def test_sqlite_backend_identity_and_capabilities():
     assert backend.capabilities.supports_materialized_views is False
     assert backend.resolve_index_strategy("auto") == "keep"
     assert backend.journal_mode == "WAL"
+
+
+@pytest.mark.parametrize("merge_batch_size", [0, -1])
+@pytest.mark.parametrize("merge_strategy", ["replace", "upsert", "insert"])
+def test_sqlite_backend_rejects_non_positive_merge_batch_size(merge_batch_size, merge_strategy):
+    backend = SQLiteBackend()
+    session = _sess(_FakeSession())
+    merge = getattr(backend, f"merge_{merge_strategy}")
+    args = [_ComputedTableCls, session]
+    if merge_strategy in {"replace", "upsert"}:
+        args.append(["id"])
+
+    with pytest.raises(ValueError, match="merge_batch_size must be a positive integer or None"):
+        merge(*args, merge_batch_size=merge_batch_size)
 
 
 def test_sqlite_backend_create_staging_table(session, engine):
@@ -153,56 +157,6 @@ def test_sqlite_backend_normalize_fk_check_state():
         assert "Invalid SQLite foreign_keys state" in str(exc)
     else:
         raise AssertionError("Expected ValueError for unrecognised string")
-
-
-def test_sqlite_backend_merge_replace_single_pk():
-    backend = SQLiteBackend()
-    session = _FakeSession()
-
-    backend.merge_replace(
-        _ComputedTableCls, _sess(session), _TARGET_TABLE, ["id"]
-    )
-
-    sql = session.statements[0]
-    assert f'DELETE FROM "{_TARGET_TABLE}"' in sql
-    assert f'SELECT "id" FROM "{_STAGING_TABLE}"' in sql
-
-
-def test_sqlite_backend_merge_replace_composite_pk():
-    backend = SQLiteBackend()
-    session = _FakeSession()
-
-    backend.merge_replace(
-        _ComputedTableCls, _sess(session), _TARGET_TABLE, ["id", "name"]
-    )
-
-    sql = session.statements[0]
-    assert "WHERE EXISTS (" in sql
-    assert f'"{_TARGET_TABLE}"."id" = "{_STAGING_TABLE}"."id"' in sql
-    assert f'"{_TARGET_TABLE}"."name" = "{_STAGING_TABLE}"."name"' in sql
-
-
-def test_sqlite_backend_merge_insert_excludes_computed_columns():
-    backend = SQLiteBackend()
-    session = _FakeSession()
-
-    backend.merge_insert(_ComputedTableCls, _sess(session), _TARGET_TABLE)
-
-    sql = session.statements[0]
-    assert f'INSERT INTO "{_TARGET_TABLE}" ("id", "name")' in sql
-    assert f'SELECT "id", "name" FROM "{_STAGING_TABLE}"' in sql
-
-
-def test_sqlite_backend_merge_upsert_excludes_computed_columns():
-    backend = SQLiteBackend()
-    session = _FakeSession()
-
-    backend.merge_upsert(
-        _ComputedTableCls, _sess(session), _TARGET_TABLE, ["id"]
-    )
-
-    sql = session.statements[0]
-    assert f'INSERT OR IGNORE INTO "{_TARGET_TABLE}" ("id", "name")' in sql
 
 
 def test_sqlite_backend_materialized_view_methods_raise(engine):

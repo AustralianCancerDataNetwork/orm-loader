@@ -61,9 +61,13 @@ class LoaderContext:
         Whether to apply type casting / normalisation.
     dedupe
         Whether to perform deduplication (pre-insertion for source issues)
-    staging_schema
-        Schema the staging table lives in, passed to resolve_backend() so
-        every backend resolution within this load shares the same schema.
+    quote_mode
+        Quoting mode, resolved to the same concrete mode on both the
+        PostgreSQL COPY fast-path and the pandas ORM fallback.
+    staging_schema_tag
+        schema_translate_map tag the staging table lives in, passed to
+        resolve_backend() so every backend resolution within this load
+        resolves the same schema.
     """
     tableclass: Type["CSVTableProtocol"]
     session: so.Session
@@ -74,7 +78,7 @@ class LoaderContext:
     normalise: bool = True
     dedupe: bool = True
     quote_mode: str = "auto"
-    staging_schema: str | None = None
+    staging_schema_tag: str | None = None
 
 class LoaderInterface:
 
@@ -113,7 +117,8 @@ class LoaderInterface:
         cls,
         staging_cls: sa.Table,
         session: so.Session,
-        dataframe: pd.DataFrame
+        dataframe: pd.DataFrame,
+        mapper: Any | None = None,
     ) -> int:
         """
         Load a single DataFrame chunk into the staging table.
@@ -147,6 +152,7 @@ class LoaderInterface:
         session.execute( 
             staging_cls.insert(),
             records, 
+            bind_arguments={"mapper": mapper},
         )
         session.flush()
         session.expunge_all()

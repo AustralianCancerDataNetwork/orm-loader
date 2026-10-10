@@ -2,7 +2,7 @@
 
 Schema qualification for these DDL elements follows the same convention as
 ``CreateMaterializedView``: callers must build a fully qualified, quoted
-target string themselves (see ``orm_loader.helpers.sql.qualify_identifier``)
+target string themselves (see ``oa_configurator.qualified``)
 before constructing one of these elements. The compiler has no live bindable
 to qualify a bare name itself.
 """
@@ -53,7 +53,7 @@ class DropMaterializedView(DDLElement):
     ----------
     name
         Fully qualified, quoted name of the materialized view to drop (see
-        ``orm_loader.helpers.sql.qualify_identifier``).
+        ``oa_configurator.qualified``).
     if_exists
         Emit ``IF EXISTS`` so dropping an already-absent view is a no-op
         rather than an error.
@@ -85,7 +85,7 @@ class CreateMaterializedViewIndex(DDLElement):
     ----------
     target
         Fully qualified, quoted name of the materialized view to index (see
-        ``orm_loader.helpers.sql.qualify_identifier``).
+        ``oa_configurator.qualified``).
     index
         The index to create.
     if_not_exists

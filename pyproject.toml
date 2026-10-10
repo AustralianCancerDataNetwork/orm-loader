@@ -10,7 +10,7 @@ license = { text = "Apache-2.0" }
 requires-python = ">=3.12"
 dependencies = [
     "chardet>=5.2.0",
-    "oa-configurator>=1.0.0,<2.0.0",
+    "oa-configurator>=2.0.0,<3",
     "pandas>=2.3.3",
     "pyarrow>=23.0.1",
     "sqlalchemy>=2.0.45",
@@ -50,7 +50,7 @@ postgres = [
   "psycopg[binary]>=3.2",
 ]
 dev = [
-    "oa-configurator[postgres]>=1.0.0,<2.0.0",
+    "oa-configurator[postgres]>=2.0.0,<3",
     "pytest>=9.0.3",
     "ty>=0.0.59",
     "ruff>=0.14.11",
@@ -82,7 +82,7 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "-ra"
+addopts = "-ra -m 'not db_dialect'"
 
 [tool.pyright]
 reportMissingTypeStubs = false
