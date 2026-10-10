@@ -120,6 +120,11 @@ class DatabaseBackend(ABC):
         self.staging_schema = staging_schema
 
     @staticmethod
+    def _validate_merge_batch_size(merge_batch_size: int | None) -> None:
+        if merge_batch_size is not None and merge_batch_size < 1:
+            raise ValueError("merge_batch_size must be a positive integer or None")
+
+    @staticmethod
     @abstractmethod
     def staging_name_for_table(tablename: str) -> str:
         """

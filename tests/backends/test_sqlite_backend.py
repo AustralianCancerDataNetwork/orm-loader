@@ -58,6 +58,20 @@ def test_sqlite_backend_identity_and_capabilities():
     assert backend.journal_mode == "WAL"
 
 
+@pytest.mark.parametrize("merge_batch_size", [0, -1])
+@pytest.mark.parametrize("merge_strategy", ["replace", "upsert", "insert"])
+def test_sqlite_backend_rejects_non_positive_merge_batch_size(merge_batch_size, merge_strategy):
+    backend = SQLiteBackend()
+    session = _sess(_FakeSession())
+    merge = getattr(backend, f"merge_{merge_strategy}")
+    args = [_ComputedTableCls, session]
+    if merge_strategy in {"replace", "upsert"}:
+        args.append(["id"])
+
+    with pytest.raises(ValueError, match="merge_batch_size must be a positive integer or None"):
+        merge(*args, merge_batch_size=merge_batch_size)
+
+
 def test_sqlite_backend_create_staging_table(session, engine):
     backend = SQLiteBackend()
 

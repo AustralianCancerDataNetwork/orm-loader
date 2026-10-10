@@ -488,7 +488,8 @@ class CSVLoadableTableInterface(ORMTableBase):
         Return whether the target table currently contains any rows.
         """
         row = session.execute(
-             sa.select(sa.literal(1)).select_from(cls.__table__).limit(1)
+            sa.select(sa.literal(1)).select_from(cls.__table__).limit(1),
+            bind_arguments={"mapper": cls},
         ).first()
         return row is not None
 

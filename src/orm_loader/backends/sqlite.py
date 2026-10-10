@@ -189,6 +189,7 @@ class SQLiteBackend(DatabaseBackend):
             caller's transaction and a later failure in the insert phase
             cannot leave the target emptied.
         """
+        self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
         staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
 
@@ -229,6 +230,7 @@ class SQLiteBackend(DatabaseBackend):
         *,
         merge_batch_size: int | None = None,
     ) -> None:
+        self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
         staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
         insertable_cols = self._insertable_column_names(table_cls)
@@ -268,6 +270,7 @@ class SQLiteBackend(DatabaseBackend):
         *,
         merge_batch_size: int | None = None,
     ) -> None:
+        self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
         staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
         insertable_cols = self._insertable_column_names(table_cls)

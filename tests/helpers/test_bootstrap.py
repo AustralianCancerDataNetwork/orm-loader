@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 import sqlalchemy as sa
-from oa_configurator import CDMDatabaseConfig, ConnectionConfig, Resolver
+from oa_configurator import CDMDatabaseConfig, ConnectionConfig, Resolver, StackConfig
 
 from orm_loader.helpers import bootstrap, create_db, create_tables
 
@@ -17,11 +17,15 @@ def _resolved(tmp_path, *, split: bool):
             dialect="sqlite", database_name=str(tmp_path / "vocab.db")
         )
         vocab_connection = "vocab"
-    resolver = Resolver.from_active_config().with_overrides(
-        connections=connections,
-        databases={
-            "test_cdm": CDMDatabaseConfig(connection="primary", vocab_connection=vocab_connection)
-        },
+    resolver = Resolver(
+        StackConfig.for_session(
+            connections=connections,
+            databases={
+                "test_cdm": CDMDatabaseConfig(
+                    connection="primary", vocab_connection=vocab_connection
+                )
+            },
+        )
     )
     return resolver.resolve_database("test_cdm")
 

@@ -227,6 +227,7 @@ class PostgresBackend(DatabaseBackend):
         Each batch commits, so unlike SQLite's merge the delete phase is
         already durable if a later insert phase fails.
         """
+        self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
         staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
         pk_join = sa.and_(*(target.c[c] == staging.c[c] for c in pk_cols))
@@ -264,6 +265,7 @@ class PostgresBackend(DatabaseBackend):
         *,
         merge_batch_size: int | None = None,
     ) -> None:
+        self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
         staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
         insertable_cols = self._insertable_column_names(table_cls)
@@ -307,6 +309,7 @@ class PostgresBackend(DatabaseBackend):
         *,
         merge_batch_size: int | None = None,
     ) -> None:
+        self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
         staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
         insertable_cols = self._insertable_column_names(table_cls)

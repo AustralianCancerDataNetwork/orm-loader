@@ -6,7 +6,7 @@ from __future__ import annotations
 import pandas as pd
 import sqlalchemy as sa
 import sqlalchemy.orm as so
-from oa_configurator import CDMDatabaseConfig, ConnectionConfig, Resolver
+from oa_configurator import CDMDatabaseConfig, ConnectionConfig, Resolver, StackConfig
 from oa_configurator import Role as SchemaRole
 from sqlalchemy.exc import UnboundExecutionError
 
@@ -17,18 +17,20 @@ from tests.models import SimpleTable, VocabSchemaTable
 
 
 def test_vocab_csv_load_routes_every_session_bind_to_vocab_file(tmp_path):
-    resolver = Resolver.from_active_config().with_overrides(
-        connections={
-            "primary": ConnectionConfig(
-                dialect="sqlite", database_name=str(tmp_path / "primary.db")
-            ),
-            "vocab": ConnectionConfig(
-                dialect="sqlite", database_name=str(tmp_path / "vocab.db")
-            ),
-        },
-        databases={
-            "test_cdm": CDMDatabaseConfig(connection="primary", vocab_connection="vocab")
-        },
+    resolver = Resolver(
+        StackConfig.for_session(
+            connections={
+                "primary": ConnectionConfig(
+                    dialect="sqlite", database_name=str(tmp_path / "primary.db")
+                ),
+                "vocab": ConnectionConfig(
+                    dialect="sqlite", database_name=str(tmp_path / "vocab.db")
+                ),
+            },
+            databases={
+                "test_cdm": CDMDatabaseConfig(connection="primary", vocab_connection="vocab")
+            },
+        )
     )
     resolved = resolver.resolve_database("test_cdm")
     primary_engine, vocab_engine = resolved.create_engines(
@@ -60,6 +62,7 @@ def test_vocab_csv_load_routes_every_session_bind_to_vocab_file(tmp_path):
         VocabSchemaTable.load_csv(
             session,
             csv_path,
+            merge_strategy="insert_if_empty",
             dedupe=False,
             loader=PandasLoader(),
             staging_schema_tag=staging_schema_claim().schema_tag,
