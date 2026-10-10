@@ -657,10 +657,32 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#orm_loader.mappers.MaterializedViewMixin.__mv_schema_tag__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __mv_schema_tag__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#orm_loader.mappers.MaterializedViewMixin.__mv_select__" class="md-nav__link">
     <span class="md-ellipsis">
       
         __mv_select__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#orm_loader.mappers.MaterializedViewMixin._resolve_schema_tag" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        _resolve_schema_tag
       
     </span>
   </a>
@@ -859,17 +881,6 @@
     <span class="md-ellipsis">
       
         ConcurrentRefreshNotEligibleError
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#orm_loader.mappers.UnsupportedMaterializationDialectError" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        UnsupportedMaterializationDialectError
       
     </span>
   </a>
@@ -1448,10 +1459,32 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#orm_loader.mappers.MaterializedViewMixin.__mv_schema_tag__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __mv_schema_tag__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#orm_loader.mappers.MaterializedViewMixin.__mv_select__" class="md-nav__link">
     <span class="md-ellipsis">
       
         __mv_select__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#orm_loader.mappers.MaterializedViewMixin._resolve_schema_tag" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        _resolve_schema_tag
       
     </span>
   </a>
@@ -1656,17 +1689,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#orm_loader.mappers.UnsupportedMaterializationDialectError" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        UnsupportedMaterializationDialectError
-      
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1840,18 +1862,38 @@
 </code></pre></div>
 <p><code>create_mv()</code> creates declared indexes immediately after the view. The <code>concurrently=True</code> pre-check is intentionally cheap and conservative: it checks the declaration before issuing SQL, then lets PostgreSQL verify that the index really exists and is valid. If no unique index is declared, or if PostgreSQL rejects the concurrent refresh, the operation raises <code>ConcurrentRefreshNotEligibleError</code> without hiding the underlying cause.</p>
 <p>This is fail-closed by design. An index created manually outside <code>__mv_indexes__</code> does not satisfy the mixin's declaration contract; declare it in the class even if another migration is responsible for creating it. Expressions, partial indexes, and other index forms are outside this simple contract and should not be represented as <code>MaterializedViewIndex</code> entries.</p>
-<p>By default, <code>schema=None</code> leaves the view name unqualified. PostgreSQL resolves that name through the connection's <code>search_path</code>, matching the behavior of existing callers. Pass <code>schema="reporting"</code> only when the caller intentionally wants an explicit schema-qualified target.</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># Existing/default behavior: search_path resolves the target.</span>
+<p>The view's physical schema comes from the bound connection's own <code>schema_translate_map</code>. <code>create_mv()</code>/<code>refresh_mv()</code>/<code>drop_mv()</code> resolve it via <code>oa_configurator.physical_schema_of()</code> before ever reaching the backend, which only ever sees an already-resolved physical schema string.</p>
+<p>The schema tag itself comes from one of three places, in order:</p>
+<ol>
+<li>an explicit <code>schema_tag=</code> argument, for a one-off override;</li>
+<li>when the class is also declaratively mapped (combined with a <code>Base</code>, with a real <code>__table__</code>), that table's own <code>schema</code> -- set the schema the same way as any other mapped table, via <code>__table_args__ = {"schema": ...}</code>, and the materialized view follows it automatically;</li>
+<li><code>__mv_schema_tag__</code> (defaults to <code>"primary"</code>), only consulted for a Core-only declaration with no mapped table to derive anything from.</li>
+</ol>
+<div class="highlight"><pre><span></span><code><span class="c1"># Core-only: no Base, no mapped table, so __mv_schema_tag__ is what resolves it.</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">VocabSummaryMV</span><span class="p">(</span><span class="n">MaterializedViewMixin</span><span class="p">):</span>
+    <span class="n">__mv_name__</span> <span class="o">=</span> <span class="s2">&quot;vocab_summary&quot;</span>
+    <span class="n">__mv_select__</span> <span class="o">=</span> <span class="o">...</span>
+    <span class="n">__mv_schema_tag__</span> <span class="o">=</span> <span class="n">Role</span><span class="o">.</span><span class="n">VOCAB</span><span class="o">.</span><span class="n">value</span>  <span class="c1"># resolves via the connection&#39;s vocab schema</span>
+
+<span class="c1"># Uses __mv_schema_tag__ (&quot;primary&quot; by default) via the connection&#39;s own schema_translate_map.</span>
 <span class="n">RecentObservationMV</span><span class="o">.</span><span class="n">create_mv</span><span class="p">(</span><span class="n">engine</span><span class="p">)</span>
 
-<span class="c1"># Explicit schema: the target is quoted and schema-qualified.</span>
-<span class="n">RecentObservationMV</span><span class="o">.</span><span class="n">create_mv</span><span class="p">(</span><span class="n">engine</span><span class="p">,</span> <span class="n">schema</span><span class="o">=</span><span class="s2">&quot;reporting&quot;</span><span class="p">)</span>
-<span class="n">RecentObservationMV</span><span class="o">.</span><span class="n">refresh_mv</span><span class="p">(</span><span class="n">engine</span><span class="p">,</span> <span class="n">schema</span><span class="o">=</span><span class="s2">&quot;reporting&quot;</span><span class="p">)</span>
+<span class="c1"># Override for one call.</span>
+<span class="n">RecentObservationMV</span><span class="o">.</span><span class="n">create_mv</span><span class="p">(</span><span class="n">engine</span><span class="p">,</span> <span class="n">schema_tag</span><span class="o">=</span><span class="n">Role</span><span class="o">.</span><span class="n">VOCAB</span><span class="o">.</span><span class="n">value</span><span class="p">)</span>
+
+<span class="c1"># Declaratively mapped: the mapped table&#39;s own schema is authoritative, no</span>
+<span class="c1"># __mv_schema_tag__ needed (or consulted) at all.</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">VocabPatientSummaryMV</span><span class="p">(</span><span class="n">Base</span><span class="p">,</span> <span class="n">MaterializedViewMixin</span><span class="p">):</span>
+    <span class="n">__mv_name__</span> <span class="o">=</span> <span class="s2">&quot;vocab_patient_summary&quot;</span>
+    <span class="n">__mv_select__</span> <span class="o">=</span> <span class="o">...</span>
+    <span class="n">__tablename__</span> <span class="o">=</span> <span class="s2">&quot;vocab_patient_summary&quot;</span>
+    <span class="n">__table_args__</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;schema&quot;</span><span class="p">:</span> <span class="n">Role</span><span class="o">.</span><span class="n">VOCAB</span><span class="o">.</span><span class="n">value</span><span class="p">}</span>
+    <span class="n">patient_id</span> <span class="o">=</span> <span class="n">sa</span><span class="o">.</span><span class="n">Column</span><span class="p">(</span><span class="n">sa</span><span class="o">.</span><span class="n">Integer</span><span class="p">,</span> <span class="n">primary_key</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 </code></pre></div>
-<p>Explicit schema targets are quoted component by component. This matters for embedded quotes, spaces, and mixed-case identifiers. It also means an unqualified mixed-case name and the same name passed with <code>schema=</code> can address different PostgreSQL relations. Keep schema selection at the call site and do not assume that this API provides <code>schema_translate_map</code>, role-token, or general multi-schema behavior.</p>
+<p>Every generated identifier is quoted through <code>oa_configurator.qualified()</code>, which quotes each component only when the dialect actually requires it (reserved words, mixed case, embedded quotes or spaces) — the same behavior every other Core-built query in this stack has.</p>
 <h2 id="failure-handling-and-backend-support">Failure handling and backend support<a class="headerlink" href="#failure-handling-and-backend-support" title="Permanent link">&para;</a></h2>
 <p>The built-in implementation is PostgreSQL-oriented. SQLite rejects materialized-view operations with <code>NotImplementedError</code>; this is intentional, not an emulation using ordinary views.</p>
-<p><code>drop_mv()</code> and declared-index creation wrap execution failures in <code>MaterializationError</code>. </p>
+<p><code>create_mv()</code>, <code>drop_mv()</code>, and declared-index creation all wrap execution failures in <code>MaterializationError</code>.</p>
 <h2 id="api-reference">API reference<a class="headerlink" href="#api-reference" title="Permanent link">&para;</a></h2>
 
 
@@ -1871,6 +1913,11 @@
 <li><code>__mv_name__</code>: the name of the materialized view</li>
 <li><code>__mv_select__</code>: a SQLAlchemy Select defining the view contents</li>
 <li>optionally, <code>__mv_dependencies__</code>: names of tables or materialized views this MV depends on</li>
+<li>optionally, <code>__mv_schema_tag__</code>: the schema_translate_map key a Core-only
+  declaration (no <code>Base</code>/mapped <code>Table</code>) resolves through.
+  When the class is also declaratively mapped, its own mapped
+  table's <code>schema</code> is used instead and <code>__mv_schema_tag__</code> is ignored
+  (see :meth:<code>_resolve_schema_tag</code>.)</li>
 </ul>
 <p>This mixin does not define ORM mappings; it is intended for schema-level
 helpers used during migrations, setup, or administrative workflows.</p>
@@ -2033,6 +2080,27 @@ Query like a normal mapped class:</p>
 
 
 
+<h3 id="orm_loader.mappers.MaterializedViewMixin.__mv_schema_tag__" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">__mv_schema_tag__</span> <span class="o">=</span> <span class="n">Role</span><span class="o">.</span><span class="n">PRIMARY</span><span class="o">.</span><span class="n">value</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-class-attribute"><code>class-attribute</code></small>
+      <small class="doc doc-label doc-label-instance-attribute"><code>instance-attribute</code></small>
+  </span>
+
+<a href="#orm_loader.mappers.MaterializedViewMixin.__mv_schema_tag__" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
 <h3 id="orm_loader.mappers.MaterializedViewMixin.__mv_select__" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">__mv_select__</span></code>
 
@@ -2055,8 +2123,32 @@ Query like a normal mapped class:</p>
 <div class="doc doc-object doc-function">
 
 
+<h3 id="orm_loader.mappers.MaterializedViewMixin._resolve_schema_tag" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">_resolve_schema_tag</span><span class="p">(</span><span class="n">schema_tag</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-classmethod"><code>classmethod</code></small>
+  </span>
+
+<a href="#orm_loader.mappers.MaterializedViewMixin._resolve_schema_tag" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Effective schema_tag for one lifecycle call.
+A declratively mapped class's own mapped table's schema is authoritative, 
+overriding any <code>__mv_schema_tag__</code>.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
 <h3 id="orm_loader.mappers.MaterializedViewMixin.create_mv" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">create_mv</span><span class="p">(</span><span class="n">bind</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">schema</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">with_data</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">if_not_exists</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">create_indexes</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">create_mv</span><span class="p">(</span><span class="n">bind</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">schema_tag</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">with_data</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">if_not_exists</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">create_indexes</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-classmethod"><code>classmethod</code></small>
@@ -2099,15 +2191,17 @@ Query like a normal mapped class:</p>
           </tr>
           <tr class="doc-section-item">
             <td>
-                <code>schema</code>
+                <code>schema_tag</code>
             </td>
             <td>
                   <code><span title="str">str</span> | None</code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Explicit schema override. When omitted, the view name remains
-unqualified for the connection's <code>search_path</code> to resolve.</p>
+                <p>schema_translate_map key the view's own physical schema resolves
+through. See :meth:<code>_resolve_schema_tag</code> for the default when
+omitted: the mapped table's own schema if the class is
+declaratively mapped, else <code>cls.__mv_schema_tag__</code>.</p>
               </div>
             </td>
             <td>
@@ -2165,7 +2259,7 @@ PostgreSQL. Unsupported backends raise <code>NotImplementedError</code>.</p>
 
 
 <h3 id="orm_loader.mappers.MaterializedViewMixin.drop_mv" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">drop_mv</span><span class="p">(</span><span class="n">bind</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">schema</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">if_exists</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">cascade</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">drop_mv</span><span class="p">(</span><span class="n">bind</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">schema_tag</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">if_exists</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">cascade</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-classmethod"><code>classmethod</code></small>
@@ -2177,8 +2271,54 @@ PostgreSQL. Unsupported backends raise <code>NotImplementedError</code>.</p>
     <div class="doc doc-contents ">
 
         <p>Drop the materialized view using the resolved backend.</p>
-<p>When <code>schema</code> is omitted, the view name remains unqualified for the
-connection's <code>search_path</code> to resolve.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>bind</code>
+            </td>
+            <td>
+                  <code><span title="sqlalchemy.engine.Connection">Connection</span> | <span title="sqlalchemy.engine.Engine">Engine</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A SQLAlchemy Engine or Connection used to execute the drop.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>schema_tag</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>schema_translate_map key the view's own physical schema resolves
+through; see :meth:<code>_resolve_schema_tag</code> for the default.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
 
 
     </div>
@@ -2189,7 +2329,7 @@ connection's <code>search_path</code> to resolve.</p>
 
 
 <h3 id="orm_loader.mappers.MaterializedViewMixin.refresh_mv" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">refresh_mv</span><span class="p">(</span><span class="n">bind</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">schema</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">concurrently</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">refresh_mv</span><span class="p">(</span><span class="n">bind</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">schema_tag</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">concurrently</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-classmethod"><code>classmethod</code></small>
@@ -2232,15 +2372,15 @@ connection's <code>search_path</code> to resolve.</p>
           </tr>
           <tr class="doc-section-item">
             <td>
-                <code>schema</code>
+                <code>schema_tag</code>
             </td>
             <td>
                   <code><span title="str">str</span> | None</code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Explicit schema override. When omitted, the view name remains
-unqualified for the connection's <code>search_path</code> to resolve.</p>
+                <p>schema_translate_map key the view's own physical schema resolves
+through; see :meth:<code>_resolve_schema_tag</code> for the default.</p>
               </div>
             </td>
             <td>
@@ -2394,7 +2534,9 @@ DDL execution model.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Name of the materialized view to be created.</p>
+                <p>Fully qualified, quoted name of the materialized view to be created
+(see oa_configurator.qualified). The compiler has no live bindable
+to qualify a bare name itself, so callers must qualify it first.</p>
               </div>
             </td>
             <td>
@@ -2654,7 +2796,7 @@ declaration alone, without inspecting the live catalog first.</p>
             <td>
               <div class="doc-md-description">
                 <p>Fully qualified, quoted name of the materialized view to index (see
-<code>orm_loader.helpers.sql.qualify_identifier</code>).</p>
+<code>oa_configurator.qualified</code>).</p>
               </div>
             </td>
             <td>
@@ -2761,7 +2903,7 @@ no-op rather than an error.</p>
             <td>
               <div class="doc-md-description">
                 <p>Fully qualified, quoted name of the materialized view to drop (see
-<code>orm_loader.helpers.sql.qualify_identifier</code>).</p>
+<code>oa_configurator.qualified</code>).</p>
               </div>
             </td>
             <td>
@@ -2925,51 +3067,6 @@ rather than an error.</p>
         <p>Raised when a concurrent materialized-view refresh is not eligible.</p>
 <p>This can happen before execution when no eligible unique index is
 declared, or after execution when PostgreSQL rejects the refresh.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<a id="orm_loader.mappers.UnsupportedMaterializationDialectError"></a>
-    <div class="doc doc-contents first">
-            <p class="doc doc-class-bases">
-              Bases: <code><a class="autorefs autorefs-internal" title="orm_loader.mappers.materialised_view_errors.MaterializationError" href="#orm_loader.mappers.MaterializationError">MaterializationError</a></code></p>
-
-
-
-        <p>Raised before executing Postgres-only DDL/catalog SQL against a
-non-Postgres connection. Defense in depth: the normal <code>resolve_backend</code>
-dispatch path already prevents this via <code>_require_capability</code>; this
-guards direct/manual <code>PostgresBackend()</code> use.</p>
 
 
 

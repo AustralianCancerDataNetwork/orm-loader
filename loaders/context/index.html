@@ -1404,7 +1404,7 @@ on globals or implicit configuration.</p>
 </tr>
 <tr>
 <td><code>quote_mode</code></td>
-<td>CSV quoting mode for PostgreSQL fast-path loading</td>
+<td>CSV quoting mode, resolved to the same concrete mode on both the PostgreSQL COPY fast-path and the pandas ORM fallback</td>
 </tr>
 </tbody>
 </table>
@@ -1512,14 +1512,27 @@ into a staging table, without relying on global variables.</p>
             </td>
           </tr>
           <tr class="doc-section-item">
-            <td><code><span title="orm_loader.loaders.data_classes.LoaderContext.staging_schema">staging_schema</span></code></td>
+            <td><code><span title="orm_loader.loaders.data_classes.LoaderContext.quote_mode">quote_mode</span></code></td>
+            <td>
+                  <code><span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Quoting mode, resolved to the same concrete mode on both the
+PostgreSQL COPY fast-path and the pandas ORM fallback.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="orm_loader.loaders.data_classes.LoaderContext.staging_schema_tag">staging_schema_tag</span></code></td>
             <td>
                   <code><span title="str">str</span> | None</code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Schema the staging table lives in, passed to resolve_backend() so
-every backend resolution within this load shares the same schema.</p>
+                <p>schema_translate_map tag the staging table lives in, passed to
+resolve_backend() so every backend resolution within this load
+resolves the same schema.</p>
               </div>
             </td>
           </tr>

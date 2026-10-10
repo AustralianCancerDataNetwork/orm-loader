@@ -1347,7 +1347,7 @@ not attempt to provide concurrency guarantees.</p>
 
 
 <h2 id="orm_loader.tables.loadable_table.CSVLoadableTableInterface.create_staging_table" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">create_staging_table</span><span class="p">(</span><span class="n">session</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">staging_schema</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">create_staging_table</span><span class="p">(</span><span class="n">session</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">staging_schema_tag</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-classmethod"><code>classmethod</code></small>
@@ -1392,15 +1392,16 @@ The staging table schema mirrors the target table schema.</p>
           </tr>
           <tr class="doc-section-item">
             <td>
-                <code>staging_schema</code>
+                <code>staging_schema_tag</code>
             </td>
             <td>
                   <code><span title="str">str</span> | None</code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Schema the staging table should be created in. <code>None</code> means no
-schema qualification (backend-default behavior).</p>
+                <p>schema_translate_map tag the staging table should be created
+under. <code>None</code> means no schema qualification (backend-default
+behavior).</p>
               </div>
             </td>
             <td>
@@ -1499,7 +1500,7 @@ Override this method to implement custom column mappings.</p>
 
 
 <h2 id="orm_loader.tables.loadable_table.CSVLoadableTableInterface.drop_staging_table" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">drop_staging_table</span><span class="p">(</span><span class="n">session</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">staging_schema</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">drop_staging_table</span><span class="p">(</span><span class="n">session</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">staging_schema_tag</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-classmethod"><code>classmethod</code></small>
@@ -1542,15 +1543,15 @@ Override this method to implement custom column mappings.</p>
           </tr>
           <tr class="doc-section-item">
             <td>
-                <code>staging_schema</code>
+                <code>staging_schema_tag</code>
             </td>
             <td>
                   <code><span title="str">str</span> | None</code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Schema the staging table lives in. <code>None</code> means no schema
-qualification (backend-default behavior).</p>
+                <p>schema_translate_map tag the staging table lives in. <code>None</code>
+means no schema qualification (backend-default behavior).</p>
               </div>
             </td>
             <td>
@@ -1569,7 +1570,7 @@ qualification (backend-default behavior).</p>
 
 
 <h2 id="orm_loader.tables.loadable_table.CSVLoadableTableInterface.get_staging_table" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">get_staging_table</span><span class="p">(</span><span class="n">session</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">staging_schema</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">get_staging_table</span><span class="p">(</span><span class="n">session</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">staging_schema_tag</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-classmethod"><code>classmethod</code></small>
@@ -1612,15 +1613,15 @@ qualification (backend-default behavior).</p>
           </tr>
           <tr class="doc-section-item">
             <td>
-                <code>staging_schema</code>
+                <code>staging_schema_tag</code>
             </td>
             <td>
                   <code><span title="str">str</span> | None</code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Schema the staging table lives in. <code>None</code> means no schema
-qualification (backend-default behavior).</p>
+                <p>schema_translate_map tag the staging table lives in. <code>None</code>
+means no schema qualification (backend-default behavior).</p>
               </div>
             </td>
             <td>
@@ -1654,6 +1655,19 @@ qualification (backend-default behavior).</p>
     </table>
 
 
+<details class="note" open>
+  <summary>Notes</summary>
+  <p>Inspects and reflects via <code>session.connection()</code>, not the bare
+engine. Confirmed empirically: on SQLite's SingletonThreadPool, a
+second connection opened straight from the engine is the same
+underlying DBAPI connection, and closing that second wrapper resets
+its perceived transaction state, silently discarding the session's
+own uncommitted work. Using the session's own already-open
+connection avoids ever opening a second one. Fetched fresh both
+before and after the possible <code>create_staging_table()</code> call below,
+since that call commits, which can invalidate an earlier reference.</p>
+</details>
+
     </div>
 
 </div>
@@ -1662,7 +1676,7 @@ qualification (backend-default behavior).</p>
 
 
 <h2 id="orm_loader.tables.loadable_table.CSVLoadableTableInterface.load_csv" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">load_csv</span><span class="p">(</span><span class="n">session</span><span class="p">,</span> <span class="n">path</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">loader</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">normalise</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">dedupe</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">chunksize</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">merge_strategy</span><span class="o">=</span><span class="s1">&#39;replace&#39;</span><span class="p">,</span> <span class="n">quote_mode</span><span class="o">=</span><span class="s1">&#39;auto&#39;</span><span class="p">,</span> <span class="n">index_strategy</span><span class="o">=</span><span class="s1">&#39;auto&#39;</span><span class="p">,</span> <span class="n">merge_batch_size</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">staging_schema</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">load_csv</span><span class="p">(</span><span class="n">session</span><span class="p">,</span> <span class="n">path</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">loader</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">normalise</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">dedupe</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">chunksize</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">merge_strategy</span><span class="o">=</span><span class="s1">&#39;replace&#39;</span><span class="p">,</span> <span class="n">quote_mode</span><span class="o">=</span><span class="s1">&#39;auto&#39;</span><span class="p">,</span> <span class="n">index_strategy</span><span class="o">=</span><span class="s1">&#39;auto&#39;</span><span class="p">,</span> <span class="n">merge_batch_size</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">staging_schema_tag</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-classmethod"><code>classmethod</code></small>
@@ -1814,7 +1828,9 @@ qualification (backend-default behavior).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Quoting mode used by the PostgreSQL fast-path loader.</p>
+                <p>Quoting mode. Governs parsing on both the PostgreSQL COPY
+fast-path and the pandas ORM fallback, so a file that falls back
+to the ORM path is still parsed identically.</p>
               </div>
             </td>
             <td>
@@ -1840,17 +1856,17 @@ the backend choose a sensible default.</p>
           </tr>
           <tr class="doc-section-item">
             <td>
-                <code>staging_schema</code>
+                <code>staging_schema_tag</code>
             </td>
             <td>
                   <code><span title="str">str</span> | None</code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Schema the staging table lives in. <code>None</code> means no schema
-qualification (backend-default behavior). Threaded through
-every internal step of the load lifecycle so they all resolve
-the same backend/schema.</p>
+                <p>schema_translate_map tag the staging table lives in. <code>None</code>
+means no schema qualification (backend-default behavior).
+Threaded through every internal step of the load lifecycle so
+they all resolve the same backend/schema.</p>
               </div>
             </td>
             <td>
@@ -1986,7 +2002,7 @@ supported, falling back to an ORM-based loader if necessary.</p>
 
 
 <h2 id="orm_loader.tables.loadable_table.CSVLoadableTableInterface.manage_indices" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">manage_indices</span><span class="p">(</span><span class="n">session</span><span class="p">,</span> <span class="n">index_strategy</span><span class="o">=</span><span class="s1">&#39;auto&#39;</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">staging_schema</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">manage_indices</span><span class="p">(</span><span class="n">session</span><span class="p">,</span> <span class="n">index_strategy</span><span class="o">=</span><span class="s1">&#39;auto&#39;</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">staging_schema_tag</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-classmethod"><code>classmethod</code></small>
@@ -2012,7 +2028,7 @@ and rebuilds them.</p>
 
 
 <h2 id="orm_loader.tables.loadable_table.CSVLoadableTableInterface.merge_from_staging" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">merge_from_staging</span><span class="p">(</span><span class="n">session</span><span class="p">,</span> <span class="n">merge_strategy</span><span class="o">=</span><span class="s1">&#39;replace&#39;</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">merge_batch_size</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">staging_schema</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">merge_from_staging</span><span class="p">(</span><span class="n">session</span><span class="p">,</span> <span class="n">merge_strategy</span><span class="o">=</span><span class="s1">&#39;replace&#39;</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">merge_batch_size</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">staging_schema_tag</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-classmethod"><code>classmethod</code></small>
@@ -2072,15 +2088,15 @@ and rebuilds them.</p>
           </tr>
           <tr class="doc-section-item">
             <td>
-                <code>staging_schema</code>
+                <code>staging_schema_tag</code>
             </td>
             <td>
                   <code><span title="str">str</span> | None</code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Schema the staging table lives in. <code>None</code> means no schema
-qualification (backend-default behavior).</p>
+                <p>schema_translate_map tag the staging table lives in. <code>None</code>
+means no schema qualification (backend-default behavior).</p>
               </div>
             </td>
             <td>
