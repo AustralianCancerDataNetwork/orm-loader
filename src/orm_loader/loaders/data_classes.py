@@ -117,7 +117,8 @@ class LoaderInterface:
         cls,
         staging_cls: sa.Table,
         session: so.Session,
-        dataframe: pd.DataFrame
+        dataframe: pd.DataFrame,
+        mapper: Any | None = None,
     ) -> int:
         """
         Load a single DataFrame chunk into the staging table.
@@ -151,6 +152,7 @@ class LoaderInterface:
         session.execute( 
             staging_cls.insert(),
             records, 
+            bind_arguments={"mapper": mapper},
         )
         session.flush()
         session.expunge_all()

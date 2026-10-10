@@ -30,9 +30,11 @@ def attach_sqlite_bulk_load_pragmas(
     ).install_engine_hooks(engine)
 
 
-def explain_sqlite_fk_error(session, exc: IntegrityError, raise_error: bool = True):
+def explain_sqlite_fk_error(
+    session, exc: IntegrityError, raise_error: bool = True, *, mapper=None
+):
     """Log SQLite foreign-key check details before re-raising an error."""
-    SQLiteBackend().explain_fk_error(session, exc, raise_error=raise_error)
+    SQLiteBackend().explain_fk_error(session, exc, mapper=mapper, raise_error=raise_error)
 
 
 def restore_sqlite_journal_mode(db_path: Path) -> None:

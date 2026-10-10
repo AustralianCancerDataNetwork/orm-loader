@@ -50,7 +50,7 @@ class _FakeSession:
             return {}
         return {SCHEMA_TRANSLATE_MAP_KEY: self._schema_translate_map}
 
-    def execute(self, statement, parameters=None):
+    def execute(self, statement, parameters=None, **kwargs):
         if hasattr(statement, "compile"):
             sql = str(statement.compile(dialect=postgresql.dialect()))
         else:

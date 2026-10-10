@@ -1,32 +1,28 @@
 from __future__ import annotations
 
-from contextlib import AbstractContextManager, contextmanager
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
 import sqlalchemy as sa
 import sqlalchemy.event as sae
 import sqlalchemy.orm as so
 from oa_configurator import (
-    autocommit_connection,
-    qualified,
-    physical_schema_of,
     Dialect,
+    autocommit_connection,
+    physical_schema_of,
+    qualified,
 )
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.sql.compiler import IdentifierPreparer
 
-from .base import (
-    BackendCapabilities,
-    DatabaseBackend,
-    requires_capability
-)
 from ..mappers.materialised_view_errors import (
     ConcurrentRefreshNotEligibleError,
     MaterializationError,
     MaterializationFailure,
     MaterializationOperation,
 )
+from .base import BackendCapabilities, DatabaseBackend, requires_capability
 
 if TYPE_CHECKING:
     from sqlalchemy.engine import Connection, Engine
@@ -75,29 +71,36 @@ class PostgresBackend(DatabaseBackend):
         table = table_cls.__table__
         preparer = self.identifier_preparer
         staging_ref = self.qualified_staging_name(table_cls.__tablename__)
+        bind = session.get_bind(mapper=table_cls)
         source_ref = qualified(
-            session, table.name, physical_schema=physical_schema_of(session, schema_tag=table.schema)
+            bind, table.name, physical_schema=physical_schema_of(bind, schema_tag=table.schema)
         )
-        session.execute(sa.text(f'DROP TABLE IF EXISTS {staging_ref};'))
+        bind_arguments = {"mapper": table_cls}
+        session.execute(sa.text(f'DROP TABLE IF EXISTS {staging_ref};'), bind_arguments=bind_arguments)
         session.execute(
             sa.text(
                 f'''
                 CREATE UNLOGGED TABLE {staging_ref}
                 (LIKE {source_ref} INCLUDING DEFAULTS INCLUDING CONSTRAINTS);
                 '''
-            )
+            ),
+            bind_arguments=bind_arguments,
         )
 
         computed_cols = [c.name for c in table.columns if c.computed is not None]
         for col in computed_cols:
-            session.execute(sa.text(f'ALTER TABLE {staging_ref} DROP COLUMN {preparer.quote_identifier(col)};'))
+            session.execute(
+                sa.text(f'ALTER TABLE {staging_ref} DROP COLUMN {preparer.quote_identifier(col)};'),
+                bind_arguments=bind_arguments,
+            )
 
         # allows pagination in O(N log N) time for large tables in merge_insert without needing to add an index on every staging table
         session.execute(
             sa.text(
                 f'ALTER TABLE {staging_ref} ADD COLUMN _rownum BIGINT'
                 f" GENERATED ALWAYS AS IDENTITY (CACHE 1000);"
-            )
+            ),
+            bind_arguments=bind_arguments,
         )
 
         session.commit()
@@ -107,7 +110,10 @@ class PostgresBackend(DatabaseBackend):
         table_cls: type["CSVTableProtocol"],
         session: so.Session,
     ) -> None:
-        session.execute(sa.text(f'DROP TABLE IF EXISTS {self.qualified_staging_name(table_cls.__tablename__)}'))
+        session.execute(
+            sa.text(f'DROP TABLE IF EXISTS {self.qualified_staging_name(table_cls.__tablename__)}'),
+            bind_arguments={"mapper": table_cls},
+        )
 
     def load_staging_fast(
         self,
@@ -122,6 +128,7 @@ class PostgresBackend(DatabaseBackend):
             tablename=self.staging_name_for_table(tablename),
             schema=self.staging_schema,
             quote_mode=loader_context.quote_mode,
+            mapper=loader_context.tableclass,
         )
 
     @staticmethod
@@ -141,16 +148,22 @@ class PostgresBackend(DatabaseBackend):
             )
         return normalised
 
-    def disable_fk_check(self, session: so.Session) -> str | int:
-        previous_state = session.execute(sa.text("SHOW session_replication_role")).scalar()
-        session.execute(sa.text("SET session_replication_role = 'replica'"))
+    def disable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int:
+        execute_options = {"bind_arguments": {"mapper": mapper}} if mapper is not None else {}
+        previous_state = session.execute(
+            sa.text("SHOW session_replication_role"), **execute_options
+        ).scalar()
+        session.execute(sa.text("SET session_replication_role = 'replica'"), **execute_options)
         if not isinstance(previous_state, str):
             raise RuntimeError("Expected PostgreSQL FK state to be a string")
         return previous_state
 
-    def enable_fk_check(self, session: so.Session) -> str | int:
-        previous_state = session.execute(sa.text("SHOW session_replication_role")).scalar()
-        session.execute(sa.text("SET session_replication_role = 'origin'"))
+    def enable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int:
+        execute_options = {"bind_arguments": {"mapper": mapper}} if mapper is not None else {}
+        previous_state = session.execute(
+            sa.text("SHOW session_replication_role"), **execute_options
+        ).scalar()
+        session.execute(sa.text("SET session_replication_role = 'origin'"), **execute_options)
         if not isinstance(previous_state, str):
             raise RuntimeError("Expected PostgreSQL FK state to be a string")
         return previous_state
@@ -159,16 +172,21 @@ class PostgresBackend(DatabaseBackend):
         self,
         session: so.Session,
         previous_state: str | int,
+        *,
+        mapper: Any | None = None,
     ) -> None:
         safe_state = self._normalize_fk_check_state(previous_state)
-        session.execute(sa.text(f"SET session_replication_role = '{safe_state}'"))
+        execute_options = {"bind_arguments": {"mapper": mapper}} if mapper is not None else {}
+        session.execute(
+            sa.text(f"SET session_replication_role = '{safe_state}'"), **execute_options
+        )
 
     def _staging_rownum_index(
         self, table_cls: type["CSVTableProtocol"], staging: sa.Table, session: so.Session
     ) -> None:
         staging_name = self.staging_name_for_table(table_cls.__tablename__)
         idx = sa.Index(f"{staging_name}_rownum_idx", staging.c._rownum)
-        idx.create(bind=session.connection(), checkfirst=True)
+        idx.create(bind=session.connection(bind_arguments={"mapper": table_cls}), checkfirst=True)
         session.commit()
 
     @staticmethod
@@ -250,7 +268,7 @@ class PostgresBackend(DatabaseBackend):
         staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
         insertable_cols = self._insertable_column_names(table_cls)
 
-        def _upsert(select_: sa.sql.Select[Any]) -> sa.Insert:
+        def _upsert(select_: Any) -> sa.Insert:
             # sa.insert() has no .on_conflict_do_nothing()
             return (
                 postgresql.insert(target)
@@ -294,7 +312,7 @@ class PostgresBackend(DatabaseBackend):
         insertable_cols = self._insertable_column_names(table_cls)
         non_paginated_select = sa.select(*(staging.c[c] for c in insertable_cols))
 
-        def _insert(select_: sa.sql.Select[Any]) -> sa.Insert:
+        def _insert(select_: Any) -> sa.Insert:
             return sa.insert(target).from_select(insertable_cols, select_)
 
         if merge_batch_size is None:
@@ -322,13 +340,6 @@ class PostgresBackend(DatabaseBackend):
             session.execute(_insert(batch_select))
             session.commit()
             start = end
-
-    def merge_context(
-        self,
-        table_cls: type["CSVTableProtocol"],
-        session: so.Session,
-    ) -> AbstractContextManager[None]:
-        return self.bulk_load_context(session, disable_fk=True, no_autoflush=False)
 
     @requires_capability("supports_materialized_views", "materialized views")
     def create_materialized_view(

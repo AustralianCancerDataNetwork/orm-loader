@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from contextlib import AbstractContextManager, contextmanager, nullcontext
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from collections.abc import Generator
 from functools import wraps
@@ -302,11 +302,11 @@ class DatabaseBackend(ABC):
         """
 
     @abstractmethod
-    def disable_fk_check(self, session: so.Session) -> str | int:
+    def disable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int:
         """Disable FK checks and return the previous backend-specific state."""
 
     @abstractmethod
-    def enable_fk_check(self, session: so.Session) -> str | int:
+    def enable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int:
         """Explicitly enable FK checks and return the previous backend-specific state."""
 
     @abstractmethod
@@ -314,6 +314,8 @@ class DatabaseBackend(ABC):
         self,
         session: so.Session,
         previous_state: str | int,
+        *,
+        mapper: Any | None = None,
     ) -> None:
         """Restore FK checks to a previously returned backend-specific state."""
 
@@ -354,14 +356,17 @@ class DatabaseBackend(ABC):
         table_cls: Type["CSVTableProtocol"],
         session: so.Session,
     ) -> AbstractContextManager[None]:
-        """Return a context manager for merge-time backend operations."""
-        return nullcontext()
+        """Disable backend FK checks for a table's merge and restore them afterward."""
+        return self.bulk_load_context(
+            session, mapper=table_cls, disable_fk=True, no_autoflush=False
+        )
 
     @contextmanager
     def bulk_load_context(
         self,
         session: so.Session,
         *,
+        mapper: Any | None = None,
         disable_fk: bool = True,
         no_autoflush: bool = True,
     ):
@@ -372,7 +377,11 @@ class DatabaseBackend(ABC):
         try:
             if disable_fk:
                 self._require_capability("supports_fk_toggle", "foreign key toggling")
-                raw_state = self.disable_fk_check(session)
+                raw_state = (
+                    self.disable_fk_check(session)
+                    if mapper is None
+                    else self.disable_fk_check(session, mapper=mapper)
+                )
                 previous_fk_state = self._normalize_fk_check_state(raw_state)
 
             if no_autoflush:
@@ -387,7 +396,10 @@ class DatabaseBackend(ABC):
 
         finally:
             if previous_fk_state is not None:
-                self.restore_fk_check(session, previous_fk_state)
+                if mapper is None:
+                    self.restore_fk_check(session, previous_fk_state)
+                else:
+                    self.restore_fk_check(session, previous_fk_state, mapper=mapper)
 
     @requires_capability("supports_materialized_views", "materialized views")
     def create_materialized_view(

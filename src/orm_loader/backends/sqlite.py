@@ -4,7 +4,6 @@ import logging
 import sqlite3
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from contextlib import AbstractContextManager
 
 import sqlalchemy as sa
 import sqlalchemy.orm as so
@@ -110,15 +109,22 @@ class SQLiteBackend(DatabaseBackend):
         session: so.Session,
     ) -> None:
         staging_name = self.staging_name_for_table(table_cls.__tablename__)
-        session.execute(sa.text(f'DROP TABLE IF EXISTS {self.identifier_preparer.quote_identifier(staging_name)};'))
+        session.execute(
+            sa.text(f'DROP TABLE IF EXISTS {self.identifier_preparer.quote_identifier(staging_name)};'),
+            bind_arguments={"mapper": table_cls},
+        )
 
         metadata = sa.MetaData()
         staging_columns = [
             sa.Column(col.name, col.type, nullable=True)
             for col in table_cls.__table__.columns
         ]
-        staging_table = sa.Table(staging_name, metadata, *staging_columns)
-        metadata.create_all(bind=session.connection(), tables=[staging_table])
+        staging_table = sa.Table(
+            staging_name, metadata, *staging_columns, schema=table_cls.__table__.schema
+        )
+        metadata.create_all(
+            bind=session.connection(bind_arguments={"mapper": table_cls}), tables=[staging_table]
+        )
         session.commit()
 
     def drop_staging_table(
@@ -127,18 +133,23 @@ class SQLiteBackend(DatabaseBackend):
         session: so.Session,
     ) -> None:
         staging_ref = self.identifier_preparer.quote_identifier(self.staging_name_for_table(table_cls.__tablename__))
-        session.execute(sa.text(f'DROP TABLE IF EXISTS {staging_ref}'))
+        session.execute(
+            sa.text(f'DROP TABLE IF EXISTS {staging_ref}'),
+            bind_arguments={"mapper": table_cls},
+        )
 
-    def disable_fk_check(self, session: so.Session) -> str | int:
-        previous_state = session.execute(text("PRAGMA foreign_keys")).scalar()
-        session.execute(text("PRAGMA foreign_keys = OFF"))
+    def disable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int:
+        execute_options = {"bind_arguments": {"mapper": mapper}} if mapper is not None else {}
+        previous_state = session.execute(text("PRAGMA foreign_keys"), **execute_options).scalar()
+        session.execute(text("PRAGMA foreign_keys = OFF"), **execute_options)
         if not isinstance(previous_state, int):
             raise RuntimeError("Expected SQLite FK state to be an int")
         return previous_state
 
-    def enable_fk_check(self, session: so.Session) -> str | int:
-        previous_state = session.execute(text("PRAGMA foreign_keys")).scalar()
-        session.execute(text("PRAGMA foreign_keys = ON"))
+    def enable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int:
+        execute_options = {"bind_arguments": {"mapper": mapper}} if mapper is not None else {}
+        previous_state = session.execute(text("PRAGMA foreign_keys"), **execute_options).scalar()
+        session.execute(text("PRAGMA foreign_keys = ON"), **execute_options)
         if not isinstance(previous_state, int):
             raise RuntimeError("Expected SQLite FK state to be an int")
         return previous_state
@@ -147,9 +158,12 @@ class SQLiteBackend(DatabaseBackend):
         self,
         session: so.Session,
         previous_state: str | int,
+        *,
+        mapper: Any | None = None,
     ) -> None:
         safe_state = self._normalize_fk_check_state(previous_state)
-        session.execute(text(f"PRAGMA foreign_keys = {safe_state}"))
+        execute_options = {"bind_arguments": {"mapper": mapper}} if mapper is not None else {}
+        session.execute(text(f"PRAGMA foreign_keys = {safe_state}"), **execute_options)
 
     @staticmethod
     def _staging_rowid() -> sa.ColumnElement[int]:
@@ -219,7 +233,7 @@ class SQLiteBackend(DatabaseBackend):
         staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
         insertable_cols = self._insertable_column_names(table_cls)
 
-        def _upsert(select_: sa.Select[Any]) -> sa.Insert:
+        def _upsert(select_: Any) -> sa.Insert:
             return (
                 sqlite_dialect.insert(target)
                 .from_select(insertable_cols, select_)
@@ -259,7 +273,7 @@ class SQLiteBackend(DatabaseBackend):
         insertable_cols = self._insertable_column_names(table_cls)
         non_paginated_select = sa.select(*(staging.c[c] for c in insertable_cols))
 
-        def _insert(select_: sa.Select[Any]) -> sa.Insert:
+        def _insert(select_: Any) -> sa.Insert:
             return sa.insert(target).from_select(insertable_cols, select_)
 
         if merge_batch_size is None:
@@ -278,13 +292,6 @@ class SQLiteBackend(DatabaseBackend):
             batch_select = non_paginated_select.where(rowid > start, rowid <= end)
             session.execute(_insert(batch_select))
             start = end
-
-    def merge_context(
-        self,
-        table_cls: type["CSVTableProtocol"],
-        session: so.Session,
-    ) -> AbstractContextManager[None]:
-        return self.bulk_load_context(session, disable_fk=True, no_autoflush=False)
 
     def configure_dbapi_connection(self, dbapi_connection:  sa.engine.interfaces.DBAPIConnection) -> None:
         if dbapi_connection.__class__.__module__.startswith("sqlite3"):
@@ -309,9 +316,10 @@ class SQLiteBackend(DatabaseBackend):
         session: so.Session,
         exc: IntegrityError,
         *,
+        mapper: Any | None = None,
         raise_error: bool = True,
     ) -> None:
-        bind: Engine | Connection = session.get_bind()
+        bind: Engine | Connection = session.get_bind(mapper=mapper)
         if bind.dialect.name != Dialect.SQLITE:
             raise exc
 

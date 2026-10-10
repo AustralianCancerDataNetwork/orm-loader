@@ -811,3 +811,30 @@ def test_invalid_index_strategy_raises(session, tmp_path):
 #         else:
 #             # stored value may be str-canonicalised version
 #             assert rows[0].txt.encode("utf-8", errors="replace") == s.encode("utf-8", errors="replace")
+
+
+def test_sqlite_failed_batched_replace_keeps_original_target_rows(session, tmp_path):
+    session.add_all([SimpleTable(id=1, name="original-1"), SimpleTable(id=2, name="original-2")])
+    session.commit()
+    csv_path = tmp_path / "test_table.csv"
+    pd.DataFrame(
+        [
+            {"id": 1, "name": "replacement-1"},
+            {"id": 2, "name": "replacement-2"},
+            {"id": 2, "name": "duplicate-2"},
+        ]
+    ).to_csv(csv_path, index=False, sep="\t")
+
+    with pytest.raises(sa.exc.IntegrityError):
+        SimpleTable.load_csv(
+            session,
+            csv_path,
+            dedupe=False,
+            loader=PandasLoader(),
+            merge_strategy="replace",
+            merge_batch_size=2,
+        )
+    session.rollback()
+
+    rows = session.execute(sa.select(SimpleTable).order_by(SimpleTable.id)).scalars().all()
+    assert [(row.id, row.name) for row in rows] == [(1, "original-1"), (2, "original-2")]

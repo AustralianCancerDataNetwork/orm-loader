@@ -1,5 +1,6 @@
 import logging
-from typing import Iterable, cast
+from collections.abc import Iterable
+from typing import cast
 
 import sqlalchemy as sa
 from oa_configurator import (
@@ -58,10 +59,10 @@ def create_tables(
     """Create *tables* on *connection* as they can physically exist under *resolved*.
 
     Foreign keys to a tag hosted on another database are left out, since no
-    dialect can express them. When none cross, this is plain
-    ``Base.metadata.create_all``. Otherwise every ``Base`` table on the same
-    database is copied alongside, so a kept foreign key to a table that
-    already exists still resolves.
+    dialect can express them. When none cross, this creates the requested
+    tables from each table's own metadata. Otherwise same-transaction tables
+    from each requested table's metadata are copied alongside, so kept local
+    foreign keys resolve even when their target tables aren't requested.
 
     Parameters
     ----------
@@ -77,34 +78,53 @@ def create_tables(
     ValueError
         If a table has no schema tag.
     """
+    tables = list(tables)
     tagged = [(table, table.schema) for table in tables]
     if not tagged:
         return
     untagged = sorted(table.name for table, tag in tagged if tag is None)
     if untagged:
         raise ValueError(f"create_tables() needs schema-tagged tables, got untagged {untagged}.")
-    tags = {table.key: tag for table, tag in tagged if tag is not None}
-    tables = [table for table, _ in tagged]
+    schema_tags = {tag for _, tag in tagged if tag is not None}
+    if not resolved.tags_share_a_transaction(*schema_tags):
+        raise ValueError(
+            "create_tables() requires all tables to share one database transaction; "
+            f"got schema tags {sorted(schema_tags)}."
+        )
     crossing = any(
-        not resolved.foreign_key_can_span(tags[table.key], referred_schema_tag(fk, tags[table.key]))
+        not resolved.foreign_key_can_span(
+            cast(str, table.schema), referred_schema_tag(fk, cast(str, table.schema))
+        )
         for table in tables
         for fk in table.foreign_keys
     )
     if not crossing:
-        Base.metadata.create_all(connection, tables=tables, checkfirst=True)
+        tables_by_metadata: dict[sa.MetaData, list[sa.Table]] = {}
+        for table in tables:
+            tables_by_metadata.setdefault(table.metadata, []).append(table)
+        for metadata, metadata_tables in tables_by_metadata.items():
+            metadata.create_all(connection, tables=metadata_tables, checkfirst=True)
         return
 
-    own_tag = tags[tables[0].key]
-    local = [
-        table
-        for table in Base.metadata.tables.values()
-        if table.schema is not None and resolved.tags_share_a_transaction(table.schema, own_tag)
-    ]
-    wanted = {table.key for table in tables}
-    copies = without_cross_engine_foreign_keys(local, resolved=resolved)
-    copies[0].metadata.create_all(
-        connection, tables=[copy for copy in copies if copy.key in wanted], checkfirst=True
-    )
+    related_by_metadata: dict[sa.MetaData, set[sa.Table]] = {}
+    requested_by_metadata: dict[sa.MetaData, set[str]] = {}
+    for table in tables:
+        metadata = table.metadata
+        requested_by_metadata.setdefault(metadata, set()).add(table.key)
+        related_by_metadata.setdefault(metadata, set()).update(
+            candidate
+            for candidate in metadata.tables.values()
+            if candidate.schema is not None
+            and resolved.tags_share_a_transaction(
+                candidate.schema, cast(str, table.schema)
+            )
+        )
+
+    for metadata, related in related_by_metadata.items():
+        local_tables = [table for table in metadata.tables.values() if table in related]
+        copies = without_cross_engine_foreign_keys(local_tables, resolved=resolved)
+        requested = [table for table in copies if table.key in requested_by_metadata[metadata]]
+        copies[0].metadata.create_all(connection, tables=requested, checkfirst=True)
 
 
 def create_db(resolved: ResolvedDatabase, *, bindable: Bindable | None = None) -> None:
@@ -122,6 +142,19 @@ def create_db(resolved: ResolvedDatabase, *, bindable: Bindable | None = None) -
     between the engine's creation and this call's create_all(), so no
     separate provenance guard is needed here.
     """
+    if not isinstance(resolved, ResolvedDatabase):
+        raise TypeError(
+            "create_db() requires a ResolvedDatabase; pass bindable= for an existing engine."
+        )
+    if (
+        bindable is not None
+        and isinstance(resolved, ResolvedCDMDatabase)
+        and not resolved.tags_share_a_transaction("primary", "vocab")
+    ):
+        raise ValueError(
+            "create_db() cannot use one bindable for a split database: one bind cannot host "
+            "both databases. Omit bindable so each role gets its own engine."
+        )
     logger.debug("Creating database schema")
     if not Base.metadata.tables:
         logger.warning(
@@ -178,5 +211,9 @@ def bootstrap(
     bindable: Bindable | None = None,
 ) -> None:
     logger.info("Bootstrapping schema (create=%s)", create)
+    if not isinstance(resolved, ResolvedDatabase):
+        raise TypeError(
+            "bootstrap() requires a ResolvedDatabase; pass bindable= for an existing engine."
+        )
     if create:
         create_db(resolved, bindable=bindable)

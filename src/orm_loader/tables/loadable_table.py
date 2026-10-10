@@ -1,20 +1,19 @@
 # pyright: reportPrivateUsage=false
+import logging
+from contextlib import contextmanager
+from pathlib import Path
+from time import perf_counter
+from typing import Any, Generator, Type
+
 import sqlalchemy as sa
 import sqlalchemy.orm as so
-import logging
-from oa_configurator import physical_schema_of
-
+from oa_configurator import Dialect, physical_schema_of
 from sqlalchemy.exc import InvalidRequestError, UnboundExecutionError
 
-from typing import Type, Any, Generator
-from pathlib import Path
-from contextlib import contextmanager
-from time import perf_counter
-
+from ..backends.resolve import resolve_backend
+from ..loaders.loader_interface import LoaderContext, LoaderInterface, PandasLoader, ParquetLoader
 from .orm_table import ORMTableBase
 from .typing import CSVTableProtocol
-from ..backends.resolve import resolve_backend
-from ..loaders.loader_interface import LoaderInterface, LoaderContext, PandasLoader, ParquetLoader
 
 logger = logging.getLogger(__name__)
 
@@ -24,10 +23,10 @@ def _format_elapsed(seconds: float) -> str:
     return f"{seconds:.2f}s"
 
 
-def _require_bind(session: so.Session) -> sa.Engine | sa.Connection:
+def _require_bind(session: so.Session, mapper: Any | None = None) -> sa.Engine | sa.Connection:
     """Return a bound connectable or raise a stable runtime error."""
     try:
-        return session.get_bind()
+        return session.get_bind(mapper=mapper)
     except (InvalidRequestError, UnboundExecutionError) as exc:
         raise RuntimeError("Session is not bound to an engine") from exc
 
@@ -97,8 +96,8 @@ class CSVLoadableTableInterface(ORMTableBase):
         NotImplementedError
             If the database dialect is unsupported.
         """
-        _require_bind(session)
-        backend = resolve_backend(session, staging_schema_tag=staging_schema_tag)
+        _require_bind(session, cls)
+        backend = resolve_backend(session, staging_schema_tag=staging_schema_tag, mapper=cls)
         backend.create_staging_table(cls, session)
 
     @classmethod
@@ -118,15 +117,16 @@ class CSVLoadableTableInterface(ORMTableBase):
         moment SQLite keeps indexes by default, while PostgreSQL drops
         and rebuilds them.
         """
-        backend = resolve_backend(session, staging_schema_tag=staging_schema_tag)
+        backend = resolve_backend(session, staging_schema_tag=staging_schema_tag, mapper=cls)
         resolved_index_strategy = backend.resolve_index_strategy(index_strategy)
         table_name = cls.__tablename__
 
         indices = list(cls.__table__.indexes) if resolved_index_strategy == "drop_rebuild" else []
 
         if indices:
-            inspector = sa.inspect(session.connection())
-            schema = physical_schema_of(session, schema_tag=cls.__table__.schema)
+            connection = session.connection(bind_arguments={"mapper": cls})
+            inspector = sa.inspect(connection)
+            schema = physical_schema_of(connection, schema_tag=cls.__table__.schema)
             existing_in_db = {idx['name'] for idx in inspector.get_indexes(cls.__tablename__, schema=schema)}
             to_drop = [i for i in indices if i.name in existing_in_db]
             
@@ -182,8 +182,9 @@ class CSVLoadableTableInterface(ORMTableBase):
             if indices:
                 logger.info(f"Table `{table_name}`: Verifying/Rebuilding indices.")
                 rebuild_started = perf_counter()
-                inspector = sa.inspect(session.connection())
-                schema = physical_schema_of(session, schema_tag=cls.__table__.schema)
+                connection = session.connection(bind_arguments={"mapper": cls})
+                inspector = sa.inspect(connection)
+                schema = physical_schema_of(connection, schema_tag=cls.__table__.schema)
                 existing_idx_names = {idx['name'] for idx in inspector.get_indexes(table_name, schema=schema)}
                
                 for idx in indices:
@@ -249,20 +250,26 @@ class CSVLoadableTableInterface(ORMTableBase):
         before and after the possible ``create_staging_table()`` call below,
         since that call commits, which can invalidate an earlier reference.
         """
-        _require_bind(session)
-        backend = resolve_backend(session, staging_schema_tag=staging_schema_tag)
-        inspector = sa.inspect(session.connection())
+        _require_bind(session, cls)
+        backend = resolve_backend(session, staging_schema_tag=staging_schema_tag, mapper=cls)
+        connection = session.connection(bind_arguments={"mapper": cls})
+        inspector = sa.inspect(connection)
         staging_name = backend.staging_name_for_table(cls.__tablename__)
 
+        staging_schema = backend.staging_schema
+        if staging_schema is None and backend.dialect == Dialect.SQLITE:
+            staging_schema = cls.__table__.schema
         if not inspector.has_table(staging_name, schema=backend.staging_schema):
             logger.debug(f"Staging table {staging_name} does not exist; recreating",)
             cls.create_staging_table(session, staging_schema_tag=staging_schema_tag)
 
+        connection = session.connection(bind_arguments={"mapper": cls})
+
         return sa.Table(
             staging_name,
             sa.MetaData(),  # throwaway — keeps staging table out of Base.metadata
-            autoload_with=session.connection(),
-            schema=backend.staging_schema,
+            autoload_with=connection,
+            schema=staging_schema,
         )
 
     @classmethod
@@ -289,9 +296,11 @@ class CSVLoadableTableInterface(ORMTableBase):
         int
             Number of rows loaded into the staging table.
         """
-        _require_bind(loader_context.session)
+        _require_bind(loader_context.session, cls)
 
-        backend = resolve_backend(loader_context.session, staging_schema_tag=loader_context.staging_schema_tag)
+        backend = resolve_backend(
+            loader_context.session, staging_schema_tag=loader_context.staging_schema_tag, mapper=cls
+        )
         total = 0
 
         cls.create_staging_table(loader_context.session, staging_schema_tag=loader_context.staging_schema_tag)
@@ -510,8 +519,8 @@ class CSVLoadableTableInterface(ORMTableBase):
         target = cls.__tablename__
         pk_cols = cls.pk_names()
 
-        _require_bind(session)
-        backend = resolve_backend(session, staging_schema_tag=staging_schema_tag)
+        _require_bind(session, cls)
+        backend = resolve_backend(session, staging_schema_tag=staging_schema_tag, mapper=cls)
         target_empty_confirmed = False
         if merge_strategy in {"replace", "upsert"}:
             logger.info(
@@ -598,7 +607,7 @@ class CSVLoadableTableInterface(ORMTableBase):
             schema_translate_map tag the staging table lives in. ``None``
             means no schema qualification (backend-default behavior).
         """
-        backend = resolve_backend(session, staging_schema_tag=staging_schema_tag)
+        backend = resolve_backend(session, staging_schema_tag=staging_schema_tag, mapper=cls)
         backend.drop_staging_table(cls, session)
 
     @classmethod

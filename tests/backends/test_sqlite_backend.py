@@ -24,7 +24,7 @@ class _FakeSession:
         self.statements: list[str] = []
         self.scalar_result = scalar_result
 
-    def execute(self, statement):
+    def execute(self, statement, **kwargs):
         self.statements.append(str(statement))
 
         class _Result:
