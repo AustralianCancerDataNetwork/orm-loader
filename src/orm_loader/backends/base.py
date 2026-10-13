@@ -35,6 +35,22 @@ class BackendCapabilities:
     supports_materialized_views: bool = False
 
 
+class DeferredForeignKeyViolationError(RuntimeError):
+    """A foreign key this backend can't enforce at the DB level is violated.
+    """
+
+    def __init__(self, constraint: sa.ForeignKeyConstraint, orphan_keys: list[tuple[Any, ...]]) -> None:
+        self.constraint = constraint
+        self.orphan_keys = orphan_keys
+        local_cols = ", ".join(c.name for c in constraint.columns)
+        referred_table = next(iter(constraint.elements)).column.table.name
+        super().__init__(
+            f"{constraint.table.name}.({local_cols}) references {referred_table!r} via a "
+            f"constraint this backend can't enforce at the DB level; {len(orphan_keys)} "
+            f"row(s) violate it (showing up to 5): {orphan_keys}"
+        )
+
+
 STAGING_SCHEMA: str = "staging"
 
 
@@ -269,6 +285,52 @@ class DatabaseBackend(ABC):
         """
         return [c.name for c in table_cls.__table__.columns if c.computed is None]
 
+    def deferred_fk_constraints(
+        self,
+        table_cls: Type["CSVTableProtocol"],
+    ) -> tuple[sa.ForeignKeyConstraint, ...]:
+        """FK constraints on *table_cls* that this backend never enforces at the DB level.
+
+        Default: none. Only a backend whose dialect can't execute a deferred
+        ``ALTER TABLE ADD CONSTRAINT`` (DuckDB, for a cyclic FK graph) overrides this.
+        """
+        return ()
+
+    def validate_deferred_fks(
+        self,
+        table_cls: Type["CSVTableProtocol"],
+        session: so.Session,
+    ) -> None:
+        """Raise if any row in *table_cls* violates one of its deferred_fk_constraints().
+
+        An anti-join check recovering referential-integrity validation this
+        backend's DB can't give for those constraints. No-op when there are
+        none (every backend but DuckDB, today).
+
+        Raises
+        ------
+        DeferredForeignKeyViolationError
+            If any row's FK column is non-null with no matching row in the
+            referenced table.
+        """
+        for fk in self.deferred_fk_constraints(table_cls):
+            self._validate_one_deferred_fk(fk, session)
+
+    @staticmethod
+    def _validate_one_deferred_fk(fk: sa.ForeignKeyConstraint, session: so.Session) -> None:
+        local_cols = list(fk.columns)
+        remote_cols = [element.column for element in fk.elements]
+        referred_table = remote_cols[0].table
+        matches = sa.and_(*(local_cols[i] == remote_cols[i] for i in range(len(local_cols))))
+        not_null = sa.and_(*(col.isnot(None) for col in local_cols))
+        orphan_exists = sa.exists(sa.select(sa.literal(1)).select_from(referred_table).where(matches))
+
+        orphans = session.execute(
+            sa.select(*local_cols).where(not_null, ~orphan_exists).limit(5)
+        ).all()
+        if orphans:
+            raise DeferredForeignKeyViolationError(fk, [tuple(row) for row in orphans])
+
     @abstractmethod
     def create_staging_table(
         self,
@@ -361,9 +423,15 @@ class DatabaseBackend(ABC):
         table_cls: Type["CSVTableProtocol"],
         session: so.Session,
     ) -> AbstractContextManager[None]:
-        """Disable backend FK checks for a table's merge and restore them afterward."""
+        """Disable backend FK checks for a table's merge and restore them afterward.
+
+        A backend without supports_fk_toggle has no state to disable in the
+        first place, so this skips the attempt entirely rather than raising;
+        such a backend's own merge methods must avoid operations (like
+        deleting a referenced row) that would need the toggle to be safe.
+        """
         return self.bulk_load_context(
-            session, mapper=table_cls, disable_fk=True, no_autoflush=False
+            session, mapper=table_cls, disable_fk=self.capabilities.supports_fk_toggle, no_autoflush=False
         )
 
     @contextmanager

@@ -373,6 +373,7 @@ class CSVLoadableTableInterface(ORMTableBase):
         index_strategy: str = "auto",
         merge_batch_size: int | None = None,
         staging_schema_tag: str | None = None,
+        validate_deferred_fks: bool = False,
     ) -> int:
 
         """
@@ -413,6 +414,11 @@ class CSVLoadableTableInterface(ORMTableBase):
             means no schema qualification (backend-default behavior).
             Threaded through every internal step of the load lifecycle so
             they all resolve the same backend/schema.
+        validate_deferred_fks
+            After merging, run an anti-join check for any FK this backend's
+            DB can't enforce itself (see DatabaseBackend.validate_deferred_fks()).
+            Off by default: a full-table scan per such FK, on top of the load.
+            No-op for a backend with none (every backend but DuckDB, today).
 
         Returns
         -------
@@ -472,6 +478,11 @@ class CSVLoadableTableInterface(ORMTableBase):
                 merge_batch_size=merge_batch_size,
                 staging_schema_tag=staging_schema_tag,
             )
+
+        if validate_deferred_fks:
+            logger.info(f"Table `{cls.__tablename__}`: Validating deferred foreign keys.")
+            backend = resolve_backend(session, staging_schema_tag=staging_schema_tag, mapper=cls)
+            backend.validate_deferred_fks(cls, session)
 
         cls.drop_staging_table(session, staging_schema_tag=staging_schema_tag)
 

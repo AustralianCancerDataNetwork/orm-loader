@@ -27,8 +27,8 @@ class ParquetTable(Base, CSVLoadableTableInterface):
 _ParquetTable = cast(Type[CSVTableProtocol], ParquetTable)
 
 
-def test_parquet_loader(session, engine, tmp_path):
-    Base.metadata.create_all(engine)
+def test_parquet_loader(sqlite_session, sqlite_engine, tmp_path):
+    Base.metadata.create_all(sqlite_engine)
 
     df = pd.DataFrame(
         [
@@ -41,12 +41,12 @@ def test_parquet_loader(session, engine, tmp_path):
     pq.write_table(table, path)
 
     inserted = _ParquetTable.load_csv(
-        session,
+        sqlite_session,
         path,
         loader=ParquetLoader(),
         dedupe=False,
     )
-    session.commit()
+    sqlite_session.commit()
 
     assert inserted == 2
 
@@ -68,26 +68,26 @@ _NullSentinelTable = cast(Type[CSVTableProtocol], NullSentinelTable)
 _SENTINELS = ["NULL", "null", " NULL ", "n/a", "N/A", "NaN", "none", "None", "  ", ""]
 
 
-def test_arrow_path_normalises_text_null_sentinels(session, engine, tmp_path):
+def test_arrow_path_normalises_text_null_sentinels(sqlite_session, sqlite_engine, tmp_path):
     # cast_scalar normalises these before dispatching; without the same
     # treatment here the plain String branch wrote the literal text into
     # staging, so the same file loaded via the two loaders disagreed.
-    Base.metadata.create_all(engine)
+    Base.metadata.create_all(sqlite_engine)
 
     rows = [{"id": i, "name": s, "role": None} for i, s in enumerate(_SENTINELS, start=1)]
     rows.append({"id": 99, "name": " keep me ", "role": None})
     path = tmp_path / "null_sentinel_table.parquet"
     pq.write_table(pa.Table.from_pandas(pd.DataFrame(rows)), path)
 
-    _NullSentinelTable.load_csv(session, path, loader=ParquetLoader(), dedupe=False)
-    session.commit()
+    _NullSentinelTable.load_csv(sqlite_session, path, loader=ParquetLoader(), dedupe=False)
+    sqlite_session.commit()
 
-    stored = dict(session.execute(sa.select(NullSentinelTable.id, NullSentinelTable.name)).all())
+    stored = dict(sqlite_session.execute(sa.select(NullSentinelTable.id, NullSentinelTable.name)).all())
     assert [stored[i] for i in range(1, len(_SENTINELS) + 1)] == [None] * len(_SENTINELS)
     assert stored[99] == "keep me"
 
 
-def test_arrow_and_pandas_paths_agree_on_null_sentinels(session, engine, tmp_path):
+def test_arrow_and_pandas_paths_agree_on_null_sentinels(sqlite_session, sqlite_engine, tmp_path):
     from orm_loader.loaders.data.converters import cast_arrow_column, cast_scalar
 
     col = NullSentinelTable.__table__.c.name
@@ -97,7 +97,7 @@ def test_arrow_and_pandas_paths_agree_on_null_sentinels(session, engine, tmp_pat
         assert arrow == scalar, f"{raw!r}: arrow={arrow!r} scalar={scalar!r}"
 
 
-def test_arrow_column_rule_does_not_count_nulls_as_cast_failures(session, engine, tmp_path):
+def test_arrow_column_rule_does_not_count_nulls_as_cast_failures(sqlite_session, sqlite_engine, tmp_path):
     # The override branch resolved these to None either way, but recorded each
     # one as a failure -- warning about rows that are simply null.
     from enum import Enum
@@ -128,7 +128,7 @@ def test_arrow_column_rule_does_not_count_nulls_as_cast_failures(session, engine
         _COLUMN_CAST_RULES.clear()
 
 
-def test_arrow_path_nulls_float_nan(session, engine, tmp_path):
+def test_arrow_path_nulls_float_nan(sqlite_session, sqlite_engine, tmp_path):
     from orm_loader.loaders.data.converters import cast_arrow_column
 
     class FloatTable(Base, CSVLoadableTableInterface):

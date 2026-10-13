@@ -62,9 +62,9 @@ def test_sqlite_backend_identity_and_capabilities():
 @pytest.mark.parametrize("merge_strategy", ["replace", "upsert", "insert"])
 def test_sqlite_backend_rejects_non_positive_merge_batch_size(merge_batch_size, merge_strategy):
     backend = SQLiteBackend()
-    session = _sess(_FakeSession())
+    sqlite_session = _sess(_FakeSession())
     merge = getattr(backend, f"merge_{merge_strategy}")
-    args = [_ComputedTableCls, session]
+    args = [_ComputedTableCls, sqlite_session]
     if merge_strategy in {"replace", "upsert"}:
         args.append(["id"])
 
@@ -72,11 +72,11 @@ def test_sqlite_backend_rejects_non_positive_merge_batch_size(merge_batch_size, 
         merge(*args, merge_batch_size=merge_batch_size)
 
 
-def test_sqlite_backend_create_staging_table(session, engine):
+def test_sqlite_backend_create_staging_table(sqlite_session, sqlite_engine):
     backend = SQLiteBackend()
 
-    backend.create_staging_table(_ComputedTableCls, session)
-    inspector = sa.inspect(engine)
+    backend.create_staging_table(_ComputedTableCls, sqlite_session)
+    inspector = sa.inspect(sqlite_engine)
     assert inspector.has_table(_STAGING_TABLE) is True
     cols = inspector.get_columns(_STAGING_TABLE)
     assert [c["name"] for c in cols] == ["id", "name", "slug"]
@@ -85,22 +85,22 @@ def test_sqlite_backend_create_staging_table(session, engine):
 
 def test_sqlite_backend_drop_staging_table():
     backend = SQLiteBackend()
-    session = _FakeSession()
+    sqlite_session = _FakeSession()
 
-    backend.drop_staging_table(_ComputedTableCls, _sess(session))
+    backend.drop_staging_table(_ComputedTableCls, _sess(sqlite_session))
 
-    assert session.statements == [f'DROP TABLE IF EXISTS "{_STAGING_TABLE}"']
+    assert sqlite_session.statements == [f'DROP TABLE IF EXISTS "{_STAGING_TABLE}"']
 
 
 
 def test_sqlite_backend_disable_fk_reads_then_sets():
     backend = SQLiteBackend()
-    session = _FakeSession(scalar_result=1)
+    sqlite_session = _FakeSession(scalar_result=1)
 
-    previous = backend.disable_fk_check(_sess(session))
+    previous = backend.disable_fk_check(_sess(sqlite_session))
 
     assert previous == 1
-    assert session.statements == [
+    assert sqlite_session.statements == [
         "PRAGMA foreign_keys",       # read current state
         "PRAGMA foreign_keys = OFF", # set to OFF
     ]
@@ -108,12 +108,12 @@ def test_sqlite_backend_disable_fk_reads_then_sets():
 
 def test_sqlite_backend_enable_fk_reads_then_sets():
     backend = SQLiteBackend()
-    session = _FakeSession(scalar_result=0)
+    sqlite_session = _FakeSession(scalar_result=0)
 
-    previous = backend.enable_fk_check(_sess(session))
+    previous = backend.enable_fk_check(_sess(sqlite_session))
 
     assert previous == 0
-    assert session.statements == [
+    assert sqlite_session.statements == [
         "PRAGMA foreign_keys",      # read current state
         "PRAGMA foreign_keys = ON", # set to ON
     ]
@@ -121,12 +121,12 @@ def test_sqlite_backend_enable_fk_reads_then_sets():
 
 def test_sqlite_backend_restore_fk_normalises_int_and_emits():
     backend = SQLiteBackend()
-    session = _FakeSession()
+    sqlite_session = _FakeSession()
 
-    backend.restore_fk_check(_sess(session), 1)
-    backend.restore_fk_check(_sess(session), 0)
+    backend.restore_fk_check(_sess(sqlite_session), 1)
+    backend.restore_fk_check(_sess(sqlite_session), 0)
 
-    assert session.statements == [
+    assert sqlite_session.statements == [
         "PRAGMA foreign_keys = ON",
         "PRAGMA foreign_keys = OFF",
     ]
@@ -159,49 +159,49 @@ def test_sqlite_backend_normalize_fk_check_state():
         raise AssertionError("Expected ValueError for unrecognised string")
 
 
-def test_sqlite_backend_materialized_view_methods_raise(engine):
+def test_sqlite_backend_materialized_view_methods_raise(sqlite_engine):
     backend = SQLiteBackend()
     selectable = sa.select(sa.literal(1).label("n"))
 
     try:
-        backend.create_materialized_view(engine, "mv_test", selectable)
+        backend.create_materialized_view(sqlite_engine, "mv_test", selectable)
     except NotImplementedError as exc:
         assert "does not support materialized views" in str(exc)
     else:
         raise AssertionError("Expected create_materialized_view() to raise NotImplementedError")
 
     try:
-        backend.refresh_materialized_view(engine, "mv_test")
+        backend.refresh_materialized_view(sqlite_engine, "mv_test")
     except NotImplementedError as exc:
         assert "does not support materialized views" in str(exc)
     else:
         raise AssertionError("Expected refresh_materialized_view() to raise NotImplementedError")
 
 
-def test_sqlite_backend_drop_materialized_view_raises(engine):
+def test_sqlite_backend_drop_materialized_view_raises(sqlite_engine):
     backend = SQLiteBackend()
 
     with pytest.raises(NotImplementedError, match="does not support materialized views"):
-        backend.drop_materialized_view(engine, "mv_test")
+        backend.drop_materialized_view(sqlite_engine, "mv_test")
 
 
-def test_sqlite_backend_create_materialized_view_index_raises(engine):
+def test_sqlite_backend_create_materialized_view_index_raises(sqlite_engine):
     from orm_loader.mappers.materialised_view_contracts import MaterializedViewIndex
 
     backend = SQLiteBackend()
     index = MaterializedViewIndex(name="mv_test_uq", columns=("id",), unique=True)
 
     with pytest.raises(NotImplementedError, match="does not support materialized views"):
-        backend.create_materialized_view_index(engine, "mv_test", index)
+        backend.create_materialized_view_index(sqlite_engine, "mv_test", index)
 
 
 def test_sqlite_backend_configures_bulk_load_pragmas(tmp_path: Path):
     backend = SQLiteBackend()
     db_path = tmp_path / "test.db"
-    engine = sa.create_engine(f"sqlite:///{db_path}", future=True)
-    backend.install_engine_hooks(engine)
+    sqlite_engine = sa.create_engine(f"sqlite:///{db_path}", future=True)
+    backend.install_engine_hooks(sqlite_engine)
 
-    with engine.connect() as conn:
+    with sqlite_engine.connect() as conn:
         busy_timeout = conn.execute(sa.text("PRAGMA busy_timeout")).scalar_one()
         journal_mode = conn.execute(sa.text("PRAGMA journal_mode")).scalar_one()
         foreign_keys = conn.execute(sa.text("PRAGMA foreign_keys")).scalar_one()
@@ -214,14 +214,14 @@ def test_sqlite_backend_configures_bulk_load_pragmas(tmp_path: Path):
 def test_sqlite_backend_restore_journal_mode(tmp_path: Path):
     backend = SQLiteBackend()
     db_path = tmp_path / "journal.db"
-    engine = sa.create_engine(f"sqlite:///{db_path}", future=True)
-    backend.install_engine_hooks(engine)
+    sqlite_engine = sa.create_engine(f"sqlite:///{db_path}", future=True)
+    backend.install_engine_hooks(sqlite_engine)
 
-    with engine.begin() as conn:
+    with sqlite_engine.begin() as conn:
         conn.execute(sa.text("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)"))
         conn.execute(sa.text("INSERT INTO t (name) VALUES ('x')"))
 
-    engine.dispose()
+    sqlite_engine.dispose()
     backend.restore_journal_mode(db_path)
 
     with sqlite3.connect(db_path.resolve()) as conn:
@@ -232,11 +232,11 @@ def test_sqlite_backend_restore_journal_mode(tmp_path: Path):
 
 def test_attach_sqlite_bulk_load_pragmas_installs_backend_hook(tmp_path: Path):
     db_path = tmp_path / "attached.db"
-    engine = sa.create_engine(f"sqlite:///{db_path}", future=True)
+    sqlite_engine = sa.create_engine(f"sqlite:///{db_path}", future=True)
 
-    attach_sqlite_bulk_load_pragmas(engine, busy_timeout_ms=45000)
+    attach_sqlite_bulk_load_pragmas(sqlite_engine, busy_timeout_ms=45000)
 
-    with engine.connect() as conn:
+    with sqlite_engine.connect() as conn:
         busy_timeout = conn.execute(sa.text("PRAGMA busy_timeout")).scalar_one()
         journal_mode = conn.execute(sa.text("PRAGMA journal_mode")).scalar_one()
         foreign_keys = conn.execute(sa.text("PRAGMA foreign_keys")).scalar_one()
@@ -257,10 +257,10 @@ def test_sqlite_backend_rejects_invalid_journal_mode():
 
 def test_sqlite_backend_disable_fk_raises_when_pragma_returns_non_int():
     backend = SQLiteBackend()
-    session = _FakeSession(scalar_result="not_an_int")
+    sqlite_session = _FakeSession(scalar_result="not_an_int")
 
     try:
-        backend.disable_fk_check(_sess(session))
+        backend.disable_fk_check(_sess(sqlite_session))
     except RuntimeError as exc:
         assert "Expected SQLite FK state to be an int" in str(exc)
     else:
@@ -269,10 +269,10 @@ def test_sqlite_backend_disable_fk_raises_when_pragma_returns_non_int():
 
 def test_sqlite_backend_enable_fk_raises_when_pragma_returns_non_int():
     backend = SQLiteBackend()
-    session = _FakeSession(scalar_result="not_an_int")
+    sqlite_session = _FakeSession(scalar_result="not_an_int")
 
     try:
-        backend.enable_fk_check(_sess(session))
+        backend.enable_fk_check(_sess(sqlite_session))
     except RuntimeError as exc:
         assert "Expected SQLite FK state to be an int" in str(exc)
     else:
@@ -281,25 +281,25 @@ def test_sqlite_backend_enable_fk_raises_when_pragma_returns_non_int():
 
 def test_sqlite_backend_restore_fk_accepts_string_values():
     backend = SQLiteBackend()
-    session = _FakeSession()
+    sqlite_session = _FakeSession()
 
-    backend.restore_fk_check(_sess(session), "ON")
-    backend.restore_fk_check(_sess(session), "OFF")
+    backend.restore_fk_check(_sess(sqlite_session), "ON")
+    backend.restore_fk_check(_sess(sqlite_session), "OFF")
 
-    assert session.statements == [
+    assert sqlite_session.statements == [
         "PRAGMA foreign_keys = ON",
         "PRAGMA foreign_keys = OFF",
     ]
 
 
-def test_sqlite_backend_fk_toggle_round_trip(session):
+def test_sqlite_backend_fk_toggle_round_trip(sqlite_session):
     backend = SQLiteBackend()
 
-    session.execute(sa.text("PRAGMA foreign_keys = ON"))
-    assert session.execute(sa.text("PRAGMA foreign_keys")).scalar() == 1
+    sqlite_session.execute(sa.text("PRAGMA foreign_keys = ON"))
+    assert sqlite_session.execute(sa.text("PRAGMA foreign_keys")).scalar() == 1
 
-    previous = backend.disable_fk_check(session)
-    assert session.execute(sa.text("PRAGMA foreign_keys")).scalar() == 0
+    previous = backend.disable_fk_check(sqlite_session)
+    assert sqlite_session.execute(sa.text("PRAGMA foreign_keys")).scalar() == 0
 
-    backend.restore_fk_check(session, previous)
-    assert session.execute(sa.text("PRAGMA foreign_keys")).scalar() == 1
+    backend.restore_fk_check(sqlite_session, previous)
+    assert sqlite_session.execute(sa.text("PRAGMA foreign_keys")).scalar() == 1

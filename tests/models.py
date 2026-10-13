@@ -54,6 +54,29 @@ class CompositeTable(Base, CSVLoadableTableInterface):
     value: so.Mapped[str] = so.mapped_column(sa.String)
 
 
+class CycleATable(Base, CSVLoadableTableInterface):
+    """Mutually-referencing pair with CycleBTable, for deferred-FK tests:
+    DuckDB can't execute the ALTER TABLE ADD CONSTRAINT this cycle forces."""
+
+    __tablename__ = "cycle_a_table"
+    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+
+    id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
+    b_id: so.Mapped[int | None] = so.mapped_column(
+        sa.Integer, sa.ForeignKey(f"{SchemaRole.PRIMARY.value}.cycle_b_table.id")
+    )
+
+
+class CycleBTable(Base, CSVLoadableTableInterface):
+    __tablename__ = "cycle_b_table"
+    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+
+    id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
+    a_id: so.Mapped[int | None] = so.mapped_column(
+        sa.Integer, sa.ForeignKey(f"{SchemaRole.PRIMARY.value}.cycle_a_table.id")
+    )
+
+
 class EnumTable(Base, CSVLoadableTableInterface):
     """A genuine sa.Enum column, unmodified -- register_column_cast_rule's
     enum_type matches a raw value (e.g. "first author") by .value but stores
@@ -80,7 +103,8 @@ class ComputedColumnTable(Base, CSVLoadableTableInterface):
 
     id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     name: so.Mapped[str] = so.mapped_column(sa.String)
-    slug: so.Mapped[str] = so.mapped_column(sa.String, sa.Computed("lower(name)"))
+    # nullable: DuckDB doesn't support any constraint (including NOT NULL) on a generated column.
+    slug: so.Mapped[str | None] = so.mapped_column(sa.String, sa.Computed("lower(name)"))
 
 
 class ImpliedEnumTable(Base, CSVLoadableTableInterface):

@@ -49,8 +49,11 @@ packages = ["src/orm_loader"]
 postgres = [
   "psycopg[binary]>=3.2",
 ]
+duckdb = [
+  "duckdb-sqlalchemy>=1.5",
+]
 dev = [
-    "oa-configurator[postgres]>=2.0.0,<3",
+    "oa-configurator[postgres,duckdb]>=2.0.0,<3",
     "pytest>=9.0.3",
     "ty>=0.0.59",
     "ruff>=0.14.11",
