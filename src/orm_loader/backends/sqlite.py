@@ -97,6 +97,7 @@ class SQLiteBackend(DatabaseBackend):
             supports_unlogged_staging=False,
             supports_fk_toggle=True,
             supports_materialized_views=False,
+            supports_replace_with_kept_indexes=True,
         )
 
     @property

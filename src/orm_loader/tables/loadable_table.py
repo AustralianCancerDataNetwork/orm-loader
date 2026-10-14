@@ -450,6 +450,14 @@ class CSVLoadableTableInterface(ORMTableBase):
                     f"'insert_if_empty'"
                 )
 
+        if merge_strategy == "replace":
+            backend = resolve_backend(session, staging_schema_tag=staging_schema_tag, mapper=cls)
+            if backend.resolve_index_strategy(index_strategy) == "keep":
+                backend._require_capability(
+                    "supports_replace_with_kept_indexes",
+                    "merge_strategy='replace' with index_strategy='keep'",
+                )
+
         loader_context = LoaderContext(
             tableclass=cls,
             session=session,
@@ -479,12 +487,13 @@ class CSVLoadableTableInterface(ORMTableBase):
                 staging_schema_tag=staging_schema_tag,
             )
 
-        if validate_deferred_fks:
-            logger.info(f"Table `{cls.__tablename__}`: Validating deferred foreign keys.")
-            backend = resolve_backend(session, staging_schema_tag=staging_schema_tag, mapper=cls)
-            backend.validate_deferred_fks(cls, session)
-
-        cls.drop_staging_table(session, staging_schema_tag=staging_schema_tag)
+        try:
+            if validate_deferred_fks:
+                logger.info(f"Table `{cls.__tablename__}`: Validating deferred foreign keys.")
+                backend = resolve_backend(session, staging_schema_tag=staging_schema_tag, mapper=cls)
+                backend.validate_deferred_fks(cls, session)
+        finally:
+            cls.drop_staging_table(session, staging_schema_tag=staging_schema_tag)
 
         logger.info(f"Table `{cls.__tablename__}`: Successfully finished ingestion. Total rows: {total}")
         return total

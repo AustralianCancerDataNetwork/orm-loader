@@ -30,6 +30,7 @@ def test_duckdb_backend_identity_and_capabilities():
     assert backend.capabilities.supports_unlogged_staging is False
     assert backend.capabilities.supports_fk_toggle is False
     assert backend.capabilities.supports_materialized_views is False
+    assert backend.capabilities.supports_replace_with_kept_indexes is False
     assert backend.resolve_index_strategy("auto") == "drop_rebuild"
 
 
@@ -57,8 +58,8 @@ def test_duckdb_backend_create_staging_table(duckdb_session):
     inspector = sa.inspect(duckdb_session.get_bind())
     assert inspector.has_table(_STAGING_TABLE) is True
     cols = inspector.get_columns(_STAGING_TABLE)
-    assert [c["name"] for c in cols] == ["id", "name", "slug"]
-    assert all(c["nullable"] is True for c in cols)
+    assert [c["name"] for c in cols] == ["id", "name", "slug", "_rownum"]
+    assert all(c["nullable"] is True for c in cols if c["name"] != "_rownum")
 
 
 @pytest.mark.duckdb
@@ -71,6 +72,45 @@ def test_duckdb_backend_drop_staging_table(duckdb_session):
 
     inspector = sa.inspect(duckdb_session.get_bind())
     assert inspector.has_table(_STAGING_TABLE) is False
+
+
+@pytest.mark.duckdb
+@pytest.mark.db_dialect
+def test_duckdb_backend_drop_staging_table_also_drops_rownum_sequence(duckdb_session):
+    """The staging table's _rownum column is backed by a real sequence, so dropping 
+    the staging table must drop that sequence too.
+    
+    Notes
+    -----
+    DuckDB can't ALTER TABLE ADD a GENERATED ALWAYS AS IDENTITY column after creation
+    """
+    backend = DuckDBBackend()
+    backend.create_staging_table(_ComputedTableCls, duckdb_session)
+
+    sequences_while_present = duckdb_session.execute(
+        sa.text("SELECT sequence_name FROM duckdb_sequences()")
+    ).scalars().all()
+    assert any(f"{_STAGING_TABLE}_rownum_seq" in name for name in sequences_while_present)
+
+    backend.drop_staging_table(_ComputedTableCls, duckdb_session)
+
+    sequences_after_drop = duckdb_session.execute(
+        sa.text("SELECT sequence_name FROM duckdb_sequences()")
+    ).scalars().all()
+    assert not any(f"{_STAGING_TABLE}_rownum_seq" in name for name in sequences_after_drop)
+
+
+@pytest.mark.duckdb
+@pytest.mark.db_dialect
+def test_duckdb_backend_rownum_populates_monotonically_on_insert(duckdb_session):
+    backend = DuckDBBackend()
+    backend.create_staging_table(_ComputedTableCls, duckdb_session)
+    staging = _ComputedTableCls.get_staging_table(duckdb_session, staging_schema_tag=backend.staging_schema_tag)
+
+    duckdb_session.execute(sa.insert(staging), [{"id": 1, "name": "a"}, {"id": 2, "name": "b"}])
+
+    rownums = duckdb_session.execute(sa.select(staging.c._rownum).order_by(staging.c.id)).scalars().all()
+    assert rownums == [1, 2]
 
 
 def test_duckdb_backend_fk_toggle_methods_raise():

@@ -859,3 +859,29 @@ def test_validate_deferred_fks_catches_an_orphan_introduced_by_load_csv(duckdb_s
         _CycleATable.load_csv(
             duckdb_session, csv_path, dedupe=False, loader=PandasLoader(), validate_deferred_fks=True
         )
+
+    staging_name = resolve_backend(duckdb_session, mapper=_CycleATable).staging_name_for_table(
+        _CycleATable.__tablename__
+    )
+    assert sa.inspect(duckdb_session.get_bind()).has_table(staging_name) is False
+
+
+@pytest.mark.duckdb
+@pytest.mark.db_dialect
+def test_load_csv_rejects_replace_with_keep_index_strategy_on_duckdb_upfront(duckdb_session, tmp_path):
+    """merge_strategy='replace' does an UPDATE in place on DuckDB, which
+    breaks with a live index on an updated column. This combination must be
+    rejected before the staging load even starts, not surface as DuckDB's
+    own opaque constraint error partway through the merge."""
+    csv_path = tmp_path / f"{SimpleTable.__tablename__}.csv"
+    pd.DataFrame([{"id": 1, "name": "a"}]).to_csv(csv_path, index=False, sep="\t")
+
+    with pytest.raises(NotImplementedError, match="merge_strategy='replace' with index_strategy='keep'"):
+        SimpleTable.load_csv(
+            duckdb_session,
+            csv_path,
+            dedupe=False,
+            loader=PandasLoader(),
+            merge_strategy="replace",
+            index_strategy="keep",
+        )

@@ -33,6 +33,7 @@ class BackendCapabilities:
     supports_unlogged_staging: bool = False
     supports_fk_toggle: bool = False
     supports_materialized_views: bool = False
+    supports_replace_with_kept_indexes: bool = False
 
 
 class DeferredForeignKeyViolationError(RuntimeError):

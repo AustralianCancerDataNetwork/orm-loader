@@ -61,6 +61,7 @@ class PostgresBackend(DatabaseBackend):
             supports_unlogged_staging=True,
             supports_fk_toggle=True,
             supports_materialized_views=True,
+            supports_replace_with_kept_indexes=True,
         )
 
     def create_staging_table(
