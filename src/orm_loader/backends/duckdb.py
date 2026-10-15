@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, Type
 
 import duckdb_sqlalchemy
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 from oa_configurator import qualified
+from sqlalchemy.schema import CreateSequence, DropSequence, DropTable
 from sqlalchemy.sql.compiler import IdentifierPreparer
 
 from .base import BackendCapabilities, DatabaseBackend, Dialect
@@ -87,12 +87,17 @@ class DuckDBBackend(DatabaseBackend):
         session: so.Session,
     ) -> None:
         bind_arguments = {"mapper": table_cls}
+        staging_name = self.staging_name_for_table(table_cls.__tablename__)
         staging_ref = self.qualified_staging_name(table_cls.__tablename__)
         seq_ref = self._staging_rownum_sequence_ref(table_cls.__tablename__)
-        session.execute(sa.text(f'DROP TABLE IF EXISTS {staging_ref};'), bind_arguments=bind_arguments)
-        session.execute(sa.text(f'DROP SEQUENCE IF EXISTS {seq_ref};'), bind_arguments=bind_arguments)
+        sequence = sa.Sequence(f"{staging_name}_rownum_seq", schema=self.staging_schema)
 
-        staging_name = self.staging_name_for_table(table_cls.__tablename__)
+        session.execute(
+            DropTable(sa.Table(staging_name, sa.MetaData(), schema=self.staging_schema), if_exists=True),
+            bind_arguments=bind_arguments,
+        )
+        session.execute(DropSequence(sequence, if_exists=True), bind_arguments=bind_arguments)
+
         metadata = sa.MetaData()
         staging_columns = [
             sa.Column(col.name, col.type, nullable=True)
@@ -103,7 +108,8 @@ class DuckDBBackend(DatabaseBackend):
             bind=session.connection(bind_arguments=bind_arguments), tables=[staging_table]
         )
 
-        session.execute(sa.text(f'CREATE SEQUENCE {seq_ref};'), bind_arguments=bind_arguments)
+        session.execute(CreateSequence(sequence), bind_arguments=bind_arguments)
+        # ALTER TABLE ADD COLUMN has no Core DDL construct, so this stays raw.
         session.execute(
             sa.text(f"ALTER TABLE {staging_ref} ADD COLUMN _rownum BIGINT DEFAULT nextval('{seq_ref}');"),
             bind_arguments=bind_arguments,
@@ -116,12 +122,15 @@ class DuckDBBackend(DatabaseBackend):
         session: so.Session,
     ) -> None:
         bind_arguments = {"mapper": table_cls}
+        staging_name = self.staging_name_for_table(table_cls.__tablename__)
         session.execute(
-            sa.text(f'DROP TABLE IF EXISTS {self.qualified_staging_name(table_cls.__tablename__)}'),
+            DropTable(sa.Table(staging_name, sa.MetaData(), schema=self.staging_schema), if_exists=True),
             bind_arguments=bind_arguments,
         )
         session.execute(
-            sa.text(f'DROP SEQUENCE IF EXISTS {self._staging_rownum_sequence_ref(table_cls.__tablename__)};'),
+            DropSequence(
+                sa.Sequence(f"{staging_name}_rownum_seq", schema=self.staging_schema), if_exists=True
+            ),
             bind_arguments=bind_arguments,
         )
 
@@ -152,39 +161,18 @@ class DuckDBBackend(DatabaseBackend):
             "DuckDB has no foreign-key-toggle mechanism (no PRAGMA/SET equivalent exists)."
         )
 
-    def _staging_rownum_index(
+    def _pagination_column(
+        self, table_cls: type["CSVTableProtocol"], staging: sa.Table
+    ) -> sa.ColumnElement[int]:
+        return staging.c._rownum
+
+    def _ensure_pagination_index(
         self, table_cls: type["CSVTableProtocol"], staging: sa.Table, session: so.Session
     ) -> None:
-        """Index staging's _rownum column for O(N log N) windowed range scans."""
         staging_name = self.staging_name_for_table(table_cls.__tablename__)
         idx = sa.Index(f"{staging_name}_rownum_idx", staging.c._rownum)
         idx.create(bind=session.connection(bind_arguments={"mapper": table_cls}), checkfirst=True)
         session.commit()
-
-    @staticmethod
-    def _staging_rownum_bound(staging: sa.Table, session: so.Session) -> int:
-        """Highest _rownum in staging, as the pagination upper bound (0 when empty)."""
-        return session.execute(
-            sa.select(sa.func.coalesce(sa.func.max(staging.c._rownum), 0)).select_from(staging)
-        ).scalar_one()
-
-    def _staging_rownum_batches(
-        self,
-        table_cls: type["CSVTableProtocol"],
-        staging: sa.Table,
-        session: so.Session,
-        merge_batch_size: int,
-    ) -> Iterator[sa.ColumnElement[bool]]:
-        """Yield successive _rownum window predicates covering every row in
-        staging, each at most merge_batch_size wide.
-        """
-        self._staging_rownum_index(table_cls, staging, session)
-        bound = self._staging_rownum_bound(staging, session)
-        start = 0
-        while start < bound:
-            end = start + merge_batch_size
-            yield sa.and_(staging.c._rownum > start, staging.c._rownum <= end)
-            start = end
 
     def merge_replace(
         self,
@@ -248,15 +236,11 @@ class DuckDBBackend(DatabaseBackend):
             _drop_matched_from_staging()
             return
 
-        if merge_batch_size is None:
-            _update()
-            _drop_matched_from_staging()
-            return
-
-        for batch_range in self._staging_rownum_batches(table_cls, staging, session, merge_batch_size):
+        for batch_range in self._paginate_batches(table_cls, staging, session, merge_batch_size):
             _update(batch_range)
             _drop_matched_from_staging(batch_range)
-            session.commit()
+            if batch_range is not None and self._commits_between_pagination_batches:
+                session.commit()
 
     def merge_upsert(
         self,
@@ -280,12 +264,11 @@ class DuckDBBackend(DatabaseBackend):
 
         non_paginated_select = sa.select(*(staging.c[c] for c in insertable_cols))
 
-        if merge_batch_size is None:
-            session.execute(_upsert(non_paginated_select))
-            return
-
-        for batch_range in self._staging_rownum_batches(table_cls, staging, session, merge_batch_size):
-            session.execute(_upsert(non_paginated_select.where(batch_range)))
+        for batch_range in self._paginate_batches(table_cls, staging, session, merge_batch_size):
+            select_ = non_paginated_select if batch_range is None else non_paginated_select.where(batch_range)
+            session.execute(_upsert(select_))
+            if batch_range is not None and self._commits_between_pagination_batches:
+                session.commit()
 
     def merge_insert(
         self,
@@ -303,9 +286,8 @@ class DuckDBBackend(DatabaseBackend):
         def _insert(select_: Any) -> sa.Insert:
             return sa.insert(target).from_select(insertable_cols, select_)
 
-        if merge_batch_size is None:
-            session.execute(_insert(non_paginated_select))
-            return
-
-        for batch_range in self._staging_rownum_batches(table_cls, staging, session, merge_batch_size):
-            session.execute(_insert(non_paginated_select.where(batch_range)))
+        for batch_range in self._paginate_batches(table_cls, staging, session, merge_batch_size):
+            select_ = non_paginated_select if batch_range is None else non_paginated_select.where(batch_range)
+            session.execute(_insert(select_))
+            if batch_range is not None and self._commits_between_pagination_batches:
+                session.commit()

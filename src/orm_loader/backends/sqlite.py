@@ -10,6 +10,7 @@ import sqlalchemy.orm as so
 from sqlalchemy import event, text
 from sqlalchemy.dialects import sqlite as sqlite_dialect
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.schema import DropTable
 from sqlalchemy.sql.compiler import IdentifierPreparer
 
 from .base import BackendCapabilities, DatabaseBackend, Dialect
@@ -111,7 +112,7 @@ class SQLiteBackend(DatabaseBackend):
     ) -> None:
         staging_name = self.staging_name_for_table(table_cls.__tablename__)
         session.execute(
-            sa.text(f'DROP TABLE IF EXISTS {self.identifier_preparer.quote_identifier(staging_name)};'),
+            DropTable(sa.Table(staging_name, sa.MetaData()), if_exists=True),
             bind_arguments={"mapper": table_cls},
         )
 
@@ -133,9 +134,9 @@ class SQLiteBackend(DatabaseBackend):
         table_cls: type["CSVTableProtocol"],
         session: so.Session,
     ) -> None:
-        staging_ref = self.identifier_preparer.quote_identifier(self.staging_name_for_table(table_cls.__tablename__))
+        staging_name = self.staging_name_for_table(table_cls.__tablename__)
         session.execute(
-            sa.text(f'DROP TABLE IF EXISTS {staging_ref}'),
+            DropTable(sa.Table(staging_name, sa.MetaData()), if_exists=True),
             bind_arguments={"mapper": table_cls},
         )
 
@@ -166,11 +167,19 @@ class SQLiteBackend(DatabaseBackend):
         execute_options = {"bind_arguments": {"mapper": mapper}} if mapper is not None else {}
         session.execute(text(f"PRAGMA foreign_keys = {safe_state}"), **execute_options)
 
-    @staticmethod
-    def _staging_rowid() -> sa.ColumnElement[int]:
-        """SQLite's implicit rowid: already gapless and indexed, so it needs
-        no added column or index the way Postgres's _rownum does."""
+    def _pagination_column(
+        self, table_cls: type["CSVTableProtocol"], staging: sa.Table
+    ) -> sa.ColumnElement[int]:
+        """SQLite's implicit rowid is already gapless and indexed."""
         return sa.literal_column("rowid")
+
+    @property
+    def _commits_between_pagination_batches(self) -> bool:
+        """False: keeps the whole merge in the caller's transaction, so a
+        later insert-phase failure can't leave a delete-then-reinsert merge
+        with the target emptied and nothing to replace it.
+        """
+        return False
 
     def merge_replace(
         self,
@@ -180,16 +189,7 @@ class SQLiteBackend(DatabaseBackend):
         *,
         merge_batch_size: int | None = None,
     ) -> None:
-        """Delete every target row whose primary key appears in staging.
-
-        Parameters
-        ----------
-        merge_batch_size : int or None, optional
-            Rows per statement. Bounds statement size only; the batches are
-            not committed individually, so the whole merge stays in the
-            caller's transaction and a later failure in the insert phase
-            cannot leave the target emptied.
-        """
+        """Delete every target row whose primary key appears in staging."""
         self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
         staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
@@ -207,21 +207,8 @@ class SQLiteBackend(DatabaseBackend):
                 sa.tuple_(*(target.c[c] for c in pk_cols)).in_(keys)
             )
 
-        if merge_batch_size is None:
-            session.execute(_delete())
-            return
-
-        total = session.execute(sa.select(sa.func.count()).select_from(staging)).scalar_one()
-        if total <= merge_batch_size:
-            session.execute(_delete())
-            return
-
-        rowid = self._staging_rowid()
-        start = 0
-        while start < total:
-            end = start + merge_batch_size
-            session.execute(_delete(sa.and_(rowid > start, rowid <= end)))
-            start = end
+        for batch_range in self._paginate_batches(table_cls, staging, session, merge_batch_size):
+            session.execute(_delete(batch_range))
 
     def merge_upsert(
         self,
@@ -245,24 +232,10 @@ class SQLiteBackend(DatabaseBackend):
 
         non_paginated_select = sa.select(*(staging.c[c] for c in insertable_cols))
 
-        if merge_batch_size is None:
-            # SQLite's grammar rejects INSERT...SELECT...ON CONFLICT with no
-            # WHERE on the SELECT (confirmed empirically); sa.true() supplies one.
-            session.execute(_upsert(non_paginated_select.where(sa.true())))
-            return
+        for batch_range in self._paginate_batches(table_cls, staging, session, merge_batch_size):
 
-        total = session.execute(sa.select(sa.func.count()).select_from(staging)).scalar_one()
-        if total <= merge_batch_size:
-            session.execute(_upsert(non_paginated_select.where(sa.true())))
-            return
-
-        rowid = self._staging_rowid()
-        start = 0
-        while start < total:
-            end = start + merge_batch_size
-            batch_select = non_paginated_select.where(rowid > start, rowid <= end)
-            session.execute(_upsert(batch_select))
-            start = end
+            select_ = non_paginated_select.where(batch_range if batch_range is not None else sa.true())
+            session.execute(_upsert(select_))
 
     def merge_insert(
         self,
@@ -280,22 +253,9 @@ class SQLiteBackend(DatabaseBackend):
         def _insert(select_: Any) -> sa.Insert:
             return sa.insert(target).from_select(insertable_cols, select_)
 
-        if merge_batch_size is None:
-            session.execute(_insert(non_paginated_select))
-            return
-
-        total = session.execute(sa.select(sa.func.count()).select_from(staging)).scalar_one()
-        if total <= merge_batch_size:
-            session.execute(_insert(non_paginated_select))
-            return
-
-        rowid = self._staging_rowid()
-        start = 0
-        while start < total:
-            end = start + merge_batch_size
-            batch_select = non_paginated_select.where(rowid > start, rowid <= end)
-            session.execute(_insert(batch_select))
-            start = end
+        for batch_range in self._paginate_batches(table_cls, staging, session, merge_batch_size):
+            select_ = non_paginated_select if batch_range is None else non_paginated_select.where(batch_range)
+            session.execute(_insert(select_))
 
     def configure_dbapi_connection(self, dbapi_connection:  sa.engine.interfaces.DBAPIConnection) -> None:
         if dbapi_connection.__class__.__module__.startswith("sqlite3"):

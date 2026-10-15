@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
-from collections.abc import Generator
+from collections.abc import Generator, Iterator
 from functools import wraps
 from typing import TYPE_CHECKING, Any, Callable, ParamSpec, Type, TypeVar, cast
 
@@ -418,6 +418,66 @@ class DatabaseBackend(ABC):
         merge_batch_size: int | None = None,
     ) -> None:
         """Insert all staging rows into the target table."""
+
+    @abstractmethod
+    def _pagination_column(
+        self,
+        table_cls: Type["CSVTableProtocol"],
+        staging: sa.Table,
+    ) -> sa.ColumnElement[int]:
+        """Column this backend orders a staging-table scan by, for pagination."""
+
+    def _ensure_pagination_index(
+        self,
+        table_cls: Type["CSVTableProtocol"],
+        staging: sa.Table,
+        session: so.Session,
+    ) -> None:
+        """Make sure _pagination_column() is indexed, if it needs to be.
+        No-op by default. Overwrite in a backend that needs an index to paginate efficiently (e.g. DuckDB).
+        """
+        return
+
+    @property
+    def _commits_between_pagination_batches(self) -> bool:
+        """Whether _paginate_batches()'s caller should commit after each batch.
+        True by default, to bound how much uncommitted work a large load
+        accumulates.
+        """
+        return True
+
+    def _paginate_batches(
+        self,
+        table_cls: Type["CSVTableProtocol"],
+        staging: sa.Table,
+        session: so.Session,
+        merge_batch_size: int | None,
+    ) -> Iterator[sa.ColumnElement[bool] | None]:
+        """Yield one window predicate per batch for a full scan of staging.
+
+        Yields
+        ------
+        sa.ColumnElement[bool] or None
+            A predicate to filter the staging table to a single batch of rows.
+            None if merge_batch_size is None or the staging table is smaller than 
+            merge_batch_size.
+        """
+        if merge_batch_size is not None:
+            total = session.execute(sa.select(sa.func.count()).select_from(staging)).scalar_one()
+        if merge_batch_size is None or total <= merge_batch_size:
+            yield None
+            return
+
+        column = self._pagination_column(table_cls, staging)
+        self._ensure_pagination_index(table_cls, staging, session)
+        bound = session.execute(
+            sa.select(sa.func.coalesce(sa.func.max(column), 0)).select_from(staging)
+        ).scalar_one()
+        start = 0
+        while start < bound:
+            end = start + merge_batch_size
+            yield sa.and_(column > start, column <= end)
+            start = end
 
     def merge_context(
         self,

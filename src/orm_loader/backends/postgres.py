@@ -14,6 +14,7 @@ from oa_configurator import (
 )
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import OperationalError
+from sqlalchemy.schema import DropTable
 from sqlalchemy.sql.compiler import IdentifierPreparer
 
 from ..mappers.materialised_view_errors import (
@@ -71,13 +72,17 @@ class PostgresBackend(DatabaseBackend):
     ) -> None:
         table = table_cls.__table__
         preparer = self.identifier_preparer
+        staging_name = self.staging_name_for_table(table_cls.__tablename__)
         staging_ref = self.qualified_staging_name(table_cls.__tablename__)
         bind = session.get_bind(mapper=table_cls)
         source_ref = qualified(
             bind, table.name, physical_schema=physical_schema_of(bind, schema_tag=table.schema)
         )
         bind_arguments = {"mapper": table_cls}
-        session.execute(sa.text(f'DROP TABLE IF EXISTS {staging_ref};'), bind_arguments=bind_arguments)
+        session.execute(
+            DropTable(sa.Table(staging_name, sa.MetaData(), schema=self.staging_schema), if_exists=True),
+            bind_arguments=bind_arguments,
+        )
         session.execute(
             sa.text(
                 f'''
@@ -111,8 +116,9 @@ class PostgresBackend(DatabaseBackend):
         table_cls: type["CSVTableProtocol"],
         session: so.Session,
     ) -> None:
+        staging_name = self.staging_name_for_table(table_cls.__tablename__)
         session.execute(
-            sa.text(f'DROP TABLE IF EXISTS {self.qualified_staging_name(table_cls.__tablename__)}'),
+            DropTable(sa.Table(staging_name, sa.MetaData(), schema=self.staging_schema), if_exists=True),
             bind_arguments={"mapper": table_cls},
         )
 
@@ -182,36 +188,18 @@ class PostgresBackend(DatabaseBackend):
             sa.text(f"SET session_replication_role = '{safe_state}'"), **execute_options
         )
 
-    def _staging_rownum_index(
+    def _pagination_column(
+        self, table_cls: type["CSVTableProtocol"], staging: sa.Table
+    ) -> sa.ColumnElement[int]:
+        return staging.c._rownum
+
+    def _ensure_pagination_index(
         self, table_cls: type["CSVTableProtocol"], staging: sa.Table, session: so.Session
     ) -> None:
         staging_name = self.staging_name_for_table(table_cls.__tablename__)
         idx = sa.Index(f"{staging_name}_rownum_idx", staging.c._rownum)
         idx.create(bind=session.connection(bind_arguments={"mapper": table_cls}), checkfirst=True)
         session.commit()
-
-    @staticmethod
-    def _staging_rownum_bound(staging: sa.Table, session: so.Session) -> int:
-        """Highest ``_rownum`` in *staging*, as the pagination upper bound.
-
-        ``_rownum`` is an identity column whose values need not start at 1,
-        so the row count is not a valid upper bound.
-
-        Parameters
-        ----------
-        staging : sqlalchemy.Table
-            Staging table being paginated.
-        session : sqlalchemy.orm.Session
-            Session to query on.
-
-        Returns
-        -------
-        int
-            0 for an empty staging table.
-        """
-        return session.execute(
-            sa.select(sa.func.coalesce(sa.func.max(staging.c._rownum), 0))
-        ).scalar_one()
 
     def merge_replace(
         self,
@@ -233,30 +221,11 @@ class PostgresBackend(DatabaseBackend):
         staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
         pk_join = sa.and_(*(target.c[c] == staging.c[c] for c in pk_cols))
 
-        non_paginated_replace = sa.delete(target).where(pk_join)
-
-        if merge_batch_size is None:
-            session.execute(non_paginated_replace)
-            return
-
-        total = session.execute(sa.select(sa.func.count()).select_from(staging)).scalar_one()
-        if total <= merge_batch_size:
-            session.execute(non_paginated_replace)
-            return
-
-        self._staging_rownum_index(table_cls, staging, session)
-
-        bound = self._staging_rownum_bound(staging, session)
-        start = 0
-        while start < bound:
-            end = start + merge_batch_size
-            session.execute(
-                sa.delete(target).where(
-                    pk_join, staging.c._rownum > start, staging.c._rownum <= end
-                )
-            )
-            session.commit()
-            start = end
+        for batch_range in self._paginate_batches(table_cls, staging, session, merge_batch_size):
+            where = pk_join if batch_range is None else sa.and_(pk_join, batch_range)
+            session.execute(sa.delete(target).where(where))
+            if batch_range is not None and self._commits_between_pagination_batches:
+                session.commit()
 
     def merge_upsert(
         self,
@@ -281,27 +250,11 @@ class PostgresBackend(DatabaseBackend):
 
         non_paginated_select = sa.select(*(staging.c[c] for c in insertable_cols))
 
-        if merge_batch_size is None:
-            session.execute(_upsert(non_paginated_select))
-            return
-
-        total = session.execute(sa.select(sa.func.count()).select_from(staging)).scalar_one()
-        if total <= merge_batch_size:
-            session.execute(_upsert(non_paginated_select))
-            return
-
-        self._staging_rownum_index(table_cls, staging, session)
-
-        bound = self._staging_rownum_bound(staging, session)
-        start = 0
-        while start < bound:
-            end = start + merge_batch_size
-            batch_select = non_paginated_select.where(
-                staging.c._rownum > start, staging.c._rownum <= end
-            )
-            session.execute(_upsert(batch_select))
-            session.commit()
-            start = end
+        for batch_range in self._paginate_batches(table_cls, staging, session, merge_batch_size):
+            select_ = non_paginated_select if batch_range is None else non_paginated_select.where(batch_range)
+            session.execute(_upsert(select_))
+            if batch_range is not None and self._commits_between_pagination_batches:
+                session.commit()
 
     def merge_insert(
         self,
@@ -310,6 +263,11 @@ class PostgresBackend(DatabaseBackend):
         *,
         merge_batch_size: int | None = None,
     ) -> None:
+        """Insert all staging rows into the target table.
+
+        session_replication_role='replica' is session-level and persists
+        across commits, so FK checks stay disabled for every batch.
+        """
         self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
         staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
@@ -319,31 +277,11 @@ class PostgresBackend(DatabaseBackend):
         def _insert(select_: Any) -> sa.Insert:
             return sa.insert(target).from_select(insertable_cols, select_)
 
-        if merge_batch_size is None:
-            session.execute(_insert(non_paginated_select))
-            return
-
-        total = session.execute(sa.select(sa.func.count()).select_from(staging)).scalar_one()
-        if total <= merge_batch_size:
-            session.execute(_insert(non_paginated_select))
-            return
-
-        # Paginated path: index _rownum for O(N log N) range scans then
-        # INSERT in batch-sized transactions to bound WAL per commit.
-        # session_replication_role='replica' is session-level and persists
-        # across commits, so FK checks stay disabled for all batches.
-        self._staging_rownum_index(table_cls, staging, session)
-
-        bound = self._staging_rownum_bound(staging, session)
-        start = 0
-        while start < bound:
-            end = start + merge_batch_size
-            batch_select = non_paginated_select.where(
-                staging.c._rownum > start, staging.c._rownum <= end
-            )
-            session.execute(_insert(batch_select))
-            session.commit()
-            start = end
+        for batch_range in self._paginate_batches(table_cls, staging, session, merge_batch_size):
+            select_ = non_paginated_select if batch_range is None else non_paginated_select.where(batch_range)
+            session.execute(_insert(select_))
+            if batch_range is not None and self._commits_between_pagination_batches:
+                session.commit()
 
     @requires_capability("supports_materialized_views", "materialized views")
     def create_materialized_view(

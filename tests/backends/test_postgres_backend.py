@@ -52,7 +52,7 @@ class _FakeSession:
 
     def execute(self, statement, parameters=None, **kwargs):
         if hasattr(statement, "compile"):
-            sql = str(statement.compile(dialect=postgresql.dialect()))
+            sql = str(statement.compile(dialect=postgresql.dialect())).strip()
         else:
             sql = str(statement)
         self.statements.append(sql)

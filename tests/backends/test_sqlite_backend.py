@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Type, cast
 import pytest
 import sqlalchemy as sa
 import sqlalchemy.orm as so
+from sqlalchemy.dialects import sqlite as sqlite_dialect
 
 from orm_loader.backends import Dialect, SQLiteBackend
 from orm_loader.helpers.sqlite import attach_sqlite_bulk_load_pragmas
@@ -25,7 +26,11 @@ class _FakeSession:
         self.scalar_result = scalar_result
 
     def execute(self, statement, **kwargs):
-        self.statements.append(str(statement))
+        if hasattr(statement, "compile"):
+            sql = str(statement.compile(dialect=sqlite_dialect.dialect())).strip()
+        else:
+            sql = str(statement)
+        self.statements.append(sql)
 
         class _Result:
             def __init__(self, value):
@@ -89,7 +94,7 @@ def test_sqlite_backend_drop_staging_table():
 
     backend.drop_staging_table(_ComputedTableCls, _sess(sqlite_session))
 
-    assert sqlite_session.statements == [f'DROP TABLE IF EXISTS "{_STAGING_TABLE}"']
+    assert sqlite_session.statements == [f"DROP TABLE IF EXISTS {_STAGING_TABLE}"]
 
 
 

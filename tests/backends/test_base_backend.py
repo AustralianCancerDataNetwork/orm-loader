@@ -107,6 +107,11 @@ class FakeBackend(DatabaseBackend):
     ) -> None:
         return None
 
+    def _pagination_column(
+        self, _table_cls: Type[CSVTableProtocol], _staging: sa.Table
+    ) -> sa.ColumnElement[int]:
+        return sa.literal_column("rowid")
+
     @staticmethod
     def _normalize_fk_check_state(previous_state: str | int) -> str | int:
         return previous_state
