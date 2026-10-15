@@ -439,12 +439,9 @@ class DatabaseBackend(ABC):
         return
 
     @property
+    @abstractmethod
     def _commits_between_pagination_batches(self) -> bool:
-        """Whether _paginate_batches()'s caller should commit after each batch.
-        True by default, to bound how much uncommitted work a large load
-        accumulates.
-        """
-        return True
+        """Whether _paginate_batches()'s caller should commit after each batch."""
 
     def _paginate_batches(
         self,

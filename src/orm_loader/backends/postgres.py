@@ -201,6 +201,19 @@ class PostgresBackend(DatabaseBackend):
         idx.create(bind=session.connection(bind_arguments={"mapper": table_cls}), checkfirst=True)
         session.commit()
 
+    @property
+    def _commits_between_pagination_batches(self) -> bool:
+        """True: bounds the WAL growth, lock duration, and dead-tuple
+        accumulation of one uncommitted transaction over a large table.
+
+        A crash between a delete batch and its insert batch leaves those
+        rows missing until the load runs again. The next run deletes them
+        from the target again (their primary keys are still in the freshly
+        reloaded staging table) before reinserting, so no manual cleanup
+        is needed, just a rerun.
+        """
+        return True
+
     def merge_replace(
         self,
         table_cls: type["CSVTableProtocol"],
@@ -209,13 +222,7 @@ class PostgresBackend(DatabaseBackend):
         *,
         merge_batch_size: int | None = None,
     ) -> None:
-        """Delete every target row whose primary key appears in staging.
-
-        Notes
-        -----
-        Each batch commits, so unlike SQLite's merge the delete phase is
-        already durable if a later insert phase fails.
-        """
+        """Delete every target row whose primary key appears in staging."""
         self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
         staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)

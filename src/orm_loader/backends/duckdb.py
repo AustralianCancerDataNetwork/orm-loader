@@ -174,6 +174,15 @@ class DuckDBBackend(DatabaseBackend):
         idx.create(bind=session.connection(bind_arguments={"mapper": table_cls}), checkfirst=True)
         session.commit()
 
+    @property
+    def _commits_between_pagination_batches(self) -> bool:
+        """True: bounds how much uncommitted work one load accumulates on a
+        large table. Safe here because merge_replace updates matching rows
+        in place rather than deleting and reinserting them, so a commit
+        between batches never leaves a row removed without its replacement.
+        """
+        return True
+
     def merge_replace(
         self,
         table_cls: type["CSVTableProtocol"],
