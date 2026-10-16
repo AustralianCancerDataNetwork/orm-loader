@@ -194,6 +194,41 @@ class DuckDBBackend(DatabaseBackend):
         """
         return True
 
+    def check_replace_feasible(
+        self,
+        table_cls: type["CSVTableProtocol"],
+        pk_cols: list[str],
+    ) -> None:
+        """Raise if merge_strategy='replace' can't update table_cls's own FK columns.
+
+        Notes
+        -----
+        Meant to be called before any replace load touches table_cls, so a table later 
+        in load order failing this check doesn't leave earlier tables already replaced.
+
+        Raises
+        ------
+        ValueError
+            If target is itself referenced by another table's FK and also
+            owns an enforced FK of its own on a column being updated: DuckDB
+            rejects a SET on any FK-constrained column of a currently-
+            referenced row, dropped indexes or not.
+        """
+        target = table_cls.__table__
+        update_cols = [c for c in self._insertable_column_names(table_cls) if c not in pk_cols]
+        deferred_cols = {col.name for fk in self.deferred_fk_constraints(table_cls) for col in fk.columns}
+        enforced_fk_cols = [
+            c for c in update_cols
+            if c in target.c and target.c[c].foreign_keys and c not in deferred_cols
+        ]
+        if enforced_fk_cols and self._is_referenced_by_other_table(target):
+            raise ValueError(
+                f"merge_strategy='replace' can't update {target.name}.{enforced_fk_cols} on DuckDB: "
+                f"{target.name} is referenced by another table's FK, and DuckDB rejects any SET "
+                "on an FK-constrained column of a currently-referenced row. Use "
+                "--merge-strategy upsert, or reload into an empty database."
+            )
+
     def merge_replace(
         self,
         table_cls: type["CSVTableProtocol"],
@@ -220,23 +255,13 @@ class DuckDBBackend(DatabaseBackend):
         Raises
         ------
         ValueError
-            If target is itself referenced by another table's FK and also
-            owns an FK of its own on a column being updated: DuckDB rejects
-            a SET on any FK-constrained column of a currently-referenced
-            row, dropped indexes or not.
+            See check_replace_feasible().
         """
         self._validate_merge_batch_size(merge_batch_size)
+        self.check_replace_feasible(table_cls, pk_cols)
         target = table_cls.__table__
         staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
         update_cols = [c for c in self._insertable_column_names(table_cls) if c not in pk_cols]
-        own_fk_cols = [c for c in update_cols if c in target.c and target.c[c].foreign_keys]
-        if own_fk_cols and self._is_referenced_by_other_table(target):
-            raise ValueError(
-                f"merge_strategy='replace' can't update {target.name}.{own_fk_cols} on DuckDB: "
-                f"{target.name} is referenced by another table's FK, and DuckDB rejects any SET "
-                "on an FK-constrained column of a currently-referenced row. Use "
-                "--merge-strategy upsert, or reload into an empty database."
-            )
         pk_join = sa.and_(*(target.c[c] == staging.c[c] for c in pk_cols))
 
         def _batch_keys(extra: sa.ColumnElement[bool] | None = None) -> sa.Select[Any]:

@@ -411,6 +411,19 @@ class DatabaseBackend(ABC):
     ) -> None:
         """Restore FK checks to a previously returned backend-specific state."""
 
+    def check_replace_feasible(
+        self,
+        table_cls: Type["CSVTableProtocol"],
+        pk_cols: list[str],
+    ) -> None:
+        """Raise if merge_strategy='replace' can't load table_cls on this backend.
+
+        Default: always feasible. Only a backend that rejects certain
+        in-place updates on a currently-referenced row (DuckDB) overrides
+        this, so callers can preflight every table a replace load will
+        touch before loading any of them.
+        """
+
     @abstractmethod
     def merge_replace(
         self,
