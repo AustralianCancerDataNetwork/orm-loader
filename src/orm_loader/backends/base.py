@@ -415,13 +415,15 @@ class DatabaseBackend(ABC):
         self,
         table_cls: Type["CSVTableProtocol"],
         pk_cols: list[str],
+        session: so.Session,
     ) -> None:
         """Raise if merge_strategy='replace' can't load table_cls on this backend.
 
         Default: always feasible. Only a backend that rejects certain
         in-place updates on a currently-referenced row (DuckDB) overrides
         this, so callers can preflight every table a replace load will
-        touch before loading any of them.
+        touch before loading any of them. session is only used as read-only
+        to check whether target or a referencing table already has rows
         """
 
     @abstractmethod

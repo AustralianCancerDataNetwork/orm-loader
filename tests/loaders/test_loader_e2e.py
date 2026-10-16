@@ -851,6 +851,12 @@ def test_validate_deferred_fks_catches_an_orphan_introduced_by_load_csv(duckdb_s
     _skip_deferred_fk_on_duckdb no-oped the ALTER TABLE ADD CONSTRAINT): a
     load introducing an orphaned reference succeeds silently unless
     validate_deferred_fks=True catches it.
+
+    Notes
+    -----
+    Rollback on duckdb_session wipes out data that has already been committed.
+    Rollback-after-commit on this fixture's session is therefore unreliable for 
+    asserting target-row survival.
     """
     csv_path = tmp_path / "cycle_a_table.csv"
     pd.DataFrame([{"id": 1, "b_id": 999}]).to_csv(csv_path, index=False, sep="\t")

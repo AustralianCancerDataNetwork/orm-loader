@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any, Type
 
 import sqlalchemy as sa
 import sqlalchemy.orm as so
-from oa_configurator import qualified
+from oa_configurator import physical_schema_of, qualified
 from sqlalchemy.schema import CreateSequence, DropSequence, DropTable
 from sqlalchemy.sql.compiler import IdentifierPreparer
 
@@ -70,13 +70,28 @@ class DuckDBBackend(DatabaseBackend):
         return tuple(fk for fk in deferred if fk.table is table_cls.__table__)
 
     @staticmethod
-    def _is_referenced_by_other_table(target: sa.Table) -> bool:
-        """True if some other table in target's own metadata has an FK pointing at target."""
-        return any(
-            fk.referred_table is target
+    def _tables_referencing(target: sa.Table) -> set[sa.Table]:
+        """Other tables in target's own metadata that have an FK pointing at target."""
+        return {
+            other
             for other in target.metadata.tables.values()
             if other is not target
             for fk in other.foreign_key_constraints
+            if fk.referred_table is target
+        }
+
+    def _is_referenced_by_existing_rows(self, target: sa.Table, session: so.Session) -> bool:
+        """True if some table referencing target has any rows.
+
+        Table-level existence check. A referencing table may not exist yet,
+        since target's shared metadata spans every CDM table.
+        """
+        bind = session.get_bind()
+        inspector = sa.inspect(bind)
+        return any(
+            inspector.has_table(other.name, schema=physical_schema_of(bind, schema_tag=other.schema))
+            and session.execute(sa.select(sa.literal(1)).select_from(other).limit(1)).first() is not None
+            for other in self._tables_referencing(target)
         )
 
     def _staging_rownum_sequence_ref(self, tablename: str) -> str:
@@ -198,21 +213,19 @@ class DuckDBBackend(DatabaseBackend):
         self,
         table_cls: type["CSVTableProtocol"],
         pk_cols: list[str],
+        session: so.Session,
     ) -> None:
         """Raise if merge_strategy='replace' can't update table_cls's own FK columns.
 
-        Notes
-        -----
-        Meant to be called before any replace load touches table_cls, so a table later 
-        in load order failing this check doesn't leave earlier tables already replaced.
+        Call before any replace load touches table_cls, so a later table
+        failing this check doesn't leave earlier tables already replaced.
 
         Raises
         ------
         ValueError
-            If target is itself referenced by another table's FK and also
-            owns an enforced FK of its own on a column being updated: DuckDB
-            rejects a SET on any FK-constrained column of a currently-
-            referenced row, dropped indexes or not.
+            Target has rows, some table referencing it also has rows, and
+            target owns an enforced FK on a column being updated: DuckDB
+            rejects a SET on an FK-constrained column of a referenced row.
         """
         target = table_cls.__table__
         update_cols = [c for c in self._insertable_column_names(table_cls) if c not in pk_cols]
@@ -221,13 +234,18 @@ class DuckDBBackend(DatabaseBackend):
             c for c in update_cols
             if c in target.c and target.c[c].foreign_keys and c not in deferred_cols
         ]
-        if enforced_fk_cols and self._is_referenced_by_other_table(target):
-            raise ValueError(
-                f"merge_strategy='replace' can't update {target.name}.{enforced_fk_cols} on DuckDB: "
-                f"{target.name} is referenced by another table's FK, and DuckDB rejects any SET "
-                "on an FK-constrained column of a currently-referenced row. Use "
-                "--merge-strategy upsert, or reload into an empty database."
-            )
+        if not enforced_fk_cols:
+            return
+        if not table_cls._target_has_rows(session=session):
+            return
+        if not self._is_referenced_by_existing_rows(target, session):
+            return
+        raise ValueError(
+            f"merge_strategy='replace' can't update {target.name}.{enforced_fk_cols} on DuckDB: "
+            f"{target.name} is referenced by another table's FK, and DuckDB rejects any SET "
+            "on an FK-constrained column of a currently-referenced row. Use "
+            "--merge-strategy upsert, or reload into an empty database."
+        )
 
     def merge_replace(
         self,
@@ -258,7 +276,7 @@ class DuckDBBackend(DatabaseBackend):
             See check_replace_feasible().
         """
         self._validate_merge_batch_size(merge_batch_size)
-        self.check_replace_feasible(table_cls, pk_cols)
+        self.check_replace_feasible(table_cls, pk_cols, session)
         target = table_cls.__table__
         staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
         update_cols = [c for c in self._insertable_column_names(table_cls) if c not in pk_cols]

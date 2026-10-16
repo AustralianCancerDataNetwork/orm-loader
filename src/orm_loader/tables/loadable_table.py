@@ -477,19 +477,18 @@ class CSVLoadableTableInterface(ORMTableBase):
 
         # Merge staging to target (Wrapped in our index dropper!)
         logger.info(f"Table `{cls.__tablename__}`: Merging staging data into target table")
-        with cls.manage_indices(session, index_strategy=index_strategy, staging_schema_tag=staging_schema_tag):
-            cls.merge_from_staging(
-                session,
-                merge_strategy=merge_strategy,
-                merge_batch_size=merge_batch_size,
-                staging_schema_tag=staging_schema_tag,
-            )
-
         try:
-            if validate_deferred_fks:
-                logger.info(f"Table `{cls.__tablename__}`: Validating deferred foreign keys.")
-                backend = resolve_backend(session, staging_schema_tag=staging_schema_tag, mapper=cls)
-                backend.validate_deferred_fks(cls, session)
+            with cls.manage_indices(session, index_strategy=index_strategy, staging_schema_tag=staging_schema_tag):
+                cls.merge_from_staging(
+                    session,
+                    merge_strategy=merge_strategy,
+                    merge_batch_size=merge_batch_size,
+                    staging_schema_tag=staging_schema_tag,
+                )
+                if validate_deferred_fks:
+                    logger.info(f"Table `{cls.__tablename__}`: Validating deferred foreign keys.")
+                    backend = resolve_backend(session, staging_schema_tag=staging_schema_tag, mapper=cls)
+                    backend.validate_deferred_fks(cls, session)
         finally:
             cls.drop_staging_table(session, staging_schema_tag=staging_schema_tag)
 
