@@ -319,12 +319,36 @@ class DatabaseBackend(ABC):
 
     @staticmethod
     def _validate_one_deferred_fk(fk: sa.ForeignKeyConstraint, session: so.Session) -> None:
+        """Raise if any row of fk's local table has a non-null value with no match in the referred table.
+
+        Parameters
+        ----------
+        fk : sa.ForeignKeyConstraint
+            The deferred FK constraint to check.
+        session : so.Session
+            Session to run the anti-join query against.
+
+        Raises
+        ------
+        DeferredForeignKeyViolationError
+            If any row's FK column is non-null with no matching row in the
+            referenced table.
+
+        Notes
+        -----
+        The referred table is always aliased, even for an ordinary
+        cross-table FK where it changes nothing. A self-referential FK's
+        referred table is the same Table object as the row being checked,
+        so an unaliased subquery would compare each row to itself instead
+        of correlating to the outer row.
+        """
         local_cols = list(fk.columns)
         remote_cols = [element.column for element in fk.elements]
-        referred_table = remote_cols[0].table
-        matches = sa.and_(*(local_cols[i] == remote_cols[i] for i in range(len(local_cols))))
+        referred_alias = remote_cols[0].table.alias()
+        aliased_remote_cols = [referred_alias.c[col.name] for col in remote_cols]
+        matches = sa.and_(*(local_cols[i] == aliased_remote_cols[i] for i in range(len(local_cols))))
         not_null = sa.and_(*(col.isnot(None) for col in local_cols))
-        orphan_exists = sa.exists(sa.select(sa.literal(1)).select_from(referred_table).where(matches))
+        orphan_exists = sa.exists(sa.select(sa.literal(1)).select_from(referred_alias).where(matches))
 
         orphans = session.execute(
             sa.select(*local_cols).where(not_null, ~orphan_exists).limit(5)

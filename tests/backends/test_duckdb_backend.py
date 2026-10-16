@@ -8,7 +8,14 @@ import sqlalchemy.orm as so
 
 from orm_loader.backends import Dialect, DuckDBBackend
 from orm_loader.backends.base import DeferredForeignKeyViolationError
-from tests.models import ComputedColumnTable, CycleATable, CycleBTable
+from tests.models import (
+    ComputedColumnTable,
+    CycleATable,
+    CycleBTable,
+    ReferencedParentTable,
+    ReferencingChildTable,
+    UnreferencedGrandparentTable,
+)
 
 if TYPE_CHECKING:
     from orm_loader.tables.typing import CSVTableProtocol
@@ -16,6 +23,7 @@ if TYPE_CHECKING:
 _ComputedTableCls = cast("Type[CSVTableProtocol]", ComputedColumnTable)
 _CycleATableCls = cast("Type[CSVTableProtocol]", CycleATable)
 _CycleBTableCls = cast("Type[CSVTableProtocol]", CycleBTable)
+_ReferencedParentTableCls = cast("Type[CSVTableProtocol]", ReferencedParentTable)
 _TARGET_TABLE = ComputedColumnTable.__tablename__
 _STAGING_TABLE = f"_staging_{_TARGET_TABLE}"
 
@@ -233,3 +241,27 @@ def test_duckdb_backend_merge_replace_paginated_updates_in_place(duckdb_session)
 
     rows = {r.id: r.name for r in duckdb_session.execute(sa.select(ComputedColumnTable)).scalars().all()}
     assert rows == {i: f"staged{i}" for i in range(10)}
+
+
+@pytest.mark.duckdb
+@pytest.mark.db_dialect
+def test_duckdb_backend_merge_replace_rejects_referenced_table_with_own_fk(duckdb_session):
+    """DuckDB rejects a SET on any FK-constrained column of a row that's
+    still referenced elsewhere, regardless of index_strategy. merge_replace
+    must fail up front, before touching any data, rather than partway
+    through a batch."""
+    backend = DuckDBBackend()
+    backend.create_staging_table(_ReferencedParentTableCls, duckdb_session)
+    staging = _ReferencedParentTableCls.get_staging_table(
+        duckdb_session, staging_schema_tag=backend.staging_schema_tag
+    )
+
+    duckdb_session.execute(sa.insert(UnreferencedGrandparentTable), [{"id": 1, "name": "g1"}])
+    duckdb_session.execute(
+        sa.insert(ReferencedParentTable), [{"id": 1, "grandparent_id": 1, "name": "p1"}]
+    )
+    duckdb_session.execute(sa.insert(ReferencingChildTable), [{"id": 1, "parent_id": 1}])
+    duckdb_session.execute(sa.insert(staging), [{"id": 1, "grandparent_id": 1, "name": "p1-updated"}])
+
+    with pytest.raises(ValueError, match="referenced_parent_table"):
+        backend.merge_replace(_ReferencedParentTableCls, duckdb_session, ["id"])

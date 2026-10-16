@@ -13,7 +13,7 @@ It focuses on:
 - model-agnostic validation scaffolding
 - operational helpers for supported backends
 
-It currently ships with backend implementations for SQLite and PostgreSQL.
+It ships with backend implementations for SQLite, PostgreSQL, and DuckDB. See [oa-configurator's supported dialects](https://AustralianCancerDataNetwork.github.io/oa-configurator/config-reference/#supported-dialects) for the dialect list this is built against.
 
 ---
 

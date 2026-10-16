@@ -373,7 +373,7 @@ class CSVLoadableTableInterface(ORMTableBase):
         index_strategy: str = "auto",
         merge_batch_size: int | None = None,
         staging_schema_tag: str | None = None,
-        validate_deferred_fks: bool = False,
+        validate_deferred_fks: bool = True,
     ) -> int:
 
         """
@@ -417,8 +417,6 @@ class CSVLoadableTableInterface(ORMTableBase):
         validate_deferred_fks
             After merging, run an anti-join check for any FK this backend's
             DB can't enforce itself (see DatabaseBackend.validate_deferred_fks()).
-            Off by default: a full-table scan per such FK, on top of the load.
-            No-op for a backend with none (every backend but DuckDB, today).
 
         Returns
         -------

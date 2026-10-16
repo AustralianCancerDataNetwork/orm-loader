@@ -351,12 +351,7 @@ class PostgresBackend(DatabaseBackend):
             try:
                 conn.execute(sa.text(f"REFRESH MATERIALIZED VIEW {concurrency}{safe_name};"))
             except OperationalError as error:
-                # Keep psycopg optional at import time; it is only needed when
-                # handling an actual PostgreSQL driver error.
-                try:
-                    from psycopg.errors import ObjectNotInPrerequisiteState
-                except ImportError:
-                    raise error from None
+                from psycopg.errors import ObjectNotInPrerequisiteState
 
                 if not concurrently or not isinstance(error.orig, ObjectNotInPrerequisiteState):
                     raise

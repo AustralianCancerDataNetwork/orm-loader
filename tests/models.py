@@ -120,6 +120,40 @@ class ImpliedEnumTable(Base, CSVLoadableTableInterface):
     flag: so.Mapped[str | None] = so.mapped_column(sa.String(1), nullable=True)
 
 
+class ReferencedParentTable(Base, CSVLoadableTableInterface):
+    """Referenced by ReferencingChildTable *and* owns its own FK, for
+    merge_replace's up-front DuckDB guard: a table in this shape can't be
+    SET on its own FK column while still referenced, even with indexes
+    dropped."""
+
+    __tablename__ = "referenced_parent_table"
+    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+
+    id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
+    grandparent_id: so.Mapped[int] = so.mapped_column(
+        sa.Integer, sa.ForeignKey(f"{SchemaRole.PRIMARY.value}.unreferenced_grandparent_table.id")
+    )
+    name: so.Mapped[str] = so.mapped_column(sa.String)
+
+
+class UnreferencedGrandparentTable(Base, CSVLoadableTableInterface):
+    __tablename__ = "unreferenced_grandparent_table"
+    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+
+    id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
+    name: so.Mapped[str] = so.mapped_column(sa.String)
+
+
+class ReferencingChildTable(Base, CSVLoadableTableInterface):
+    __tablename__ = "referencing_child_table"
+    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+
+    id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
+    parent_id: so.Mapped[int] = so.mapped_column(
+        sa.Integer, sa.ForeignKey(f"{SchemaRole.PRIMARY.value}.referenced_parent_table.id")
+    )
+
+
 class VocabSchemaTable(Base, CSVLoadableTableInterface):
     """A VOCAB-tagged table, so tests can prove the staging/index schema
     derivation actually resolves a non-primary schema tag correctly."""

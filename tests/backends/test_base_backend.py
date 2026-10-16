@@ -112,6 +112,10 @@ class FakeBackend(DatabaseBackend):
     ) -> sa.ColumnElement[int]:
         return sa.literal_column("rowid")
 
+    @property
+    def _commits_between_pagination_batches(self) -> bool:
+        return True
+
     @staticmethod
     def _normalize_fk_check_state(previous_state: str | int) -> str | int:
         return previous_state

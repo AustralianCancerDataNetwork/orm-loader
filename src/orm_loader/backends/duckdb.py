@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Type
 
-import duckdb_sqlalchemy
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 from oa_configurator import qualified
@@ -30,6 +29,8 @@ class DuckDBBackend(DatabaseBackend):
 
     @property
     def identifier_preparer(self) -> IdentifierPreparer:
+        import duckdb_sqlalchemy
+
         return duckdb_sqlalchemy.Dialect().identifier_preparer
 
     @property
@@ -57,8 +58,8 @@ class DuckDBBackend(DatabaseBackend):
         Only reads the ``tbl is None`` bucket of sort_tables_and_constraints's
         output. A standalone self-referential FK (not part of a cross-table
         cycle) is still deferred by SQLAlchemy either way, but lands in its
-        *own* table's bucket unless the column declares ``use_alter=True`` --
-        without that, this method can't see it, and it will insert without
+        *own* table's bucket unless the column declares ``use_alter=True``.
+        Without that, this method can't see it, and it will insert without
         error instead of being caught by validate_deferred_fks(). Model
         authors: mark a self-referential FK ``use_alter=True`` explicitly if
         it needs anti-join validation on DuckDB.
@@ -67,6 +68,16 @@ class DuckDBBackend(DatabaseBackend):
         entries = sa.schema.sort_tables_and_constraints(metadata.tables.values())
         deferred = next(fks for tbl, fks in entries if tbl is None)
         return tuple(fk for fk in deferred if fk.table is table_cls.__table__)
+
+    @staticmethod
+    def _is_referenced_by_other_table(target: sa.Table) -> bool:
+        """True if some other table in target's own metadata has an FK pointing at target."""
+        return any(
+            fk.referred_table is target
+            for other in target.metadata.tables.values()
+            if other is not target
+            for fk in other.foreign_key_constraints
+        )
 
     def _staging_rownum_sequence_ref(self, tablename: str) -> str:
         """Fully schema-qualified, quoted name of tablename's staging _rownum sequence.
@@ -205,11 +216,27 @@ class DuckDBBackend(DatabaseBackend):
         supports_replace_with_kept_indexes is False for this reason; the
         caller is expected to check it before resolving index_strategy to
         "keep" for a "replace" merge.
+
+        Raises
+        ------
+        ValueError
+            If target is itself referenced by another table's FK and also
+            owns an FK of its own on a column being updated: DuckDB rejects
+            a SET on any FK-constrained column of a currently-referenced
+            row, dropped indexes or not.
         """
         self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
         staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
         update_cols = [c for c in self._insertable_column_names(table_cls) if c not in pk_cols]
+        own_fk_cols = [c for c in update_cols if c in target.c and target.c[c].foreign_keys]
+        if own_fk_cols and self._is_referenced_by_other_table(target):
+            raise ValueError(
+                f"merge_strategy='replace' can't update {target.name}.{own_fk_cols} on DuckDB: "
+                f"{target.name} is referenced by another table's FK, and DuckDB rejects any SET "
+                "on an FK-constrained column of a currently-referenced row. Use "
+                "--merge-strategy upsert, or reload into an empty database."
+            )
         pk_join = sa.and_(*(target.c[c] == staging.c[c] for c in pk_cols))
 
         def _batch_keys(extra: sa.ColumnElement[bool] | None = None) -> sa.Select[Any]:
@@ -259,6 +286,8 @@ class DuckDBBackend(DatabaseBackend):
         *,
         merge_batch_size: int | None = None,
     ) -> None:
+        import duckdb_sqlalchemy
+
         self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
         staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)

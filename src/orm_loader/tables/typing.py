@@ -87,7 +87,7 @@ class CSVTableProtocol(ORMTableProtocol, Protocol):
         index_strategy: str = "auto",
         merge_batch_size: int | None = None,
         staging_schema_tag: str | None = None,
-        validate_deferred_fks: bool = False,
+        validate_deferred_fks: bool = True,
     ) -> int: ...
 
     @classmethod
