@@ -52,8 +52,8 @@ postgres = [
 dev = [
     "oa-configurator[postgres]>=2.0.0,<3",
     "pytest>=9.0.3",
-    "ty>=0.0.59",
-    "ruff>=0.14.11",
+    "ty==0.0.90",
+    "ruff==0.17.1",
     "mkdocs-material>=9.7.7",
     "mkdocstrings-python>=2.0.1",
     "requests>=2.33.0",
@@ -71,11 +71,6 @@ cache-keys = [{ file = "pyproject.toml" }, { git = { commit = true, tags = true 
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
-
-[tool.mypy]
-python_version = "3.11"
-strict = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -83,6 +78,3 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-ra -m 'not db_dialect'"
-
-[tool.pyright]
-reportMissingTypeStubs = false
