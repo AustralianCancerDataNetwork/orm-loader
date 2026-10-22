@@ -86,7 +86,9 @@ def test_create_tables_crossing_subset_resolves_local_fk_to_existing_table(tmp_p
     parent = sa.Table(
         "local_parent", metadata, sa.Column("id", sa.Integer, primary_key=True), schema="primary"
     )
-    sa.Table("remote_parent", metadata, sa.Column("id", sa.Integer, primary_key=True), schema="vocab")
+    sa.Table(
+        "remote_parent", metadata, sa.Column("id", sa.Integer, primary_key=True), schema="vocab"
+    )
     child = sa.Table(
         "crossing_child",
         metadata,
@@ -102,9 +104,9 @@ def test_create_tables_crossing_subset_resolves_local_fk_to_existing_table(tmp_p
         create_tables(connection, [child], resolved=resolved)
 
     assert sa.inspect(engine).has_table("crossing_child")
-    assert [fk["referred_table"] for fk in sa.inspect(engine).get_foreign_keys("crossing_child")] == [
-        "local_parent"
-    ]
+    assert [
+        fk["referred_table"] for fk in sa.inspect(engine).get_foreign_keys("crossing_child")
+    ] == ["local_parent"]
     engine.dispose()
 
 

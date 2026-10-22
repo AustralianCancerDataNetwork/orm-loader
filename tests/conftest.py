@@ -19,7 +19,9 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 @pytest.fixture
 def engine():
     with isolated_test_database(
-        OrmLoaderConfig, "test_orm_db_sqlite", dialect="sqlite",
+        OrmLoaderConfig,
+        "test_orm_db_sqlite",
+        dialect="sqlite",
     ) as db:
         engine = db.connection.engine
         Base.metadata.create_all(engine)
@@ -36,6 +38,7 @@ def session(engine):
 # Postgres fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def pg_db(request):
     """Isolated PostgreSQL test database. Everything done through
@@ -43,7 +46,10 @@ def pg_db(request):
     that's rolled back on exit, so concurrent test runs can't collide and
     nothing needs manual cleanup."""
     with isolated_test_database(
-        OrmLoaderConfig, "test_orm_db_pg", request=request, schema_claims=[staging_schema_claim()],
+        OrmLoaderConfig,
+        "test_orm_db_pg",
+        request=request,
+        schema_claims=[staging_schema_claim()],
     ) as db:
         yield db
 
@@ -65,7 +71,10 @@ def schema_scoped_session(
     """A Session on committed scoped test schemas, with the staging schema
     claimed and *table* already created."""
     with scoped_test_schema(
-        pg_db.resolved, prefix=prefix, split_roles=split_roles, schema_claims=[staging_schema_claim()]
+        pg_db.resolved,
+        prefix=prefix,
+        split_roles=split_roles,
+        schema_claims=[staging_schema_claim()],
     ) as scoped:
         with scoped.engine.begin() as conn:
             table.create(conn, checkfirst=True)

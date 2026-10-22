@@ -11,6 +11,7 @@ from orm_loader.tables.typing import (
 
 Base = so.declarative_base()
 
+
 def test_orm_table_protocol_conformance():
     class Q(ORMTableBase, Base):
         __tablename__ = "f"
@@ -21,6 +22,7 @@ def test_orm_table_protocol_conformance():
     assert hasattr(Q, "__tablename__")
     assert callable(Q.pk_names)
     assert callable(Q.model_columns)
+
 
 def test_serialized_table_protocol_conformance():
     class G(SerialisableTableInterface, ORMTableBase, Base):
@@ -38,12 +40,13 @@ def test_serialized_table_protocol_conformance():
     assert callable(obj.to_json)
     assert callable(obj.fingerprint)
 
+
 def test_csv_table_protocol_conformance():
     class P(CSVLoadableTableInterface, ORMTableBase, Base):
         __tablename__ = "p"
         id = sa.Column(sa.Integer, primary_key=True)
 
-    assert isinstance(P, CSVTableProtocol)  
+    assert isinstance(P, CSVTableProtocol)
     # Required class-level API
     assert callable(P.load_csv)
     assert callable(P.create_staging_table)

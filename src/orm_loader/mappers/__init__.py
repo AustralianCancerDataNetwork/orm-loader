@@ -8,7 +8,6 @@
 # will not affect package-level consumers. A later breaking release can rename
 # the modules and remove the legacy paths.
 
-
 from .materialised_view_contracts import (
     CreateMaterializedViewIndex,
     DropMaterializedView,

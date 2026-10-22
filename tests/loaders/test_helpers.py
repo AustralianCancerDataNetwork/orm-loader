@@ -22,6 +22,7 @@ def test_normalised_csv_stream_strips_quoted_header_with_leading_whitespace():
     stream = NormalisedCSVStream(io.BytesIO(raw), encoding="utf-8", delimiter=",")
     assert stream.read() == b"id,name\n1,alpha\n"
 
+
 def test_column_casting_stats_records_examples():
     stats = ColumnCastingStats()
     stats.record("bad1")
@@ -32,6 +33,7 @@ def test_column_casting_stats_records_examples():
     assert stats.count == 4
     assert len(stats.examples) == 3
 
+
 def test_table_casting_stats_aggregation():
     stats = TableCastingStats(table_name="test")
     stats.record(column="a", value="x")
@@ -41,15 +43,18 @@ def test_table_casting_stats_aggregation():
     assert stats.total_failures == 3
     assert stats.has_failures() is True
 
+
 def test_infer_delim_csv(tmp_path):
     p = tmp_path / "x.csv"
     p.write_text("a,b,c\n1,2,3\n")
     assert infer_delim(p) == ","
 
+
 def test_infer_delim_tsv(tmp_path):
     p = tmp_path / "x.tsv"
     p.write_text("a\tb\tc\n1\t2\t3\n")
     assert infer_delim(p) == "\t"
+
 
 def test_infer_encoding_utf8(tmp_path):
     p = tmp_path / "x.csv"
@@ -93,6 +98,7 @@ def test_infer_quote_mode_unbalanced_quote_returns_literal(tmp_path):
 # ---------------------------------------------------------------------------
 # resolve_quote_mode
 # ---------------------------------------------------------------------------
+
 
 def test_resolve_quote_mode_explicit_csv_passthrough():
     # Explicit modes are returned unchanged and never read the file

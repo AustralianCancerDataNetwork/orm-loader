@@ -1,4 +1,3 @@
-
 from enum import Enum
 
 import sqlalchemy as sa
@@ -18,6 +17,7 @@ class Role(str, Enum):
 class Flag(str, Enum):
     STANDARD = "S"
     CLASSIFICATION = "C"
+
 
 class PandasLoaderTable(CSVLoadableTableInterface, Base):
     __tablename__ = "test_pandas_loader"

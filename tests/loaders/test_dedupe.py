@@ -27,15 +27,16 @@ _DedupTable = cast(Type[CSVTableProtocol], DedupTable)
 
 
 def test_arrow_drop_duplicates_simple():
-    table = pa.table({
-        "id": [1, 1, 2],
-        "x":  ["a", "a", "b"],
-    })
+    table = pa.table(
+        {
+            "id": [1, 1, 2],
+            "x": ["a", "a", "b"],
+        }
+    )
 
     deduped = arrow_drop_duplicates(table, ["id"])
     assert deduped.num_rows == 2
     assert deduped["id"].to_pylist() == [1, 2]
-
 
 
 def test_internal_deduplication(session, engine, tmp_path):

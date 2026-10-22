@@ -24,9 +24,7 @@ def _dialect(bindable: Bindable) -> Dialect:
     try:
         return Dialect(dialect_name)
     except ValueError as exc:
-        raise NotImplementedError(
-            f"Unsupported SQLAlchemy dialect '{dialect_name}'"
-        ) from exc
+        raise NotImplementedError(f"Unsupported SQLAlchemy dialect '{dialect_name}'") from exc
 
 
 def resolve_backend(

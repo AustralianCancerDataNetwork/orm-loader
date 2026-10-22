@@ -1,15 +1,29 @@
-from typing import Protocol, ClassVar, runtime_checkable, TYPE_CHECKING, Optional, Type, Dict, Any, Unpack, TypedDict
+from typing import (
+    Protocol,
+    ClassVar,
+    runtime_checkable,
+    TYPE_CHECKING,
+    Optional,
+    Type,
+    Dict,
+    Any,
+    Unpack,
+    TypedDict,
+)
 import sqlalchemy.orm as so
 import sqlalchemy as sa
 from pathlib import Path
 from contextlib import AbstractContextManager
+
 if TYPE_CHECKING:
     from ..loaders import LoaderContext, LoaderInterface
+
 
 class ToDictKwargs(TypedDict, total=False):
     include_nulls: bool
     only: set[str] | None
     exclude: set[str] | None
+
 
 @runtime_checkable
 class ORMTableProtocol(Protocol):
@@ -47,6 +61,7 @@ class ORMTableProtocol(Protocol):
     @classmethod
     def required_columns(cls) -> set[str]: ...
 
+
 @runtime_checkable
 class CSVTableProtocol(ORMTableProtocol, Protocol):
     """
@@ -67,10 +82,14 @@ class CSVTableProtocol(ORMTableProtocol, Protocol):
     def _select_loader(cls, path: Path) -> "LoaderInterface": ...
 
     @classmethod
-    def create_staging_table(cls, session: so.Session, *, staging_schema_tag: str | None = None) -> None: ...
+    def create_staging_table(
+        cls, session: so.Session, *, staging_schema_tag: str | None = None
+    ) -> None: ...
 
     @classmethod
-    def load_staging(cls: Type["CSVTableProtocol"], loader: "LoaderInterface", loader_context: "LoaderContext") -> int: ...
+    def load_staging(
+        cls: Type["CSVTableProtocol"], loader: "LoaderInterface", loader_context: "LoaderContext"
+    ) -> int: ...
 
     @classmethod
     def load_csv(
@@ -90,10 +109,14 @@ class CSVTableProtocol(ORMTableProtocol, Protocol):
     ) -> int: ...
 
     @classmethod
-    def orm_staging_load(cls, loader: "LoaderInterface", loader_context: "LoaderContext") -> int: ...
+    def orm_staging_load(
+        cls, loader: "LoaderInterface", loader_context: "LoaderContext"
+    ) -> int: ...
 
     @classmethod
-    def get_staging_table(cls, session: so.Session, *, staging_schema_tag: str | None = None) -> sa.Table: ...
+    def get_staging_table(
+        cls, session: so.Session, *, staging_schema_tag: str | None = None
+    ) -> sa.Table: ...
 
     @classmethod
     def merge_from_staging(
@@ -106,17 +129,22 @@ class CSVTableProtocol(ORMTableProtocol, Protocol):
     ) -> None: ...
 
     @classmethod
-    def drop_staging_table(cls, session: so.Session, *, staging_schema_tag: str | None = None) -> None: ...
+    def drop_staging_table(
+        cls, session: so.Session, *, staging_schema_tag: str | None = None
+    ) -> None: ...
 
     @classmethod
     def _target_has_rows(cls, session: so.Session) -> bool: ...
 
     @classmethod
     def manage_indices(
-        cls, session: so.Session, index_strategy: str = "auto", *, staging_schema_tag: str | None = None
-    ) -> AbstractContextManager[None]:
-        ...
-    
+        cls,
+        session: so.Session,
+        index_strategy: str = "auto",
+        *,
+        staging_schema_tag: str | None = None,
+    ) -> AbstractContextManager[None]: ...
+
 
 @runtime_checkable
 class SerializedTableProtocol(Protocol):

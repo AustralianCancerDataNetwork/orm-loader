@@ -35,7 +35,9 @@ _VALID_PG_REPLICATION_ROLES = frozenset({"origin", "local", "replica"})
 
 
 class PostgresBackend(DatabaseBackend):
-    def __init__(self, *, staging_schema_tag: str | None = None, staging_schema: str | None = None) -> None:
+    def __init__(
+        self, *, staging_schema_tag: str | None = None, staging_schema: str | None = None
+    ) -> None:
         super().__init__(staging_schema_tag=staging_schema_tag, staging_schema=staging_schema)
 
     @staticmethod
@@ -76,13 +78,15 @@ class PostgresBackend(DatabaseBackend):
             bind, table.name, physical_schema=physical_schema_of(bind, schema_tag=table.schema)
         )
         bind_arguments = {"mapper": table_cls}
-        session.execute(sa.text(f'DROP TABLE IF EXISTS {staging_ref};'), bind_arguments=bind_arguments)
+        session.execute(
+            sa.text(f"DROP TABLE IF EXISTS {staging_ref};"), bind_arguments=bind_arguments
+        )
         session.execute(
             sa.text(
-                f'''
+                f"""
                 CREATE UNLOGGED TABLE {staging_ref}
                 (LIKE {source_ref} INCLUDING DEFAULTS INCLUDING CONSTRAINTS);
-                '''
+                """
             ),
             bind_arguments=bind_arguments,
         )
@@ -90,14 +94,14 @@ class PostgresBackend(DatabaseBackend):
         computed_cols = [c.name for c in table.columns if c.computed is not None]
         for col in computed_cols:
             session.execute(
-                sa.text(f'ALTER TABLE {staging_ref} DROP COLUMN {preparer.quote_identifier(col)};'),
+                sa.text(f"ALTER TABLE {staging_ref} DROP COLUMN {preparer.quote_identifier(col)};"),
                 bind_arguments=bind_arguments,
             )
 
         # allows pagination in O(N log N) time for large tables in merge_insert without needing to add an index on every staging table
         session.execute(
             sa.text(
-                f'ALTER TABLE {staging_ref} ADD COLUMN _rownum BIGINT'
+                f"ALTER TABLE {staging_ref} ADD COLUMN _rownum BIGINT"
                 f" GENERATED ALWAYS AS IDENTITY (CACHE 1000);"
             ),
             bind_arguments=bind_arguments,
@@ -111,7 +115,7 @@ class PostgresBackend(DatabaseBackend):
         session: so.Session,
     ) -> None:
         session.execute(
-            sa.text(f'DROP TABLE IF EXISTS {self.qualified_staging_name(table_cls.__tablename__)}'),
+            sa.text(f"DROP TABLE IF EXISTS {self.qualified_staging_name(table_cls.__tablename__)}"),
             bind_arguments={"mapper": table_cls},
         )
 
@@ -440,7 +444,9 @@ class PostgresBackend(DatabaseBackend):
             try:
                 conn.execute(
                     DropMaterializedView(
-                        qualified(conn, name, physical_schema=schema), if_exists=if_exists, cascade=cascade
+                        qualified(conn, name, physical_schema=schema),
+                        if_exists=if_exists,
+                        cascade=cascade,
                     )
                 )
             except Exception as error:
@@ -470,7 +476,9 @@ class PostgresBackend(DatabaseBackend):
             try:
                 conn.execute(
                     CreateMaterializedViewIndex(
-                        qualified(conn, name, physical_schema=schema), index, if_not_exists=if_not_exists
+                        qualified(conn, name, physical_schema=schema),
+                        index,
+                        if_not_exists=if_not_exists,
                     )
                 )
             except Exception as error:

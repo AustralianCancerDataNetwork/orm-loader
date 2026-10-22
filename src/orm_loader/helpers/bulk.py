@@ -6,9 +6,11 @@ from typing import Generator
 
 logger = logging.getLogger(__name__)
 
+
 def disable_fk_check(session: Session) -> str | int:
     """Disable foreign-key checks for the current session and return the previous state."""
     from ..backends.resolve import resolve_backend
+
     previous_state = resolve_backend(session).disable_fk_check(session)
     logger.info("Disabled foreign key checks for bulk load.")
     if not isinstance(previous_state, (str, int)):
@@ -16,9 +18,11 @@ def disable_fk_check(session: Session) -> str | int:
         raise TypeError(f"Expected previous FK state to be str or int, got {type(previous_state)}")
     return previous_state
 
+
 def enable_fk_check(session: Session) -> str | int:
     """Enable foreign-key checks for the current session and return the previous state."""
     from ..backends.resolve import resolve_backend
+
     previous_state = resolve_backend(session).enable_fk_check(session)
     logger.info("Explicitly re-enabled foreign key checks.")
     if not isinstance(previous_state, (str, int)):
@@ -26,11 +30,14 @@ def enable_fk_check(session: Session) -> str | int:
         raise TypeError(f"Expected previous FK state to be str or int, got {type(previous_state)}")
     return previous_state
 
+
 def restore_fk_check(session: Session, previous_state: str | int):
     """Restore foreign-key checks to a previously captured backend-specific state."""
     from ..backends.resolve import resolve_backend
+
     resolve_backend(session).restore_fk_check(session, previous_state)
     logger.info(f"Restored foreign key checks to state: {previous_state}")
+
 
 @contextmanager
 def bulk_load_context(
@@ -46,6 +53,7 @@ def bulk_load_context(
     It exists so older call sites can keep using the helper import path.
     """
     from ..backends.resolve import resolve_backend
+
     backend = resolve_backend(session)
     with backend.bulk_load_context(
         session,
@@ -64,6 +72,7 @@ def engine_with_replica_role(engine: Engine) -> Generator[Engine, None, None]:
     on backends that explicitly implement the behaviour.
     """
     from ..backends.resolve import resolve_backend
+
     backend = resolve_backend(engine)
     method = getattr(backend, "engine_with_replica_role", None)
     if method is None:

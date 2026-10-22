@@ -17,6 +17,7 @@ It is responsible for:
 - supporting optional fail-fast behaviour
 """
 
+
 class ValidationRunner:
     """
     Coordinates execution of validators against a model registry.
@@ -24,6 +25,7 @@ class ValidationRunner:
     The runner itself is deliberately simple and does not embed any
     validation logic. All rules are provided via Validator instances.
     """
+
     def __init__(self, validators: list[Validator], fail_fast: bool = False):
         """
         Initialise a validation runner.
@@ -37,7 +39,6 @@ class ValidationRunner:
         """
         self.validators = validators
         self.fail_fast = fail_fast
-
 
     def run(self, registry: ModelRegistry) -> ValidationReport:
         """
@@ -53,9 +54,7 @@ class ValidationRunner:
         ValidationReport
             Aggregated validation report.
         """
-        report = ValidationReport(
-            model_version=registry.model_version
-        )
+        report = ValidationReport(model_version=registry.model_version)
 
         for table_name, desc in registry.models().items():
             table_spec = registry._table_specs.get(table_name)
@@ -71,10 +70,7 @@ class ValidationRunner:
                 for issue in issues:
                     report.add(issue)
 
-                    if (
-                        self.fail_fast
-                        and issue.level == SeverityLevel.ERROR
-                    ):
+                    if self.fail_fast and issue.level == SeverityLevel.ERROR:
                         return report
 
         return report

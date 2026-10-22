@@ -70,9 +70,7 @@ class FakeBackend(DatabaseBackend):
     ) -> None:
         return None
 
-    def drop_staging_table(
-        self, _table_cls: Type[CSVTableProtocol], _session: so.Session
-    ) -> None:
+    def drop_staging_table(self, _table_cls: Type[CSVTableProtocol], _session: so.Session) -> None:
         return None
 
     def merge_replace(
@@ -170,7 +168,7 @@ def test_backend_capabilities_defaults():
 
 def test_database_backend_is_abstract():
     with pytest.raises(TypeError):
-        DatabaseBackend() # type: ignore
+        DatabaseBackend()  # type: ignore
 
 
 def test_fake_backend_can_implement_contract():
@@ -334,9 +332,7 @@ def test_capable_backend_inheriting_default_materialized_view_methods_fails_loud
         NotImplementedError,
         match="has not implemented create_materialized_view",
     ):
-        backend.create_materialized_view(
-            cast(Engine, None), "mv_test", cast(Any, None)
-        )
+        backend.create_materialized_view(cast(Engine, None), "mv_test", cast(Any, None))
 
     with pytest.raises(
         NotImplementedError,

@@ -30,7 +30,10 @@ from tests.models import SimpleTable, VocabSchemaTable
 
 
 def test_load_csv_respects_non_default_schema_end_to_end(pg_db, tmp_path):
-    with schema_scoped_session(pg_db, SimpleTable.__table__, prefix="loader_primary") as (scoped, session):
+    with schema_scoped_session(pg_db, SimpleTable.__table__, prefix="loader_primary") as (
+        scoped,
+        session,
+    ):
         schema = scoped.schemas[SchemaRole.PRIMARY]
         csv_path = tmp_path / "test_table.csv"
         pd.DataFrame(
@@ -38,7 +41,11 @@ def test_load_csv_respects_non_default_schema_end_to_end(pg_db, tmp_path):
         ).to_csv(csv_path, index=False, sep="\t")
 
         inserted = SimpleTable.load_csv(
-            session, csv_path, dedupe=False, loader=PandasLoader(), staging_schema_tag=STAGING_SCHEMA
+            session,
+            csv_path,
+            dedupe=False,
+            loader=PandasLoader(),
+            staging_schema_tag=STAGING_SCHEMA,
         )
         session.commit()
 
@@ -61,7 +68,10 @@ def test_replace_merge_respects_non_default_schema_end_to_end(pg_db, tmp_path):
     """A second load_csv() call with merge_strategy="replace" against the
     same non-default schema. Proves the merge path itself, not just the
     initial insert-if-empty fast path, qualifies correctly."""
-    with schema_scoped_session(pg_db, SimpleTable.__table__, prefix="loader_replace") as (scoped, session):
+    with schema_scoped_session(pg_db, SimpleTable.__table__, prefix="loader_replace") as (
+        scoped,
+        session,
+    ):
         schema = scoped.schemas[SchemaRole.PRIMARY]
 
         def _write_and_load(rows: list[dict], path_name: str) -> int:
@@ -102,7 +112,11 @@ def test_load_csv_respects_non_primary_schema_tag_end_to_end(pg_db, tmp_path):
         )
 
         inserted = VocabSchemaTable.load_csv(
-            session, csv_path, dedupe=False, loader=PandasLoader(), staging_schema_tag=STAGING_SCHEMA
+            session,
+            csv_path,
+            dedupe=False,
+            loader=PandasLoader(),
+            staging_schema_tag=STAGING_SCHEMA,
         )
         session.commit()
 
@@ -110,7 +124,9 @@ def test_load_csv_respects_non_primary_schema_tag_end_to_end(pg_db, tmp_path):
 
         with scoped.engine.connect() as conn:
             rows = conn.execute(
-                sa.text(f'SELECT id, name FROM "{vocab_schema}"."test_vocab_role_table" ORDER BY id')
+                sa.text(
+                    f'SELECT id, name FROM "{vocab_schema}"."test_vocab_role_table" ORDER BY id'
+                )
             ).fetchall()
             leaked = conn.execute(
                 sa.text(f"SELECT to_regclass('{primary_schema}.test_vocab_role_table')")

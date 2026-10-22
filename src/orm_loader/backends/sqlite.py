@@ -21,9 +21,7 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
-VALID_SQLITE_JOURNAL_MODES = frozenset(
-    {"DELETE", "TRUNCATE", "PERSIST", "MEMORY", "WAL", "OFF"}
-)
+VALID_SQLITE_JOURNAL_MODES = frozenset({"DELETE", "TRUNCATE", "PERSIST", "MEMORY", "WAL", "OFF"})
 
 
 class SQLiteBackend(DatabaseBackend):
@@ -74,8 +72,7 @@ class SQLiteBackend(DatabaseBackend):
             if normalised in {"0", "OFF"}:
                 return "OFF"
         raise ValueError(
-            f"Invalid SQLite foreign_keys state {previous_state!r}. "
-            "Expected 0, 1, 'OFF', or 'ON'."
+            f"Invalid SQLite foreign_keys state {previous_state!r}. Expected 0, 1, 'OFF', or 'ON'."
         )
 
     @property
@@ -110,14 +107,15 @@ class SQLiteBackend(DatabaseBackend):
     ) -> None:
         staging_name = self.staging_name_for_table(table_cls.__tablename__)
         session.execute(
-            sa.text(f'DROP TABLE IF EXISTS {self.identifier_preparer.quote_identifier(staging_name)};'),
+            sa.text(
+                f"DROP TABLE IF EXISTS {self.identifier_preparer.quote_identifier(staging_name)};"
+            ),
             bind_arguments={"mapper": table_cls},
         )
 
         metadata = sa.MetaData()
         staging_columns = [
-            sa.Column(col.name, col.type, nullable=True)
-            for col in table_cls.__table__.columns
+            sa.Column(col.name, col.type, nullable=True) for col in table_cls.__table__.columns
         ]
         staging_table = sa.Table(
             staging_name, metadata, *staging_columns, schema=table_cls.__table__.schema
@@ -132,9 +130,11 @@ class SQLiteBackend(DatabaseBackend):
         table_cls: type["CSVTableProtocol"],
         session: so.Session,
     ) -> None:
-        staging_ref = self.identifier_preparer.quote_identifier(self.staging_name_for_table(table_cls.__tablename__))
+        staging_ref = self.identifier_preparer.quote_identifier(
+            self.staging_name_for_table(table_cls.__tablename__)
+        )
         session.execute(
-            sa.text(f'DROP TABLE IF EXISTS {staging_ref}'),
+            sa.text(f"DROP TABLE IF EXISTS {staging_ref}"),
             bind_arguments={"mapper": table_cls},
         )
 
@@ -202,9 +202,7 @@ class SQLiteBackend(DatabaseBackend):
                 keys = keys.where(extra)
             if len(pk_cols) == 1:
                 return sa.delete(target).where(target.c[pk_cols[0]].in_(keys))
-            return sa.delete(target).where(
-                sa.tuple_(*(target.c[c] for c in pk_cols)).in_(keys)
-            )
+            return sa.delete(target).where(sa.tuple_(*(target.c[c] for c in pk_cols)).in_(keys))
 
         if merge_batch_size is None:
             session.execute(_delete())
@@ -296,7 +294,9 @@ class SQLiteBackend(DatabaseBackend):
             session.execute(_insert(batch_select))
             start = end
 
-    def configure_dbapi_connection(self, dbapi_connection:  sa.engine.interfaces.DBAPIConnection) -> None:
+    def configure_dbapi_connection(
+        self, dbapi_connection: sa.engine.interfaces.DBAPIConnection
+    ) -> None:
         if dbapi_connection.__class__.__module__.startswith("sqlite3"):
             cursor = dbapi_connection.cursor()
             cursor.execute(f"PRAGMA busy_timeout = {self.busy_timeout_ms}")
@@ -309,8 +309,7 @@ class SQLiteBackend(DatabaseBackend):
     def install_engine_hooks(self, engine: "Engine") -> None:
         @event.listens_for(engine, "connect")
         def _enable_sqlite_foreign_keys(
-            dbapi_connection: sa.engine.interfaces.DBAPIConnection, 
-            _connection_record: Any
+            dbapi_connection: sa.engine.interfaces.DBAPIConnection, _connection_record: Any
         ) -> None:
             self.configure_dbapi_connection(dbapi_connection)
 
@@ -333,7 +332,10 @@ class SQLiteBackend(DatabaseBackend):
             for row in rows:
                 logger.error(
                     "FK violation: table=%s rowid=%s references=%s fk_index=%s",
-                    row[0], row[1], row[2], row[3]
+                    row[0],
+                    row[1],
+                    row[2],
+                    row[3],
                 )
 
         if raise_error:

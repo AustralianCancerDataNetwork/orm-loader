@@ -34,9 +34,9 @@ It supports:
 ```python
 from orm_loader.tables import ORMTableBase
 
+
 class MyTable(ORMTableBase, Base):
     __tablename__ = "my_table"
-
 ```
 You can inherit from it directly or pick it up through one of the higher-level mixins.
 
@@ -55,7 +55,6 @@ Features include:
 ```python
 class MyTable(CSVLoadableTableInterface, ORMTableBase, Base):
     __tablename__ = "my_table"
-
 ```
 
 The main extension points here are loader choice, column mapping, and the normal SQLAlchemy model definitions themselves. Most downstream projects do not need to override much beyond `csv_columns()` and the model schema.

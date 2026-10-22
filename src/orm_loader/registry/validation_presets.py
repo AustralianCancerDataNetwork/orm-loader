@@ -1,9 +1,10 @@
 from .validation import (
-    ColumnNullabilityValidator, 
-    ColumnPresenceValidator, 
-    PrimaryKeyValidator, 
+    ColumnNullabilityValidator,
+    ColumnPresenceValidator,
+    PrimaryKeyValidator,
     ForeignKeyShapeValidator,
 )
+
 
 def always_on_validators():
     return [

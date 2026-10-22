@@ -3,6 +3,7 @@ from .metadata import Base
 
 ModelT = TypeVar("ModelT", bound=Base)
 
+
 def get_model_by_tablename(
     tablename: str,
     base: type[ModelT] = Base,  # ty: ignore[invalid-parameter-default]

@@ -86,20 +86,18 @@ def test_initial_csv_load_for_a_non_primary_schema_table(session, tmp_path):
     schema-tag coverage."""
     csv_path = tmp_path / "test_vocab_role_table.csv"
 
-    pd.DataFrame(
-        [{"id": 1, "name": "alpha"}, {"id": 2, "name": "beta"}]
-    ).to_csv(csv_path, index=False, sep="\t")
-
-    inserted = _VocabSchemaTable.load_csv(
-        session, csv_path, dedupe=False, loader=PandasLoader()
+    pd.DataFrame([{"id": 1, "name": "alpha"}, {"id": 2, "name": "beta"}]).to_csv(
+        csv_path, index=False, sep="\t"
     )
+
+    inserted = _VocabSchemaTable.load_csv(session, csv_path, dedupe=False, loader=PandasLoader())
     session.commit()
 
     assert inserted == 2
 
-    rows = session.execute(
-        sa.select(VocabSchemaTable).order_by(VocabSchemaTable.id)
-    ).scalars().all()
+    rows = (
+        session.execute(sa.select(VocabSchemaTable).order_by(VocabSchemaTable.id)).scalars().all()
+    )
 
     assert [(r.id, r.name) for r in rows] == [(1, "alpha"), (2, "beta")]
 
@@ -396,7 +394,9 @@ def test_insert_if_empty_raises_on_non_empty_target(session, engine, tmp_path):
 
     pd.DataFrame([{"id": 2, "name": "beta"}]).to_csv(csv_path, index=False, sep="\t")
 
-    with pytest.raises(ValueError, match="is not empty; cannot use merge strategy 'insert_if_empty'"):
+    with pytest.raises(
+        ValueError, match="is not empty; cannot use merge strategy 'insert_if_empty'"
+    ):
         _SimpleTable.load_csv(
             session,
             csv_path,
@@ -442,7 +442,10 @@ def test_empty_target_routes_merge_to_insert_if_empty(session, tmp_path, caplog,
 
     messages = [record.getMessage() for record in caplog.records]
 
-    assert any("Checking whether target table is empty for merge optimisation." in message for message in messages)
+    assert any(
+        "Checking whether target table is empty for merge optimisation." in message
+        for message in messages
+    )
     assert any(
         f"Target table is empty; routing merge strategy `{merge_strategy}` to insert-if-empty fast path."
         in message

@@ -35,9 +35,7 @@ def test_model_descriptor_detects_foreign_keys():
 
     desc = ModelDescriptor.from_model(Child)
 
-    assert desc.foreign_keys == {
-        "parent_id": ("parent", "id")
-    }
+    assert desc.foreign_keys == {"parent_id": ("parent", "id")}
 
 
 def test_model_descriptor_rejects_unmapped_class():
@@ -45,4 +43,4 @@ def test_model_descriptor_rejects_unmapped_class():
         pass
 
     with pytest.raises(NoInspectionAvailable):
-        ModelDescriptor.from_model(NotMapped) # type: ignore
+        ModelDescriptor.from_model(NotMapped)  # type: ignore

@@ -21,7 +21,9 @@ from .metadata import Base
 logger = logging.getLogger(__name__)
 
 
-def _resolve_binds(resolved: ResolvedDatabase, bindable: Bindable | None) -> tuple[Bindable, Bindable]:
+def _resolve_binds(
+    resolved: ResolvedDatabase, bindable: Bindable | None
+) -> tuple[Bindable, Bindable]:
     """Return (primary_bind, vocab_bind) to run DDL against.
 
     Built from resolved.create_engines()/create_engine() when bindable is
@@ -115,9 +117,7 @@ def create_tables(
             candidate
             for candidate in metadata.tables.values()
             if candidate.schema is not None
-            and resolved.tags_share_a_transaction(
-                candidate.schema, cast(str, table.schema)
-            )
+            and resolved.tags_share_a_transaction(candidate.schema, cast(str, table.schema))
         )
 
     for metadata, related in related_by_metadata.items():

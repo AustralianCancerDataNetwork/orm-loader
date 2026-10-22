@@ -1,4 +1,3 @@
-
 from dataclasses import dataclass
 from typing import Optional, Type
 import sqlalchemy as sa
@@ -27,9 +26,9 @@ It is designed to support:
 No domain rules or business logic are enforced here.
 """
 
+
 @dataclass(frozen=True)
 class TableSpec:
-
     """
     Table-level specification descriptor.
 
@@ -49,11 +48,13 @@ class TableSpec:
     user_guidance
         Optional additional guidance for implementers.
     """
+
     table_name: str
     schema: str
     is_required: bool
     description: str
     user_guidance: Optional[str] = None
+
 
 @dataclass(frozen=True)
 class FieldSpec:
@@ -82,6 +83,7 @@ class FieldSpec:
     fk_field
         Referenced field name, if the field is a foreign key.
     """
+
     table_name: str
     field_name: str
     data_type: str
@@ -90,6 +92,7 @@ class FieldSpec:
     is_foreign_key: bool
     fk_table: str | None
     fk_field: str | None
+
 
 @dataclass(frozen=True)
 class ModelDescriptor:
@@ -114,12 +117,12 @@ class ModelDescriptor:
     foreign_keys
         Mapping of column name to referenced (table, field).
     """
+
     model_class: Type[ORMTableProtocol]
     table_name: str
     columns: dict[str, sa.Column]
     primary_keys: set[str]
     foreign_keys: dict[str, tuple[str, str]]  # col -> (table, field)
-
 
     @classmethod
     def from_model(cls, model: Type[ORMTableProtocol]) -> "ModelDescriptor":
@@ -161,7 +164,7 @@ class ModelDescriptor:
             primary_keys={c.name for c in table.primary_key.columns},
             foreign_keys=fks,
         )
-    
+
     @property
     def cls(self) -> Type[ORMTableProtocol]:
         """
@@ -204,8 +207,8 @@ def load_table_specs(csv_resource) -> dict[str, TableSpec]:
             )
     return out
 
-def load_field_specs(csv_resource) -> dict[str, dict[str, FieldSpec]]:
 
+def load_field_specs(csv_resource) -> dict[str, dict[str, FieldSpec]]:
     """
     Load field specifications from a CSV resource.
 
@@ -253,10 +256,10 @@ class ModelRegistry:
     Load table and field specifications from CSV files (currently only OMOP format supported).
     TODO: support generalised specification formats via LinkML or similar.
 
-    Register ORM model classes and compare against specifications to confirm accurate and 
+    Register ORM model classes and compare against specifications to confirm accurate and
     complete implementation.
 
-    Model-specific constraints can be created to extend context-specific validation such 
+    Model-specific constraints can be created to extend context-specific validation such
     as OMOP domain constraints, value set adherence, etc.
 
     Validation logic itself is implemented elsewhere and consumes the
@@ -361,10 +364,9 @@ class ModelRegistry:
             Required table names that are not implemented.
         """
         return {
-            t for t, spec in self._table_specs.items()
-            if spec.is_required and t not in self._models
+            t for t, spec in self._table_specs.items() if spec.is_required and t not in self._models
         }
-    
+
     def discover_models(self, package: str) -> None:
         """
         Discover and register ORM models from a Python package.
@@ -379,9 +381,7 @@ class ModelRegistry:
         """
         module = importlib.import_module(package)
 
-        for _, modname, _ in pkgutil.walk_packages(
-            module.__path__, module.__name__ + "."
-        ):
+        for _, modname, _ in pkgutil.walk_packages(module.__path__, module.__name__ + "."):
             mod = importlib.import_module(modname)
 
             for obj in vars(mod).values():

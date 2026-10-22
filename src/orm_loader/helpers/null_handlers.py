@@ -3,6 +3,7 @@ from typing import Any
 
 _NULL_STRINGS = {"", "nan", "null", "none", "na", "n/a"}
 
+
 def normalise_null(value: Any) -> Any | None:
     if value is None:
         return None

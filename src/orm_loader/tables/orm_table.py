@@ -14,9 +14,9 @@ def _resolves_to_autoincrement(c: sa.Column) -> bool:
     own default ``autoincrement="auto"`` sentinel the same way SQLAlchemy
     itself does at DDL-emission time.
 
-    SQLAlchemy restricts real autoincrement behaviour to a single-column 
-    integer primary key (or an explicit ``autoincrement=True``). 
-    Treating every `"auto"` column as autoincrementing would wrongly 
+    SQLAlchemy restricts real autoincrement behaviour to a single-column
+    integer primary key (or an explicit ``autoincrement=True``).
+    Treating every `"auto"` column as autoincrementing would wrongly
     exclude genuinely-required string PKs from `required_columns()`.
     """
     if c.autoincrement is False:
@@ -27,6 +27,7 @@ def _resolves_to_autoincrement(c: sa.Column) -> bool:
         return False
     pk_columns = list(c.table.primary_key.columns)
     return len(pk_columns) == 1 and pk_columns[0] is c and isinstance(c.type, sa.Integer)
+
 
 """
 ORMTableBase
@@ -138,7 +139,7 @@ class ORMTableBase:
             A dictionary mapping primary key column names to values.
         """
         return {c.key: getattr(obj, c.key) for c in cls.pk_columns() if c.key is not None}
-    
+
     @classmethod
     def pk_tuple(cls, obj: Any) -> tuple[Any, ...]:
         """
@@ -156,11 +157,7 @@ class ORMTableBase:
         tuple
             A tuple of primary key values.
         """
-        return tuple(
-            getattr(obj, c.key)
-            for c in cls.pk_columns()
-            if c.key is not None
-        )
+        return tuple(getattr(obj, c.key) for c in cls.pk_columns() if c.key is not None)
 
     @classmethod
     def model_columns(cls) -> dict[str, sa.ColumnElement[Any]]:
@@ -174,7 +171,7 @@ class ORMTableBase:
         """
         mapper = cls.mapper_for()
         return {c.key: c for c in mapper.columns}
-    
+
     @classmethod
     def required_columns(cls) -> set[str]:
         """
@@ -229,9 +226,7 @@ class ORMTableBase:
         """
         pks = cls.pk_columns()
         if len(pks) != 1:
-            raise ValueError(
-                f"{cls.__name__} has composite PK; max_id() not supported"
-            )
+            raise ValueError(f"{cls.__name__} has composite PK; max_id() not supported")
         pk = pks[0]
         return session.query(sa.func.max(pk)).scalar() or 0
 
@@ -258,7 +253,6 @@ class ORMTableBase:
             An ID allocator initialised to the current maximum ID.
         """
         return IdAllocator(cls.max_id(session))
-
 
     @classmethod
     def clean_kwargs(
@@ -291,12 +285,9 @@ class ORMTableBase:
         if strict:
             missing = cls.required_columns() - cleaned.keys()
             if missing:
-                raise ValueError(
-                    f"Missing required fields for {cls.__name__}: {sorted(missing)}"
-                )
+                raise ValueError(f"Missing required fields for {cls.__name__}: {sorted(missing)}")
 
         return cleaned
-
 
     @classmethod
     def from_dict(
@@ -331,14 +322,10 @@ class ORMTableBase:
         except StatementError as e:
             # SQLAlchemy type coercion / bind errors
             msg = (
-                f"SQLAlchemy failed to bind values for {cls.__name__}.\n"
-                f"Cleaned kwargs: {cleaned}\n"
+                f"SQLAlchemy failed to bind values for {cls.__name__}.\nCleaned kwargs: {cleaned}\n"
             )
             raise ValueError(msg) from e
 
         except Exception as e:
-            msg = (
-                f"Unexpected error constructing {cls.__name__}.\n"
-                f"Cleaned kwargs: {cleaned}\n"
-            )
+            msg = f"Unexpected error constructing {cls.__name__}.\nCleaned kwargs: {cleaned}\n"
             raise RuntimeError(msg) from e

@@ -13,8 +13,10 @@ from orm_loader.registry.registry import (
 
 Base = so.declarative_base()
 
+
 class FakeResource:
     """Minimal stand-in for importlib.resources API."""
+
     def __init__(self, text: str):
         self._text = text
 
@@ -54,7 +56,6 @@ Person,gender_concept_id,No,integer,No,Yes,Concept,concept_id
     assert person_fields["gender_concept_id"].fk_table == "Concept"
 
 
-
 def test_register_single_model():
     class B(ORMTableBase, Base):
         __tablename__ = "b"
@@ -88,7 +89,7 @@ def test_missing_required_tables():
     reg = ModelRegistry(model_version="1.0")
 
     # Fake specs injected directly (unit-level test)
-    reg._table_specs = { # type: ignore
+    reg._table_specs = {  # type: ignore
         "person": type("S", (), {"is_required": True})(),
         "visit": type("S", (), {"is_required": False})(),
     }
@@ -102,7 +103,7 @@ def test_known_vs_registered_tables():
         id = sa.Column(sa.Integer, primary_key=True)
 
     reg = ModelRegistry(model_version="1.0")
-    reg._table_specs = { # type: ignore
+    reg._table_specs = {  # type: ignore
         "r": type("S", (), {"is_required": True})(),
         "x": type("S", (), {"is_required": True})(),
     }

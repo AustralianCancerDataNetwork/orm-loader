@@ -18,7 +18,9 @@ from tests.models import ComputedColumnTable
 _TARGET_TABLE = ComputedColumnTable.__tablename__
 _STAGING_TABLE = f"_staging_{_TARGET_TABLE}"
 _PREPARER = postgresql.dialect().identifier_preparer
-_STAGING_TABLE_WITH_SCHEMA: str = qualified(_PREPARER, _STAGING_TABLE, physical_schema=STAGING_SCHEMA)
+_STAGING_TABLE_WITH_SCHEMA: str = qualified(
+    _PREPARER, _STAGING_TABLE, physical_schema=STAGING_SCHEMA
+)
 
 _ComputedTableCls = cast("Type[CSVTableProtocol]", ComputedColumnTable)
 
@@ -106,13 +108,13 @@ def test_postgres_backend_rejects_non_positive_merge_batch_size(merge_batch_size
         merge(*args, merge_batch_size=merge_batch_size)
 
 
-
-
 def test_postgres_backend_default_staging_schema_is_none():
     backend = PostgresBackend()
 
     assert backend.staging_schema is None
-    assert backend.qualified_staging_name(_TARGET_TABLE) == qualified(_PREPARER, _STAGING_TABLE, physical_schema=None)
+    assert backend.qualified_staging_name(_TARGET_TABLE) == qualified(
+        _PREPARER, _STAGING_TABLE, physical_schema=None
+    )
 
 
 def test_postgres_backend_create_staging_table_drops_computed_columns(pg_session):
@@ -131,7 +133,7 @@ def test_postgres_backend_drop_staging_table():
 
     backend.drop_staging_table(_ComputedTableCls, _sess(session))
 
-    assert session.statements == [f'DROP TABLE IF EXISTS {_STAGING_TABLE_WITH_SCHEMA}']
+    assert session.statements == [f"DROP TABLE IF EXISTS {_STAGING_TABLE_WITH_SCHEMA}"]
 
 
 def test_postgres_backend_fk_methods_emit_expected_sql():
@@ -176,18 +178,23 @@ def test_postgres_backend_materialized_view_respects_schema(pg_db) -> None:
     selectable = sa.select(sa.literal(1).label("n"))
     engine = pg_db.connection.engine
 
-    with isolated_test_schema(engine, prefix="mv_primary") as primary_schema, \
-         isolated_test_schema(engine, prefix="mv_vocab") as vocab_schema:
+    with (
+        isolated_test_schema(engine, prefix="mv_primary") as primary_schema,
+        isolated_test_schema(engine, prefix="mv_vocab") as vocab_schema,
+    ):
         with engine.begin() as conn:
-            backend.create_materialized_view(conn, "mv_schema_test", selectable, schema=vocab_schema)
+            backend.create_materialized_view(
+                conn, "mv_schema_test", selectable, schema=vocab_schema
+            )
             backend.refresh_materialized_view(conn, "mv_schema_test", schema=vocab_schema)
 
         with engine.connect() as conn:
             assert sa.inspect(conn).has_table("mv_schema_test", schema=vocab_schema)
             assert not sa.inspect(conn).has_table("mv_schema_test", schema=primary_schema)
-            assert conn.execute(
-                sa.text(f'SELECT n FROM "{vocab_schema}".mv_schema_test')
-            ).scalar() == 1
+            assert (
+                conn.execute(sa.text(f'SELECT n FROM "{vocab_schema}".mv_schema_test')).scalar()
+                == 1
+            )
 
 
 def test_postgres_backend_materialized_view_methods_emit_expected_sql():
@@ -198,8 +205,11 @@ def test_postgres_backend_materialized_view_methods_emit_expected_sql():
     backend.create_materialized_view(_sess(session), "mv_test", selectable)
     backend.refresh_materialized_view(_sess(session), "mv_test")
 
-    assert any('CREATE MATERIALIZED VIEW IF NOT EXISTS mv_test as SELECT' in sql for sql in session.statements)
-    assert any('REFRESH MATERIALIZED VIEW mv_test;' == sql for sql in session.statements)
+    assert any(
+        "CREATE MATERIALIZED VIEW IF NOT EXISTS mv_test as SELECT" in sql
+        for sql in session.statements
+    )
+    assert any("REFRESH MATERIALIZED VIEW mv_test;" == sql for sql in session.statements)
 
 
 def test_postgres_backend_rejects_mismatched_dialect_bind():
@@ -241,12 +251,15 @@ def test_postgres_backend_quotes_unqualified_materialized_view_name():
     session = _FakeSession()
     selectable = sa.select(sa.literal(1).label("n"))
 
-    backend.create_materialized_view(_sess(session), 'mv name', selectable)
+    backend.create_materialized_view(_sess(session), "mv name", selectable)
     backend.create_materialized_view_index(
-        _sess(session), 'mv name', MaterializedViewIndex(name="mv_name_idx", columns=("n",))
+        _sess(session), "mv name", MaterializedViewIndex(name="mv_name_idx", columns=("n",))
     )
 
-    assert any('CREATE MATERIALIZED VIEW IF NOT EXISTS "mv name" as SELECT' in sql for sql in session.statements)
+    assert any(
+        'CREATE MATERIALIZED VIEW IF NOT EXISTS "mv name" as SELECT' in sql
+        for sql in session.statements
+    )
     assert any('ON "mv name" ("n")' in sql for sql in session.statements)
 
 
@@ -296,7 +309,7 @@ def test_postgres_backend_drop_materialized_view_default_args():
 
     backend.drop_materialized_view(_sess(session), "mv_test", schema="reporting")
 
-    assert session.statements == ['DROP MATERIALIZED VIEW IF EXISTS reporting.mv_test']
+    assert session.statements == ["DROP MATERIALIZED VIEW IF EXISTS reporting.mv_test"]
 
 
 def test_postgres_backend_drop_materialized_view_cascade_and_if_exists_false():
@@ -307,11 +320,14 @@ def test_postgres_backend_drop_materialized_view_cascade_and_if_exists_false():
         _sess(session), "mv_test", schema="reporting", if_exists=False, cascade=True
     )
 
-    assert session.statements == ['DROP MATERIALIZED VIEW reporting.mv_test CASCADE']
+    assert session.statements == ["DROP MATERIALIZED VIEW reporting.mv_test CASCADE"]
 
 
 def test_postgres_backend_drop_materialized_view_failure_preserves_cause():
-    from orm_loader.mappers.materialised_view_errors import MaterializationError, MaterializationOperation
+    from orm_loader.mappers.materialised_view_errors import (
+        MaterializationError,
+        MaterializationOperation,
+    )
 
     original = RuntimeError("boom")
     backend = PostgresBackend()
@@ -328,7 +344,10 @@ def test_postgres_backend_drop_materialized_view_failure_preserves_cause():
 
 
 def test_postgres_backend_create_materialized_view_failure_preserves_cause():
-    from orm_loader.mappers.materialised_view_errors import MaterializationError, MaterializationOperation
+    from orm_loader.mappers.materialised_view_errors import (
+        MaterializationError,
+        MaterializationOperation,
+    )
 
     original = RuntimeError("boom")
     backend = PostgresBackend()
@@ -384,9 +403,7 @@ def test_postgres_backend_refresh_concurrently_declared_but_database_rejects_it_
         )
 
     assert exc_info.value.failure.cause.orig is orig
-    assert session.statements == [
-        'REFRESH MATERIALIZED VIEW CONCURRENTLY reporting.mv_test;'
-    ]
+    assert session.statements == ["REFRESH MATERIALIZED VIEW CONCURRENTLY reporting.mv_test;"]
 
 
 def test_postgres_backend_refresh_concurrently_unrelated_operational_error_propagates_unchanged():
@@ -428,9 +445,7 @@ def test_postgres_backend_refresh_concurrently_with_declared_index_emits_concurr
         declared_indexes=(index,),
     )
 
-    assert session.statements[-1] == (
-        'REFRESH MATERIALIZED VIEW CONCURRENTLY reporting.mv_test;'
-    )
+    assert session.statements[-1] == ("REFRESH MATERIALIZED VIEW CONCURRENTLY reporting.mv_test;")
 
 
 def test_postgres_backend_materialized_view_lifecycle_is_schema_isolated_with_adversarial_identifiers(
@@ -466,20 +481,26 @@ def test_postgres_backend_materialized_view_lifecycle_is_schema_isolated_with_ad
             backend.drop_materialized_view(conn, name, schema=left_schema)
 
         with engine.connect() as conn:
-            assert conn.execute(
-                sa.text(
-                    "SELECT EXISTS (SELECT 1 FROM pg_matviews "
-                    "WHERE schemaname = :schema AND matviewname = :name)"
-                ),
-                {"schema": left_schema, "name": name},
-            ).scalar() is False
-            assert conn.execute(
-                sa.text(
-                    "SELECT EXISTS (SELECT 1 FROM pg_matviews "
-                    "WHERE schemaname = :schema AND matviewname = :name)"
-                ),
-                {"schema": right_schema, "name": name},
-            ).scalar() is True
+            assert (
+                conn.execute(
+                    sa.text(
+                        "SELECT EXISTS (SELECT 1 FROM pg_matviews "
+                        "WHERE schemaname = :schema AND matviewname = :name)"
+                    ),
+                    {"schema": left_schema, "name": name},
+                ).scalar()
+                is False
+            )
+            assert (
+                conn.execute(
+                    sa.text(
+                        "SELECT EXISTS (SELECT 1 FROM pg_matviews "
+                        "WHERE schemaname = :schema AND matviewname = :name)"
+                    ),
+                    {"schema": right_schema, "name": name},
+                ).scalar()
+                is True
+            )
     finally:
         with engine.begin() as cleanup_conn:
             for schema in (left_schema, right_schema):
@@ -516,9 +537,7 @@ def test_postgres_backend_materialized_view_legacy_unqualified_path_still_round_
     backend = PostgresBackend()
     conn = pg_db.connection
 
-    backend.create_materialized_view(
-        conn, "mv_legacy_test", sa.select(sa.literal(1).label("n"))
-    )
+    backend.create_materialized_view(conn, "mv_legacy_test", sa.select(sa.literal(1).label("n")))
     backend.refresh_materialized_view(conn, "mv_legacy_test")
     assert conn.execute(sa.text("SELECT n FROM mv_legacy_test")).scalar() == 1
 
@@ -572,7 +591,6 @@ def test_postgres_backend_enable_fk_raises_when_show_returns_non_string():
         assert "Expected PostgreSQL FK state to be a string" in str(exc)
     else:
         raise AssertionError("Expected RuntimeError when SHOW returns a non-string")
-
 
 
 def test_postgres_backend_engine_with_replica_role_unregisters_listener(monkeypatch):

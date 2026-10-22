@@ -38,10 +38,12 @@ class BackendCapabilities:
 STAGING_SCHEMA: str = "staging"
 
 
-def staging_schema_claim(physical_schema: str | None = None, *, reserved: bool = True) -> SchemaClaim:
+def staging_schema_claim(
+    physical_schema: str | None = None, *, reserved: bool = True
+) -> SchemaClaim:
     """SchemaClaim reserving orm-loader's staging schema.
     Since orm-loader doesn't have an engine creation step of its own,
-    this claim needs to be registered by the caller ingesting tables into 
+    this claim needs to be registered by the caller ingesting tables into
     the database through orm-loader.
 
     Add to your own ``create_engines(schema_claims=[...])`` call before
@@ -99,7 +101,9 @@ class DatabaseBackend(ABC):
     without changing existing loader orchestration yet.
     """
 
-    def __init__(self, *, staging_schema_tag: str | None = None, staging_schema: str | None = None) -> None:
+    def __init__(
+        self, *, staging_schema_tag: str | None = None, staging_schema: str | None = None
+    ) -> None:
         """
         Parameters
         ----------
@@ -156,7 +160,9 @@ class DatabaseBackend(ABC):
             e.g. '"staging"."_staging_concept"' or '"_staging_concept"'.
         """
         return qualified(
-            self.identifier_preparer, self.staging_name_for_table(tablename), physical_schema=self.staging_schema
+            self.identifier_preparer,
+            self.staging_name_for_table(tablename),
+            physical_schema=self.staging_schema,
         )
 
     @property
@@ -210,10 +216,8 @@ class DatabaseBackend(ABC):
                 f"Unknown backend capability {capability_name!r} on {type(self.capabilities).__name__}"
             )
         if not getattr(self.capabilities, capability_name):
-            raise NotImplementedError(
-                f"Backend '{self.name}' does not support {feature_name}"
-            )
-        
+            raise NotImplementedError(f"Backend '{self.name}' does not support {feature_name}")
+
     @contextmanager
     def _as_connection(
         self,
@@ -490,6 +494,5 @@ class DatabaseBackend(ABC):
         the same compatibility reason as :meth:`drop_materialized_view`.
         """
         raise NotImplementedError(
-            f"Backend '{self.name}' has not implemented "
-            "create_materialized_view_index()"
+            f"Backend '{self.name}' has not implemented create_materialized_view_index()"
         )
