@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from typing import TYPE_CHECKING, Type, cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
 import sqlalchemy as sa
@@ -37,7 +37,7 @@ class _FakeSession:
         return _Result(self.scalar_result)
 
 
-_ComputedTableCls = cast("Type[CSVTableProtocol]", ComputedColumnTable)
+_ComputedTableCls = cast("type[CSVTableProtocol]", ComputedColumnTable)
 
 
 def _sess(s: _FakeSession) -> so.Session:

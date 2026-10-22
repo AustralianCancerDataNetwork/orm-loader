@@ -1,10 +1,12 @@
+import logging
+from typing import Any
+
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 from sqlalchemy.exc import NoInspectionAvailable, StatementError
-from typing import Any
-import logging
-from .allocators import IdAllocator
+
 from ..helpers import normalise_null
+from .allocators import IdAllocator
 
 logger = logging.getLogger(__name__)
 

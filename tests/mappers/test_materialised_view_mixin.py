@@ -6,9 +6,9 @@ from typing import Any
 import pytest
 import sqlalchemy as sa
 import sqlalchemy.orm as so
-
 from oa_configurator import Role
 from oa_configurator.testing import scoped_test_schema
+
 from orm_loader.mappers.materialised_view_contracts import MaterializedViewIndex
 from orm_loader.mappers.materialised_view_mixin import (
     MaterializedViewMixin,

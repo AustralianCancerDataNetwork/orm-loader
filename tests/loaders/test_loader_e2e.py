@@ -1,6 +1,6 @@
-from typing import Type, cast
-
 import logging
+from typing import cast
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -30,12 +30,12 @@ from tests.models import (
 
 # Typed aliases: Pylance cannot verify SQLAlchemy metaclass-generated attrs
 # satisfy CSVTableProtocol structurally, so we cast once per class here.
-_SimpleTable = cast(Type[CSVTableProtocol], SimpleTable)
-_RequiredTable = cast(Type[CSVTableProtocol], RequiredTable)
-_CompositeTable = cast(Type[CSVTableProtocol], CompositeTable)
-_EnumTable = cast(Type[CSVTableProtocol], EnumTable)
-_ImpliedEnumTable = cast(Type[CSVTableProtocol], ImpliedEnumTable)
-_VocabSchemaTable = cast(Type[CSVTableProtocol], VocabSchemaTable)
+_SimpleTable = cast(type[CSVTableProtocol], SimpleTable)
+_RequiredTable = cast(type[CSVTableProtocol], RequiredTable)
+_CompositeTable = cast(type[CSVTableProtocol], CompositeTable)
+_EnumTable = cast(type[CSVTableProtocol], EnumTable)
+_ImpliedEnumTable = cast(type[CSVTableProtocol], ImpliedEnumTable)
+_VocabSchemaTable = cast(type[CSVTableProtocol], VocabSchemaTable)
 
 
 @pytest.fixture(autouse=True)
@@ -549,7 +549,7 @@ def test_nullable_column_with_nan_does_not_crash(session, engine, tmp_path):
         flag: so.Mapped[str | None] = so.mapped_column(sa.String, nullable=True)
 
     Base.metadata.create_all(engine)
-    _NullableTable = cast(Type[CSVTableProtocol], NullableTable)
+    _NullableTable = cast(type[CSVTableProtocol], NullableTable)
 
     csv = tmp_path / "nullable_table.csv"
     pd.DataFrame(
@@ -586,7 +586,7 @@ def test_embedded_newline_in_field_is_preserved(session, engine, tmp_path):
         name: so.Mapped[str] = so.mapped_column(sa.String)
 
     Base.metadata.create_all(engine)
-    _TextTable = cast(Type[CSVTableProtocol], TextTable)
+    _TextTable = cast(type[CSVTableProtocol], TextTable)
 
     csv = tmp_path / "text_table.csv"
 
@@ -614,7 +614,7 @@ def test_embedded_tab_in_field(session, engine, tmp_path):
         name: so.Mapped[str] = so.mapped_column(sa.String)
 
     Base.metadata.create_all(engine)
-    _TextTable2 = cast(Type[CSVTableProtocol], TextTable2)
+    _TextTable2 = cast(type[CSVTableProtocol], TextTable2)
 
     csv = tmp_path / "tab_table.csv"
     csv.write_text('id\tname\n1\t"foo\tbar"\n')

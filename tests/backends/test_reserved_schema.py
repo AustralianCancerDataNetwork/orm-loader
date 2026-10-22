@@ -17,6 +17,7 @@ see each other.
 
 from __future__ import annotations
 
+import pytest
 from oa_configurator import (
     CDMDatabaseConfig,
     GenericDatabaseConfig,
@@ -24,7 +25,6 @@ from oa_configurator import (
     SchemaOwnershipError,
 )
 from oa_configurator.testing import reset_schema_registry_rows
-import pytest
 
 from orm_loader.backends import STAGING_SCHEMA, staging_schema_claim
 

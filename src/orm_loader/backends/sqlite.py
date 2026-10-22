@@ -102,7 +102,7 @@ class SQLiteBackend(DatabaseBackend):
 
     def create_staging_table(
         self,
-        table_cls: type["CSVTableProtocol"],
+        table_cls: type[CSVTableProtocol],
         session: so.Session,
     ) -> None:
         staging_name = self.staging_name_for_table(table_cls.__tablename__)
@@ -127,7 +127,7 @@ class SQLiteBackend(DatabaseBackend):
 
     def drop_staging_table(
         self,
-        table_cls: type["CSVTableProtocol"],
+        table_cls: type[CSVTableProtocol],
         session: so.Session,
     ) -> None:
         staging_ref = self.identifier_preparer.quote_identifier(
@@ -173,7 +173,7 @@ class SQLiteBackend(DatabaseBackend):
 
     def merge_replace(
         self,
-        table_cls: type["CSVTableProtocol"],
+        table_cls: type[CSVTableProtocol],
         session: so.Session,
         pk_cols: list[str],
         *,
@@ -222,7 +222,7 @@ class SQLiteBackend(DatabaseBackend):
 
     def merge_upsert(
         self,
-        table_cls: type["CSVTableProtocol"],
+        table_cls: type[CSVTableProtocol],
         session: so.Session,
         pk_cols: list[str],
         *,
@@ -263,7 +263,7 @@ class SQLiteBackend(DatabaseBackend):
 
     def merge_insert(
         self,
-        table_cls: type["CSVTableProtocol"],
+        table_cls: type[CSVTableProtocol],
         session: so.Session,
         *,
         merge_batch_size: int | None = None,
@@ -306,7 +306,7 @@ class SQLiteBackend(DatabaseBackend):
                 cursor.execute("PRAGMA defer_foreign_keys = ON;")
             cursor.close()
 
-    def install_engine_hooks(self, engine: "Engine") -> None:
+    def install_engine_hooks(self, engine: Engine) -> None:
         @event.listens_for(engine, "connect")
         def _enable_sqlite_foreign_keys(
             dbapi_connection: sa.engine.interfaces.DBAPIConnection, _connection_record: Any

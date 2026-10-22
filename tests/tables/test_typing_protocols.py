@@ -1,11 +1,12 @@
 import sqlalchemy as sa
 import sqlalchemy.orm as so
+
+from orm_loader.tables.loadable_table import CSVLoadableTableInterface
 from orm_loader.tables.orm_table import ORMTableBase
 from orm_loader.tables.serialisable_table import SerialisableTableInterface
-from orm_loader.tables.loadable_table import CSVLoadableTableInterface
 from orm_loader.tables.typing import (
-    ORMTableProtocol,
     CSVTableProtocol,
+    ORMTableProtocol,
     SerializedTableProtocol,
 )
 

@@ -1,15 +1,17 @@
-from sqlalchemy import ColumnElement
-from sqlalchemy.types import Integer, Float, Boolean, Date, DateTime, String, Text, TypeEngine
-from typing import Any, Callable
-from enum import Enum
 import math
+import re
+from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import date, datetime
+from enum import Enum
+from typing import Any
+
+import pandas as pd
 import pyarrow as pa
 import pyarrow.compute as pc
-import pandas as pd
-import re
-from datetime import datetime, date
 from dateutil import parser
+from sqlalchemy import ColumnElement
+from sqlalchemy.types import Boolean, Date, DateTime, Float, Integer, String, Text, TypeEngine
 
 from ..data_classes import TableCastingStats
 

@@ -1,11 +1,12 @@
-from typing import Any, Type, List, Dict, TYPE_CHECKING
 from dataclasses import dataclass, field
-import sqlalchemy as sa
-import sqlalchemy.orm as so
+from logging import getLogger
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
 import pandas as pd
 import pyarrow as pa
-from logging import getLogger
+import sqlalchemy as sa
+import sqlalchemy.orm as so
 
 logger = getLogger(__name__)
 
@@ -72,7 +73,7 @@ class LoaderContext:
         resolves the same schema.
     """
 
-    tableclass: Type["CSVTableProtocol"]
+    tableclass: type["CSVTableProtocol"]
     session: so.Session
     path: Path
     staging_table: sa.Table
@@ -185,7 +186,7 @@ class ColumnCastingStats:
     """
 
     count: int = 0
-    examples: List[Any] = field(default_factory=list)
+    examples: list[Any] = field(default_factory=list)
 
     def record(self, value: Any, example_limit: int = 3):
         self.count += 1
@@ -200,7 +201,7 @@ class TableCastingStats:
     """
 
     table_name: str
-    columns: Dict[str, ColumnCastingStats] = field(default_factory=dict)
+    columns: dict[str, ColumnCastingStats] = field(default_factory=dict)
 
     def record(
         self,

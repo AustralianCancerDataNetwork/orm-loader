@@ -3,9 +3,10 @@ from __future__ import annotations
 import importlib
 import importlib.abc
 import sys
+from collections.abc import Sequence
 from importlib.machinery import ModuleSpec
 from types import ModuleType
-from typing import TYPE_CHECKING, Sequence, Type, cast, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 import sqlalchemy as sa
@@ -66,16 +67,16 @@ class FakeBackend(DatabaseBackend):
         return f"_staging_{tablename}"
 
     def create_staging_table(
-        self, _table_cls: Type[CSVTableProtocol], _session: so.Session
+        self, _table_cls: type[CSVTableProtocol], _session: so.Session
     ) -> None:
         return None
 
-    def drop_staging_table(self, _table_cls: Type[CSVTableProtocol], _session: so.Session) -> None:
+    def drop_staging_table(self, _table_cls: type[CSVTableProtocol], _session: so.Session) -> None:
         return None
 
     def merge_replace(
         self,
-        _table_cls: Type[CSVTableProtocol],
+        _table_cls: type[CSVTableProtocol],
         _session: so.Session,
         _target_name: str,
         _pk_cols: list[str],
@@ -86,7 +87,7 @@ class FakeBackend(DatabaseBackend):
 
     def merge_upsert(
         self,
-        _table_cls: Type[CSVTableProtocol],
+        _table_cls: type[CSVTableProtocol],
         _session: so.Session,
         _target_name: str,
         _pk_cols: list[str],
@@ -97,7 +98,7 @@ class FakeBackend(DatabaseBackend):
 
     def merge_insert(
         self,
-        _table_cls: Type[CSVTableProtocol],
+        _table_cls: type[CSVTableProtocol],
         _session: so.Session,
         _target_name: str,
         *,
@@ -154,7 +155,7 @@ class _ComputedTable:
     )
 
 
-_ComputedTableCls = cast("Type[CSVTableProtocol]", _ComputedTable)
+_ComputedTableCls = cast("type[CSVTableProtocol]", _ComputedTable)
 
 
 def test_backend_capabilities_defaults():
@@ -184,7 +185,7 @@ def test_fake_backend_can_implement_contract():
     assert backend.resolve_index_strategy("keep") == "keep"
     assert backend.load_staging_fast(cast("LoaderContext", None)) is None
 
-    with backend.merge_context(cast("Type[CSVTableProtocol]", None), cast(so.Session, None)):
+    with backend.merge_context(cast("type[CSVTableProtocol]", None), cast(so.Session, None)):
         pass
 
 
@@ -258,9 +259,8 @@ def test_bulk_load_context_raises_when_capability_missing(session):
 def test_bulk_load_context_rolls_back_and_restores(session):
     backend = FakeBackend()
 
-    with pytest.raises(RuntimeError, match="boom"):
-        with backend.bulk_load_context(session):
-            raise RuntimeError("boom")
+    with pytest.raises(RuntimeError, match="boom"), backend.bulk_load_context(session):
+        raise RuntimeError("boom")
 
     assert backend.calls == [
         ("disable_fk_check", session),
@@ -269,7 +269,7 @@ def test_bulk_load_context_rolls_back_and_restores(session):
 
 
 def test_backends_package_exports():
-    import orm_loader.backends as backends
+    from orm_loader import backends
 
     assert backends.DatabaseBackend is DatabaseBackend
     assert backends.BackendCapabilities is BackendCapabilities

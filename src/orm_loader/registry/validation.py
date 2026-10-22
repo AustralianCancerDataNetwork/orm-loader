@@ -1,7 +1,9 @@
 from __future__ import annotations
+
 from typing import Protocol
-from .validation_report import ValidationIssue, SeverityLevel
-from .registry import ModelDescriptor, TableSpec, FieldSpec
+
+from .registry import FieldSpec, ModelDescriptor, TableSpec
+from .validation_report import SeverityLevel, ValidationIssue
 
 
 class Validator(Protocol):

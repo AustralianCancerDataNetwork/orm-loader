@@ -24,7 +24,6 @@ from oa_configurator import Role as SchemaRole
 
 from orm_loader.backends import STAGING_SCHEMA
 from orm_loader.loaders.loader_interface import PandasLoader
-
 from tests.conftest import schema_scoped_session
 from tests.models import SimpleTable, VocabSchemaTable
 

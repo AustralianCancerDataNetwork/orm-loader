@@ -1,8 +1,9 @@
 import logging
+from collections.abc import Generator
 from contextlib import contextmanager
+
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session
-from typing import Generator
 
 logger = logging.getLogger(__name__)
 

@@ -13,17 +13,17 @@ from .materialised_view_contracts import (
     DropMaterializedView,
     MaterializedViewIndex,
 )
-from .materialised_view_mixin import (
-    CreateMaterializedView,
-    MaterializedViewMixin,
-    refresh_all_mvs,
-    resolve_mv_refresh_order,
-)
 from .materialised_view_errors import (
     ConcurrentRefreshNotEligibleError,
     MaterializationError,
     MaterializationFailure,
     MaterializationOperation,
+)
+from .materialised_view_mixin import (
+    CreateMaterializedView,
+    MaterializedViewMixin,
+    refresh_all_mvs,
+    resolve_mv_refresh_order,
 )
 
 __all__ = [

@@ -1,15 +1,16 @@
 import io
-from orm_loader.registry.registry import ModelRegistry
+
 import sqlalchemy as sa
 import sqlalchemy.orm as so
-from orm_loader.tables.orm_table import ORMTableBase
 
 from orm_loader.registry.registry import (
-    load_table_specs,
-    load_field_specs,
-    TableSpec,
     FieldSpec,
+    ModelRegistry,
+    TableSpec,
+    load_field_specs,
+    load_table_specs,
 )
+from orm_loader.tables.orm_table import ORMTableBase
 
 Base = so.declarative_base()
 

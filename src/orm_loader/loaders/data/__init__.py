@@ -1,6 +1,6 @@
-from .converters import perform_cast, cast_arrow_column
+from .converters import cast_arrow_column, perform_cast
 
 __all__ = [
-    "perform_cast",
     "cast_arrow_column",
+    "perform_cast",
 ]

@@ -1,10 +1,11 @@
 import io
+
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 
 from orm_loader.registry.registry import ModelRegistry
-from orm_loader.registry.validation_runner import ValidationRunner
 from orm_loader.registry.validation_presets import always_on_validators
+from orm_loader.registry.validation_runner import ValidationRunner
 from orm_loader.tables.orm_table import ORMTableBase
 
 Base = so.declarative_base()

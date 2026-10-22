@@ -1,7 +1,6 @@
-from .validation_report import ValidationReport, SeverityLevel
 from .registry import ModelRegistry
 from .validation import Validator
-
+from .validation_report import SeverityLevel, ValidationReport
 
 """
 Validation Runner

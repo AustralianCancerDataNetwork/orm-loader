@@ -15,8 +15,7 @@ _DIALECT = postgresql.dialect()
 
 
 def test_mappers_package_exports_materialized_view_api():
-    import orm_loader.mappers as mappers
-
+    from orm_loader import mappers
     from orm_loader.mappers.materialised_view_errors import MaterializationError
 
     assert mappers.MaterializedViewIndex is MaterializedViewIndex

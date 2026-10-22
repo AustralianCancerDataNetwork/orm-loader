@@ -1,9 +1,10 @@
 from enum import Enum
 
 import sqlalchemy as sa
+import sqlalchemy.orm as so
 from oa_configurator import Role as SchemaRole
 from sqlalchemy.orm import declarative_base
-import sqlalchemy.orm as so
+
 from orm_loader.tables import CSVLoadableTableInterface
 
 Base = declarative_base()

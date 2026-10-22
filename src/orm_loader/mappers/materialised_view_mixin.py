@@ -2,13 +2,13 @@ from collections import defaultdict, deque
 from typing import Any
 
 import sqlalchemy as sa
-from sqlalchemy.ext import compiler
-from sqlalchemy.schema import DDLElement
 from oa_configurator import (
     Role,
     open_connection,
     physical_schema_of,
 )
+from sqlalchemy.ext import compiler
+from sqlalchemy.schema import DDLElement
 
 from .materialised_view_contracts import MaterializedViewIndex
 

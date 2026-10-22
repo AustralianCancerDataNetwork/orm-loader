@@ -1,18 +1,17 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable, Generator
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
-from collections.abc import Generator
 from functools import wraps
-from typing import TYPE_CHECKING, Any, Callable, ParamSpec, Type, TypeVar, cast
+from typing import TYPE_CHECKING, Any, ParamSpec, TypeVar, cast
 
 import sqlalchemy as sa
 import sqlalchemy.orm as so
+from oa_configurator import Dialect, SchemaClaim, open_connection, qualified
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.sql.compiler import IdentifierPreparer
-
-from oa_configurator import Dialect, SchemaClaim, open_connection, qualified
 
 if TYPE_CHECKING:
     from ..loaders.data_classes import LoaderContext
@@ -263,7 +262,7 @@ class DatabaseBackend(ABC):
 
     def _insertable_column_names(
         self,
-        table_cls: Type["CSVTableProtocol"],
+        table_cls: type[CSVTableProtocol],
     ) -> list[str]:
         """
         Return column names safe to include in generic insert statements.
@@ -276,7 +275,7 @@ class DatabaseBackend(ABC):
     @abstractmethod
     def create_staging_table(
         self,
-        table_cls: Type["CSVTableProtocol"],
+        table_cls: type[CSVTableProtocol],
         session: so.Session,
     ) -> None:
         """Create a staging table for the supplied ORM table class."""
@@ -284,14 +283,14 @@ class DatabaseBackend(ABC):
     @abstractmethod
     def drop_staging_table(
         self,
-        table_cls: Type["CSVTableProtocol"],
+        table_cls: type[CSVTableProtocol],
         session: so.Session,
     ) -> None:
         """Drop a staging table if it exists."""
 
     def load_staging_fast(
         self,
-        loader_context: "LoaderContext",
+        loader_context: LoaderContext,
     ) -> int | None:
         """
         Attempt a backend-native fast-path load.
@@ -331,7 +330,7 @@ class DatabaseBackend(ABC):
     @abstractmethod
     def merge_replace(
         self,
-        table_cls: Type["CSVTableProtocol"],
+        table_cls: type[CSVTableProtocol],
         session: so.Session,
         pk_cols: list[str],
         *,
@@ -342,7 +341,7 @@ class DatabaseBackend(ABC):
     @abstractmethod
     def merge_upsert(
         self,
-        table_cls: Type["CSVTableProtocol"],
+        table_cls: type[CSVTableProtocol],
         session: so.Session,
         pk_cols: list[str],
         *,
@@ -353,7 +352,7 @@ class DatabaseBackend(ABC):
     @abstractmethod
     def merge_insert(
         self,
-        table_cls: Type["CSVTableProtocol"],
+        table_cls: type[CSVTableProtocol],
         session: so.Session,
         *,
         merge_batch_size: int | None = None,
@@ -362,7 +361,7 @@ class DatabaseBackend(ABC):
 
     def merge_context(
         self,
-        table_cls: Type["CSVTableProtocol"],
+        table_cls: type[CSVTableProtocol],
         session: so.Session,
     ) -> AbstractContextManager[None]:
         """Disable backend FK checks for a table's merge and restore them afterward."""
@@ -413,7 +412,7 @@ class DatabaseBackend(ABC):
     @requires_capability("supports_materialized_views", "materialized views")
     def create_materialized_view(
         self,
-        bind: "Engine | Connection",
+        bind: Engine | Connection,
         name: str,
         selectable: sa.sql.Select[Any],
         *,
@@ -434,12 +433,12 @@ class DatabaseBackend(ABC):
     @requires_capability("supports_materialized_views", "materialized views")
     def refresh_materialized_view(
         self,
-        bind: "Engine | Connection",
+        bind: Engine | Connection,
         name: str,
         *,
         schema: str | None = None,
         concurrently: bool = False,
-        declared_indexes: tuple["MaterializedViewIndex", ...] = (),
+        declared_indexes: tuple[MaterializedViewIndex, ...] = (),
     ) -> None:
         """Refresh a materialized view.
 
@@ -457,7 +456,7 @@ class DatabaseBackend(ABC):
     @requires_capability("supports_materialized_views", "materialized views")
     def drop_materialized_view(
         self,
-        bind: "Engine | Connection",
+        bind: Engine | Connection,
         name: str,
         *,
         schema: str | None = None,
@@ -480,9 +479,9 @@ class DatabaseBackend(ABC):
     @requires_capability("supports_materialized_views", "materialized views")
     def create_materialized_view_index(
         self,
-        bind: "Engine | Connection",
+        bind: Engine | Connection,
         name: str,
-        index: "MaterializedViewIndex",
+        index: MaterializedViewIndex,
         *,
         schema: str | None = None,
         if_not_exists: bool = True,

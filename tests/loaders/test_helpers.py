@@ -1,8 +1,7 @@
+import io
 from pathlib import Path
 
 import pytest
-
-import io
 
 from orm_loader.loaders.data_classes import ColumnCastingStats, TableCastingStats
 from orm_loader.loaders.loading_helpers import (

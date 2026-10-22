@@ -1,7 +1,9 @@
 from pathlib import Path
-import sqlalchemy as sa
-from orm_loader.loaders.data_classes import LoaderContext
+
 import pandas as pd
+import sqlalchemy as sa
+
+from orm_loader.loaders.data_classes import LoaderContext
 from orm_loader.loaders.loader_interface import PandasLoader
 from tests.models import PandasLoaderTable
 

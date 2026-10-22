@@ -1,19 +1,18 @@
-from typing import (
-    Protocol,
-    ClassVar,
-    runtime_checkable,
-    TYPE_CHECKING,
-    Optional,
-    Type,
-    Dict,
-    Any,
-    Unpack,
-    TypedDict,
-)
-import sqlalchemy.orm as so
-import sqlalchemy as sa
-from pathlib import Path
 from contextlib import AbstractContextManager
+from pathlib import Path
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    ClassVar,
+    Optional,
+    Protocol,
+    TypedDict,
+    Unpack,
+    runtime_checkable,
+)
+
+import sqlalchemy as sa
+import sqlalchemy.orm as so
 
 if TYPE_CHECKING:
     from ..loaders import LoaderContext, LoaderInterface
@@ -88,7 +87,7 @@ class CSVTableProtocol(ORMTableProtocol, Protocol):
 
     @classmethod
     def load_staging(
-        cls: Type["CSVTableProtocol"], loader: "LoaderInterface", loader_context: "LoaderContext"
+        cls: type["CSVTableProtocol"], loader: "LoaderInterface", loader_context: "LoaderContext"
     ) -> int: ...
 
     @classmethod
@@ -165,7 +164,7 @@ class SerializedTableProtocol(Protocol):
         include_nulls: bool = False,
         only: set[str] | None = None,
         exclude: set[str] | None = None,
-    ) -> Dict[str, Any]: ...
+    ) -> dict[str, Any]: ...
 
     def to_json(self, **kwargs: Unpack[ToDictKwargs]) -> str: ...
 

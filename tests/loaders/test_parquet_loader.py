@@ -1,15 +1,16 @@
+from typing import cast
+
+import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
-import pandas as pd
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 from oa_configurator import Role
 from sqlalchemy.orm import DeclarativeBase
-from typing import cast, Type
 
+from orm_loader.loaders.loader_interface import ParquetLoader
 from orm_loader.tables.loadable_table import CSVLoadableTableInterface
 from orm_loader.tables.typing import CSVTableProtocol
-from orm_loader.loaders.loader_interface import ParquetLoader
 
 
 class Base(DeclarativeBase):
@@ -24,7 +25,7 @@ class ParquetTable(Base, CSVLoadableTableInterface):
     value: so.Mapped[int] = so.mapped_column(sa.Integer, nullable=False)
 
 
-_ParquetTable = cast(Type[CSVTableProtocol], ParquetTable)
+_ParquetTable = cast(type[CSVTableProtocol], ParquetTable)
 
 
 def test_parquet_loader(session, engine, tmp_path):
@@ -63,7 +64,7 @@ class NullSentinelTable(Base, CSVLoadableTableInterface):
     role: so.Mapped[str | None] = so.mapped_column(sa.String, nullable=True)
 
 
-_NullSentinelTable = cast(Type[CSVTableProtocol], NullSentinelTable)
+_NullSentinelTable = cast(type[CSVTableProtocol], NullSentinelTable)
 
 _SENTINELS = ["NULL", "null", " NULL ", "n/a", "N/A", "NaN", "none", "None", "  ", ""]
 

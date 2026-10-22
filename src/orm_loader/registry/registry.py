@@ -1,10 +1,11 @@
-from dataclasses import dataclass
-from typing import Optional, Type
-import sqlalchemy as sa
 import csv
 import importlib
-import pkgutil
 import logging
+import pkgutil
+from dataclasses import dataclass
+
+import sqlalchemy as sa
+
 from ..tables.typing import ORMTableProtocol
 
 logger = logging.getLogger(__name__)
@@ -53,7 +54,7 @@ class TableSpec:
     schema: str
     is_required: bool
     description: str
-    user_guidance: Optional[str] = None
+    user_guidance: str | None = None
 
 
 @dataclass(frozen=True)
@@ -118,14 +119,14 @@ class ModelDescriptor:
         Mapping of column name to referenced (table, field).
     """
 
-    model_class: Type[ORMTableProtocol]
+    model_class: type[ORMTableProtocol]
     table_name: str
     columns: dict[str, sa.Column]
     primary_keys: set[str]
     foreign_keys: dict[str, tuple[str, str]]  # col -> (table, field)
 
     @classmethod
-    def from_model(cls, model: Type[ORMTableProtocol]) -> "ModelDescriptor":
+    def from_model(cls, model: type[ORMTableProtocol]) -> "ModelDescriptor":
         """
         Construct a ModelDescriptor from an ORM model class.
 
@@ -166,7 +167,7 @@ class ModelDescriptor:
         )
 
     @property
-    def cls(self) -> Type[ORMTableProtocol]:
+    def cls(self) -> type[ORMTableProtocol]:
         """
         Alias for the underlying ORM model class.
 
@@ -266,7 +267,7 @@ class ModelRegistry:
     registry as contextual input.
     """
 
-    def __init__(self, *, model_version: str, model_name: Optional[str] = None):
+    def __init__(self, *, model_version: str, model_name: str | None = None):
         """
         Initialise a new model registry.
 

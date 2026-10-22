@@ -1,14 +1,15 @@
+from datetime import date, datetime
 from enum import Enum, IntEnum
 
+import pytest
 import sqlalchemy as sa
+
 from orm_loader.loaders.data.converters import (
     _COLUMN_CAST_RULES,
     cast_scalar,
     perform_cast,
     register_column_cast_rule,
 )
-import pytest
-from datetime import date, datetime
 
 
 def test_perform_cast_integer():

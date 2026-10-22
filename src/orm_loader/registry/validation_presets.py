@@ -1,8 +1,8 @@
 from .validation import (
     ColumnNullabilityValidator,
     ColumnPresenceValidator,
-    PrimaryKeyValidator,
     ForeignKeyShapeValidator,
+    PrimaryKeyValidator,
 )
 
 

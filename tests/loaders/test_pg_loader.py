@@ -1,15 +1,15 @@
-import sqlalchemy as sa
 import pandas as pd
 import pytest
+import sqlalchemy as sa
+
 from orm_loader.backends import STAGING_SCHEMA, resolve_backend
 from orm_loader.loaders.data.converters import _COLUMN_CAST_RULES, register_column_cast_rule
 from orm_loader.loaders.loading_helpers import (
-    infer_encoding,
-    infer_delim,
     check_line_ending,
+    infer_delim,
+    infer_encoding,
     quick_load_pg,
 )
-
 from tests.models import EnumTable, Role, SimpleTable
 
 
@@ -89,7 +89,7 @@ def test_postgres_copy_fast_path_is_used(pg_session, tmp_path, monkeypatch):
         called["copy"] = True
         return 1
 
-    import orm_loader.loaders.loading_helpers as loading_helpers
+    from orm_loader.loaders import loading_helpers
 
     monkeypatch.setattr(loading_helpers, "quick_load_pg", fake_quick_load_pg)
 
@@ -107,7 +107,7 @@ def test_copy_failure_falls_back_to_orm(pg_session, tmp_path, monkeypatch):
     # See test_postgres_copy_fast_path_is_used above: `quick_load_pg` is
     # imported lazily from `loaders.loading_helpers`, so that's what needs
     # patching, not `backends.postgres`.
-    import orm_loader.loaders.loading_helpers as loading_helpers
+    from orm_loader.loaders import loading_helpers
 
     def broken_copy(*args, **kwargs):
         raise RuntimeError("boom")

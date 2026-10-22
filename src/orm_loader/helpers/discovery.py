@@ -1,4 +1,5 @@
 from typing import TypeVar
+
 from .metadata import Base
 
 ModelT = TypeVar("ModelT", bound=Base)

@@ -6,9 +6,9 @@ import pytest
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 from dotenv import load_dotenv
-
 from oa_configurator import Role
 from oa_configurator.testing import ScopedTestSchema, isolated_test_database, scoped_test_schema
+
 from orm_loader.backends import staging_schema_claim
 from orm_loader.config import OrmLoaderConfig
 from tests.models import Base

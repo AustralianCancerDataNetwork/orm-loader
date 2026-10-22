@@ -1,9 +1,10 @@
 # pyright: reportPrivateUsage=false
 import logging
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from time import perf_counter
-from typing import Any, Generator, Type
+from typing import Any
 
 import sqlalchemy as sa
 import sqlalchemy.orm as so
@@ -69,7 +70,7 @@ class CSVLoadableTableInterface(ORMTableBase):
 
     @classmethod
     def create_staging_table(
-        cls: Type[CSVTableProtocol],
+        cls: type[CSVTableProtocol],
         session: so.Session,
         *,
         staging_schema_tag: str | None = None,
@@ -103,7 +104,7 @@ class CSVLoadableTableInterface(ORMTableBase):
     @classmethod
     @contextmanager
     def manage_indices(
-        cls: Type["CSVTableProtocol"],
+        cls: type["CSVTableProtocol"],
         session: so.Session,
         index_strategy: str = "auto",
         *,
@@ -226,7 +227,7 @@ class CSVLoadableTableInterface(ORMTableBase):
 
     @classmethod
     def get_staging_table(
-        cls: Type[CSVTableProtocol],
+        cls: type[CSVTableProtocol],
         session: so.Session,
         *,
         staging_schema_tag: str | None = None,
@@ -285,7 +286,7 @@ class CSVLoadableTableInterface(ORMTableBase):
 
     @classmethod
     def load_staging(
-        cls: Type[CSVTableProtocol],
+        cls: type[CSVTableProtocol],
         loader: LoaderInterface,
         loader_context: LoaderContext,
     ) -> int:
@@ -332,7 +333,7 @@ class CSVLoadableTableInterface(ORMTableBase):
 
     @classmethod
     def orm_staging_load(
-        cls: Type[CSVTableProtocol], loader: LoaderInterface, loader_context: LoaderContext
+        cls: type[CSVTableProtocol], loader: LoaderInterface, loader_context: LoaderContext
     ) -> int:
         """
         Load data into the staging table using an ORM-based loader.
@@ -345,7 +346,7 @@ class CSVLoadableTableInterface(ORMTableBase):
         return loader.orm_file_load(ctx=loader_context)
 
     @classmethod
-    def _select_loader(cls: Type[CSVTableProtocol], path: Path) -> LoaderInterface:
+    def _select_loader(cls: type[CSVTableProtocol], path: Path) -> LoaderInterface:
         """
         Select an appropriate loader based on file type.
 
@@ -367,7 +368,7 @@ class CSVLoadableTableInterface(ORMTableBase):
 
     @classmethod
     def load_csv(
-        cls: Type[CSVTableProtocol],
+        cls: type[CSVTableProtocol],
         session: so.Session,
         path: Path,
         *,
@@ -490,7 +491,7 @@ class CSVLoadableTableInterface(ORMTableBase):
 
     @classmethod
     def _target_has_rows(
-        cls: Type[CSVTableProtocol],
+        cls: type[CSVTableProtocol],
         session: so.Session,
     ) -> bool:
         """
@@ -504,7 +505,7 @@ class CSVLoadableTableInterface(ORMTableBase):
 
     @classmethod
     def merge_from_staging(
-        cls: Type[CSVTableProtocol],
+        cls: type[CSVTableProtocol],
         session: so.Session,
         merge_strategy: str = "replace",
         *,
@@ -600,7 +601,7 @@ class CSVLoadableTableInterface(ORMTableBase):
 
     @classmethod
     def drop_staging_table(
-        cls: Type[CSVTableProtocol],
+        cls: type[CSVTableProtocol],
         session: so.Session,
         *,
         staging_schema_tag: str | None = None,

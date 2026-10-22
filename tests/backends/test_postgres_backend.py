@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-import sqlalchemy.event as sae
-from typing import TYPE_CHECKING, Type, cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
 import sqlalchemy as sa
+import sqlalchemy.event as sae
 import sqlalchemy.orm as so
+from oa_configurator import SCHEMA_TRANSLATE_MAP_KEY, Role, qualified
+from oa_configurator.testing import isolated_test_schema
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import Engine
 
-from oa_configurator import SCHEMA_TRANSLATE_MAP_KEY, Role, qualified
-from oa_configurator.testing import isolated_test_schema
 from orm_loader.backends import STAGING_SCHEMA, Dialect, PostgresBackend
 from orm_loader.backends.resolve import resolve_backend
 from tests.models import ComputedColumnTable
@@ -22,7 +22,7 @@ _STAGING_TABLE_WITH_SCHEMA: str = qualified(
     _PREPARER, _STAGING_TABLE, physical_schema=STAGING_SCHEMA
 )
 
-_ComputedTableCls = cast("Type[CSVTableProtocol]", ComputedColumnTable)
+_ComputedTableCls = cast("type[CSVTableProtocol]", ComputedColumnTable)
 
 
 if TYPE_CHECKING:
@@ -229,8 +229,9 @@ def test_postgres_backend_rejects_mismatched_dialect_bind():
 def test_postgres_backend_rejects_dialect_that_drifted_after_resolve_backend():
     """A bind resolved to PostgresBackend, then a differently-dialected bind
     handed to one of its methods, must not run Postgres-only DDL against it."""
-    from orm_loader.backends.resolve import resolve_backend
     from sqlalchemy.dialects import sqlite
+
+    from orm_loader.backends.resolve import resolve_backend
 
     postgres_session = _FakeSession()
     backend = resolve_backend(_sess(postgres_session))
@@ -291,8 +292,8 @@ def test_postgres_backend_create_materialized_view_index_emits_expected_sql():
 
 
 def test_postgres_backend_create_materialized_view_index_failure_mentions_index_name():
-    from orm_loader.mappers.materialised_view_errors import MaterializationError
     from orm_loader.mappers.materialised_view_contracts import MaterializedViewIndex
+    from orm_loader.mappers.materialised_view_errors import MaterializationError
 
     original = RuntimeError("boom")
     backend = PostgresBackend()
@@ -378,8 +379,8 @@ def test_postgres_backend_refresh_concurrently_without_declared_unique_index_rai
 def test_postgres_backend_refresh_concurrently_declared_but_database_rejects_it_translates_error():
     psycopg = pytest.importorskip("psycopg")
 
-    from orm_loader.mappers.materialised_view_errors import ConcurrentRefreshNotEligibleError
     from orm_loader.mappers.materialised_view_contracts import MaterializedViewIndex
+    from orm_loader.mappers.materialised_view_errors import ConcurrentRefreshNotEligibleError
 
     orig = psycopg.errors.ObjectNotInPrerequisiteState(
         'cannot refresh materialized view "reporting.mv_test" concurrently\n'
@@ -510,8 +511,8 @@ def test_postgres_backend_materialized_view_lifecycle_is_schema_isolated_with_ad
 
 
 def test_postgres_backend_refresh_concurrently_raises_when_declared_index_was_never_created(pg_db):
-    from orm_loader.mappers.materialised_view_errors import ConcurrentRefreshNotEligibleError
     from orm_loader.mappers.materialised_view_contracts import MaterializedViewIndex
+    from orm_loader.mappers.materialised_view_errors import ConcurrentRefreshNotEligibleError
 
     backend = PostgresBackend()
     index = MaterializedViewIndex(name="mv_missing_index_test_uq", columns=("row_id",), unique=True)

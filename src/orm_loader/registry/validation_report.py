@@ -1,9 +1,7 @@
+import json
 from collections import defaultdict
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
-import json
-
 
 """
 Validation Reporting
@@ -60,10 +58,10 @@ class ValidationIssue:
     table: str
     level: SeverityLevel
     message: str
-    field: Optional[str] = None
-    expected: Optional[str] = None
-    actual: Optional[str] = None
-    hint: Optional[str] = None
+    field: str | None = None
+    expected: str | None = None
+    actual: str | None = None
+    hint: str | None = None
 
 
 @dataclass
@@ -79,7 +77,7 @@ class ValidationReport:
     - CI/CD pipeline integration
     """
 
-    def __init__(self, *, model_version: str, model_name: Optional[str] = None):
+    def __init__(self, *, model_version: str, model_name: str | None = None):
         """
         Initialise a new validation report.
 

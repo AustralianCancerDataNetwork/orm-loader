@@ -67,7 +67,7 @@ class PostgresBackend(DatabaseBackend):
 
     def create_staging_table(
         self,
-        table_cls: type["CSVTableProtocol"],
+        table_cls: type[CSVTableProtocol],
         session: so.Session,
     ) -> None:
         table = table_cls.__table__
@@ -111,7 +111,7 @@ class PostgresBackend(DatabaseBackend):
 
     def drop_staging_table(
         self,
-        table_cls: type["CSVTableProtocol"],
+        table_cls: type[CSVTableProtocol],
         session: so.Session,
     ) -> None:
         session.execute(
@@ -121,7 +121,7 @@ class PostgresBackend(DatabaseBackend):
 
     def load_staging_fast(
         self,
-        loader_context: "LoaderContext",
+        loader_context: LoaderContext,
     ) -> int | None:
         from ..loaders.loading_helpers import quick_load_pg
 
@@ -186,7 +186,7 @@ class PostgresBackend(DatabaseBackend):
         )
 
     def _staging_rownum_index(
-        self, table_cls: type["CSVTableProtocol"], staging: sa.Table, session: so.Session
+        self, table_cls: type[CSVTableProtocol], staging: sa.Table, session: so.Session
     ) -> None:
         staging_name = self.staging_name_for_table(table_cls.__tablename__)
         idx = sa.Index(f"{staging_name}_rownum_idx", staging.c._rownum)
@@ -218,7 +218,7 @@ class PostgresBackend(DatabaseBackend):
 
     def merge_replace(
         self,
-        table_cls: type["CSVTableProtocol"],
+        table_cls: type[CSVTableProtocol],
         session: so.Session,
         pk_cols: list[str],
         *,
@@ -263,7 +263,7 @@ class PostgresBackend(DatabaseBackend):
 
     def merge_upsert(
         self,
-        table_cls: type["CSVTableProtocol"],
+        table_cls: type[CSVTableProtocol],
         session: so.Session,
         pk_cols: list[str],
         *,
@@ -308,7 +308,7 @@ class PostgresBackend(DatabaseBackend):
 
     def merge_insert(
         self,
-        table_cls: type["CSVTableProtocol"],
+        table_cls: type[CSVTableProtocol],
         session: so.Session,
         *,
         merge_batch_size: int | None = None,
@@ -390,7 +390,7 @@ class PostgresBackend(DatabaseBackend):
         *,
         schema: str | None = None,
         concurrently: bool = False,
-        declared_indexes: tuple["MaterializedViewIndex", ...] = (),
+        declared_indexes: tuple[MaterializedViewIndex, ...] = (),
     ) -> None:
         with self._as_connection(bind) as conn:
             if concurrently:
@@ -465,7 +465,7 @@ class PostgresBackend(DatabaseBackend):
         self,
         bind: Engine | Connection,
         name: str,
-        index: "MaterializedViewIndex",
+        index: MaterializedViewIndex,
         *,
         schema: str | None = None,
         if_not_exists: bool = True,
@@ -494,7 +494,7 @@ class PostgresBackend(DatabaseBackend):
                 ) from error
 
     @contextmanager
-    def engine_with_replica_role(self, engine: "Engine"):
+    def engine_with_replica_role(self, engine: Engine):
         def _set_replica_role(
             dbapi_conn: sa.engine.interfaces.DBAPIConnection,
             _,

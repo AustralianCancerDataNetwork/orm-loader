@@ -1,7 +1,8 @@
+import pytest
 import sqlalchemy as sa
 import sqlalchemy.orm as so
-import pytest
 from sqlalchemy.exc import NoInspectionAvailable
+
 from orm_loader.registry.registry import ModelDescriptor
 from orm_loader.tables.orm_table import ORMTableBase
 

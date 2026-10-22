@@ -1,14 +1,16 @@
-import pyarrow as pa
-from typing import cast, Type
-from oa_configurator import Role
-from orm_loader.loaders.loading_helpers import arrow_drop_duplicates
+from typing import cast
+
 import pandas as pd
+import pyarrow as pa
 import sqlalchemy as sa
 import sqlalchemy.orm as so
+from oa_configurator import Role
 from sqlalchemy.orm import DeclarativeBase
+
+from orm_loader.loaders.loader_interface import PandasLoader
+from orm_loader.loaders.loading_helpers import arrow_drop_duplicates
 from orm_loader.tables.loadable_table import CSVLoadableTableInterface
 from orm_loader.tables.typing import CSVTableProtocol
-from orm_loader.loaders.loader_interface import PandasLoader
 
 
 class Base(DeclarativeBase):
@@ -23,7 +25,7 @@ class DedupTable(Base, CSVLoadableTableInterface):
     value: so.Mapped[str] = so.mapped_column(sa.String, nullable=False)
 
 
-_DedupTable = cast(Type[CSVTableProtocol], DedupTable)
+_DedupTable = cast(type[CSVTableProtocol], DedupTable)
 
 
 def test_arrow_drop_duplicates_simple():

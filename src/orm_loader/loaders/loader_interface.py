@@ -1,22 +1,26 @@
 from __future__ import annotations
-from typing import Any, Iterable, Type, TYPE_CHECKING
+
 import csv as _csv
-import pandas as pd
 import logging
-import pyarrow as pa
-import pyarrow.dataset as ds
-import pyarrow.compute as pc
+from collections.abc import Iterable
 from functools import reduce
-from .data_classes import LoaderContext, TableCastingStats, LoaderInterface
+from typing import TYPE_CHECKING, Any
+
+import pandas as pd
+import pyarrow as pa
+import pyarrow.compute as pc
+import pyarrow.dataset as ds
+
+from ..helpers import IngestError
+from .data import cast_arrow_column, perform_cast
+from .data_classes import LoaderContext, LoaderInterface, TableCastingStats
 from .loading_helpers import (
+    arrow_drop_duplicates,
+    conservative_load_parquet,
     infer_delim,
     infer_encoding,
-    conservative_load_parquet,
-    arrow_drop_duplicates,
     resolve_quote_mode,
 )
-from .data import perform_cast, cast_arrow_column
-from ..helpers import IngestError
 
 if TYPE_CHECKING:
     from ..tables.typing import CSVTableProtocol
@@ -47,7 +51,7 @@ from untrusted sources and accommodating updates and deletes for incremental loa
 
 
 def _require_columns_present(
-    tableclass: Type["CSVTableProtocol"], present_columns: Iterable[str]
+    tableclass: type[CSVTableProtocol], present_columns: Iterable[str]
 ) -> None:
     """
     Raise before staging if a genuinely required column is entirely
