@@ -1,17 +1,21 @@
 from pathlib import Path
+from typing import cast
 
 import pandas as pd
 import sqlalchemy as sa
 
 from orm_loader.loaders.data_classes import LoaderContext
 from orm_loader.loaders.loader_interface import PandasLoader
+from orm_loader.tables.typing import CSVTableProtocol
 from tests.models import PandasLoaderTable
+
+_PandasLoaderTableCls = cast(type[CSVTableProtocol], PandasLoaderTable)
 
 
 def test_loader_context_fields(session):
 
     ctx = LoaderContext(
-        tableclass=PandasLoaderTable,
+        tableclass=_PandasLoaderTableCls,
         session=session,
         path=Path("file.csv"),
         staging_table=PandasLoaderTable.__table__,
@@ -35,7 +39,7 @@ def test_pandas_loader_case_insensitive_headers(tmp_path, session):
     csv.write_text("ID,Value\n1,alpha\n2,beta\n")
 
     ctx = LoaderContext(
-        tableclass=PandasLoaderTable,
+        tableclass=_PandasLoaderTableCls,
         session=session,
         path=csv,
         staging_table=PandasLoaderTable.__table__,
@@ -63,7 +67,7 @@ def test_pandas_loader_literal_mode_preserves_quotes(tmp_path, session):
     csv.write_text('id,value\n1,"hello"\n2,"world"\n')
 
     ctx = LoaderContext(
-        tableclass=PandasLoaderTable,
+        tableclass=_PandasLoaderTableCls,
         session=session,
         path=csv,
         staging_table=PandasLoaderTable.__table__,
@@ -92,7 +96,7 @@ def test_pandas_loader_csv_mode_strips_quotes(tmp_path, session):
     csv.write_text('id,value\n1,"hello"\n2,"world"\n')
 
     ctx = LoaderContext(
-        tableclass=PandasLoaderTable,
+        tableclass=_PandasLoaderTableCls,
         session=session,
         path=csv,
         staging_table=PandasLoaderTable.__table__,
@@ -120,7 +124,7 @@ def test_pandas_loader_by_delimiter_tab_preserves_quotes(tmp_path, session):
     tsv.write_text('id\tvalue\n1\t"hi"\n2\tbye\n')
 
     ctx = LoaderContext(
-        tableclass=PandasLoaderTable,
+        tableclass=_PandasLoaderTableCls,
         session=session,
         path=tsv,
         staging_table=PandasLoaderTable.__table__,
@@ -147,7 +151,7 @@ def test_pandas_dedupe_internal(session, tmp_path):
     )
 
     ctx = LoaderContext(
-        tableclass=PandasLoaderTable,
+        tableclass=_PandasLoaderTableCls,
         session=session,
         path=Path("file.csv"),
         staging_table=PandasLoaderTable.__table__,

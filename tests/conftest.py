@@ -1,4 +1,4 @@
-from collections.abc import Iterable, Iterator
+from collections.abc import Generator, Iterable
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -67,7 +67,7 @@ def pg_session(pg_db):
 @contextmanager
 def schema_scoped_session(
     pg_db, table: sa.Table, *, prefix: str, split_roles: Iterable[Role] = ()
-) -> Iterator[tuple[ScopedTestSchema, so.Session]]:
+) -> Generator[tuple[ScopedTestSchema, so.Session]]:
     """A Session on committed scoped test schemas, with the staging schema
     claimed and *table* already created."""
     with scoped_test_schema(

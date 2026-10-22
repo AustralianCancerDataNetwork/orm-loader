@@ -5,7 +5,13 @@ from __future__ import annotations
 import pandas as pd
 import sqlalchemy as sa
 import sqlalchemy.orm as so
-from oa_configurator import CDMDatabaseConfig, ConnectionConfig, Resolver, StackConfig
+from oa_configurator import (
+    CDMDatabaseConfig,
+    ConnectionConfig,
+    ResolvedCDMDatabase,
+    Resolver,
+    StackConfig,
+)
 from oa_configurator import Role as SchemaRole
 from sqlalchemy.exc import UnboundExecutionError
 
@@ -32,6 +38,7 @@ def test_vocab_csv_load_routes_every_session_bind_to_vocab_file(tmp_path):
         )
     )
     resolved = resolver.resolve_database("test_cdm")
+    assert isinstance(resolved, ResolvedCDMDatabase)
     primary_engine, vocab_engine = resolved.create_engines(schema_claims=[staging_schema_claim()])
     VocabSchemaTable.__table__.create(vocab_engine)
 

@@ -8,6 +8,7 @@ import sqlalchemy as sa
 import sqlalchemy.event as sae
 import sqlalchemy.orm as so
 from oa_configurator import Role as SchemaRole
+from sqlalchemy.exc import IntegrityError
 
 from orm_loader.backends import resolve_backend
 from orm_loader.helpers import IngestError
@@ -828,7 +829,7 @@ def test_sqlite_failed_batched_replace_keeps_original_target_rows(session, tmp_p
         ]
     ).to_csv(csv_path, index=False, sep="\t")
 
-    with pytest.raises(sa.exc.IntegrityError):
+    with pytest.raises(IntegrityError):
         SimpleTable.load_csv(
             session,
             csv_path,

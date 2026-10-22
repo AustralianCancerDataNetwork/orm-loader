@@ -66,43 +66,38 @@ class FakeBackend(DatabaseBackend):
     def staging_name_for_table(tablename: str) -> str:
         return f"_staging_{tablename}"
 
-    def create_staging_table(
-        self, _table_cls: type[CSVTableProtocol], _session: so.Session
-    ) -> None:
+    def create_staging_table(self, table_cls: type[CSVTableProtocol], session: so.Session) -> None:
         return None
 
-    def drop_staging_table(self, _table_cls: type[CSVTableProtocol], _session: so.Session) -> None:
+    def drop_staging_table(self, table_cls: type[CSVTableProtocol], session: so.Session) -> None:
         return None
 
     def merge_replace(
         self,
-        _table_cls: type[CSVTableProtocol],
-        _session: so.Session,
-        _target_name: str,
-        _pk_cols: list[str],
+        table_cls: type[CSVTableProtocol],
+        session: so.Session,
+        pk_cols: list[str],
         *,
-        _merge_batch_size: int | None = None,
+        merge_batch_size: int | None = None,
     ) -> None:
         return None
 
     def merge_upsert(
         self,
-        _table_cls: type[CSVTableProtocol],
-        _session: so.Session,
-        _target_name: str,
-        _pk_cols: list[str],
+        table_cls: type[CSVTableProtocol],
+        session: so.Session,
+        pk_cols: list[str],
         *,
-        _merge_batch_size: int | None = None,
+        merge_batch_size: int | None = None,
     ) -> None:
         return None
 
     def merge_insert(
         self,
-        _table_cls: type[CSVTableProtocol],
-        _session: so.Session,
-        _target_name: str,
+        table_cls: type[CSVTableProtocol],
+        session: so.Session,
         *,
-        _merge_batch_size: int | None = None,
+        merge_batch_size: int | None = None,
     ) -> None:
         return None
 
@@ -110,15 +105,17 @@ class FakeBackend(DatabaseBackend):
     def _normalize_fk_check_state(previous_state: str | int) -> str | int:
         return previous_state
 
-    def disable_fk_check(self, session: so.Session) -> str | int:
+    def disable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int:
         self.calls.append(("disable_fk_check", session))
         return "enabled"
 
-    def enable_fk_check(self, session: so.Session) -> str | int:
+    def enable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int:
         self.calls.append(("enable_fk_check", session))
         return "disabled"
 
-    def restore_fk_check(self, session: so.Session, previous_state: str | int) -> None:
+    def restore_fk_check(
+        self, session: so.Session, previous_state: str | int, *, mapper: Any | None = None
+    ) -> None:
         self.calls.append(("restore_fk_check", previous_state))
 
     def create_materialized_view(

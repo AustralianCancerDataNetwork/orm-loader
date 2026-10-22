@@ -1,3 +1,5 @@
+from typing import ClassVar
+
 import pytest
 import sqlalchemy as sa
 import sqlalchemy.orm as so
@@ -11,7 +13,7 @@ Base = so.declarative_base()
 
 def test_model_descriptor_from_model_basic():
     class T(ORMTableBase, Base):
-        __tablename__ = "t"
+        __tablename__: ClassVar[str] = "t"
         id = sa.Column(sa.Integer, primary_key=True)
         a = sa.Column(sa.String)
 
@@ -30,7 +32,7 @@ def test_model_descriptor_detects_foreign_keys():
         id = sa.Column(sa.Integer, primary_key=True)
 
     class Child(ORMTableBase, Base):
-        __tablename__ = "child"
+        __tablename__: ClassVar[str] = "child"
         id = sa.Column(sa.Integer, primary_key=True)
         parent_id = sa.Column(sa.Integer, sa.ForeignKey("parent.id"))
 

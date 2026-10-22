@@ -1,4 +1,4 @@
-from typing import ClassVar, cast
+from typing import cast
 
 import pandas as pd
 import pyarrow as pa
@@ -19,7 +19,7 @@ class Base(DeclarativeBase):
 
 class DedupTable(Base, CSVLoadableTableInterface):
     __tablename__ = "dedup_table"
-    __table_args__: ClassVar[dict[str, str]] = {"schema": Role.PRIMARY.value}
+    __table_args__ = ({"schema": Role.PRIMARY.value},)
 
     id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     value: so.Mapped[str] = so.mapped_column(sa.String, nullable=False)
