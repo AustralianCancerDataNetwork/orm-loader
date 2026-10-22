@@ -83,7 +83,7 @@ class SerialisableTableInterface(ORMTableBase):
             A dictionary representation of the ORM row.
         """
         data: dict[str, Any] = {}
-        for key, _ in self.model_columns().items():
+        for key in self.model_columns():
             if only and key not in only:
                 continue
             if exclude and key in exclude:

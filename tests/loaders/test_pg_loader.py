@@ -1,4 +1,5 @@
 import pandas as pd
+import psycopg
 import pytest
 import sqlalchemy as sa
 
@@ -334,7 +335,7 @@ def test_quick_load_pg_rollback_on_error(pg_session, tmp_path):
     csv = tmp_path / "test_table.csv"
     csv.write_text("id,name\n1,alpha\n2,\n")  # violates NOT NULL
 
-    with pytest.raises(Exception):
+    with pytest.raises(psycopg.errors.IntegrityError):
         quick_load_pg(path=csv, session=pg_session, tablename="test_table")
 
     rows = pg_session.execute(sa.text("SELECT COUNT(*) FROM test_table")).scalar_one()
@@ -395,7 +396,7 @@ def test_copy_fails_with_raw_carriage_returns_but_succeeds_after_normalisation(
     try:
         quick_load_pg(path=csv, session=pg_session, tablename="test_table")
         pg_session.commit()
-    except Exception:
+    except psycopg.Error:
         failed = True
 
     # Clean up table for second attempt

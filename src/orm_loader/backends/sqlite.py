@@ -143,7 +143,7 @@ class SQLiteBackend(DatabaseBackend):
         previous_state = session.execute(text("PRAGMA foreign_keys"), **execute_options).scalar()
         session.execute(text("PRAGMA foreign_keys = OFF"), **execute_options)
         if not isinstance(previous_state, int):
-            raise RuntimeError("Expected SQLite FK state to be an int")
+            raise RuntimeError("Expected SQLite FK state to be an int")  # noqa: TRY004 - bad database result
         return previous_state
 
     def enable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int:
@@ -151,7 +151,7 @@ class SQLiteBackend(DatabaseBackend):
         previous_state = session.execute(text("PRAGMA foreign_keys"), **execute_options).scalar()
         session.execute(text("PRAGMA foreign_keys = ON"), **execute_options)
         if not isinstance(previous_state, int):
-            raise RuntimeError("Expected SQLite FK state to be an int")
+            raise RuntimeError("Expected SQLite FK state to be an int")  # noqa: TRY004 - bad database result
         return previous_state
 
     def restore_fk_check(

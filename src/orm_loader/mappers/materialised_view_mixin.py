@@ -1,5 +1,6 @@
 from collections import defaultdict, deque
-from typing import Any
+from collections.abc import Set as AbstractSet
+from typing import Any, ClassVar
 
 import sqlalchemy as sa
 from oa_configurator import (
@@ -186,7 +187,7 @@ class MaterializedViewMixin:
 
     __mv_name__: str
     __mv_select__: sa.sql.Select[Any]
-    __mv_dependencies__: set[str] = set()
+    __mv_dependencies__: ClassVar[AbstractSet[str]] = frozenset()
     __mv_schema_tag__: str = Role.PRIMARY.value
     __mv_indexes__: tuple[MaterializedViewIndex, ...] = ()
 

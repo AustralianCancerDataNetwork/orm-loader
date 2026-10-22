@@ -3,7 +3,7 @@ from __future__ import annotations
 import csv as _csv
 import logging
 from collections.abc import Iterable
-from functools import reduce
+from functools import partial, reduce
 from typing import TYPE_CHECKING, Any
 
 import pandas as pd
@@ -121,15 +121,14 @@ class PandasLoader(LoaderInterface):
             def _on_cast_error(value, *, _col=col_name):
                 stats.record(column=_col, value=value)
 
-            df[col_name] = df[col_name].map(
-                lambda v: perform_cast(
-                    v,
-                    sa_col.type,
-                    on_error=_on_cast_error,
-                    table_name=table_name,
-                    column_name=col_name,
-                )
+            cast_value = partial(
+                perform_cast,
+                sa_type=sa_col.type,
+                on_error=_on_cast_error,
+                table_name=table_name,
+                column_name=col_name,
             )
+            df[col_name] = df[col_name].map(cast_value)
 
         _require_columns_present(ctx.tableclass, df.columns)
         required_cols = list(ctx.tableclass.required_columns())
@@ -310,7 +309,7 @@ class ParquetLoader(LoaderInterface):
             if ctx.dedupe:
                 data = cls.dedupe(data, ctx)
 
-            if isinstance(data, pa.RecordBatch) or isinstance(data, pa.Table):
+            if isinstance(data, (pa.RecordBatch, pa.Table)):
                 df = data.to_pandas()
             else:
                 df = data

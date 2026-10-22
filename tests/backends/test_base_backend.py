@@ -251,9 +251,11 @@ def test_bulk_load_context_raises_when_capability_missing(session):
 
     backend = NoFKBackend()
 
-    with pytest.raises(NotImplementedError, match="does not support foreign key toggling"):
-        with backend.bulk_load_context(session):
-            pass
+    with (
+        pytest.raises(NotImplementedError, match="does not support foreign key toggling"),
+        backend.bulk_load_context(session),
+    ):
+        pass
 
 
 def test_bulk_load_context_rolls_back_and_restores(session):

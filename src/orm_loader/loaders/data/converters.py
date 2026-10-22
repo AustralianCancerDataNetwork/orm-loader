@@ -17,6 +17,9 @@ from ..data_classes import TableCastingStats
 
 _NUMERIC_RE = re.compile(r"^[+-]?\d+(\.\d+)?$")
 
+# What an unparseable value raises. Any other exception is a bug and propagates.
+_CAST_ERRORS = (ValueError, TypeError, ArithmeticError)
+
 _AVAILABLE_DATE_FORMATS = (
     "%Y%m%d",  # 20170824 (athena standard)
     "%d-%b-%Y",  # 24-AUG-2017 (oncology-branch vocab)
@@ -162,9 +165,8 @@ def _cast_string(value: Any, sa_type: TypeEngine[Any]) -> str | None:
 
     s = _to_numeric_string(s) or ""
 
-    if isinstance(sa_type, (String, Text)) and sa_type.length:
-        if len(s) > sa_type.length:
-            return s[: sa_type.length]
+    if isinstance(sa_type, (String, Text)) and sa_type.length and len(s) > sa_type.length:
+        return s[: sa_type.length]
 
     return s
 
@@ -392,7 +394,7 @@ def cast_scalar(
     if column_rule is not None:
         try:
             return column_rule(value)
-        except Exception:
+        except _CAST_ERRORS:
             if on_error:
                 on_error(value)
             return None
@@ -401,7 +403,7 @@ def cast_scalar(
         if isinstance(sa_type, rule.sa_type):
             try:
                 return rule.scalar(value, sa_type)
-            except Exception:
+            except _CAST_ERRORS:
                 if on_error:
                     on_error(value)
                 return None
@@ -434,7 +436,7 @@ def cast_arrow_column(
             raw = v.as_py()
             try:
                 values.append(column_rule(raw) if raw is not None else None)
-            except Exception:
+            except _CAST_ERRORS:
                 if stats:
                     stats.record(column=sa_col.name, value=raw)
                 values.append(None)

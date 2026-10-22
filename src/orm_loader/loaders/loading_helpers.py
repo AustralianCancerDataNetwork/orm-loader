@@ -257,8 +257,7 @@ def conservative_load_parquet(
         parse_options=parse_opts,
         convert_options=convert_opts,
     ) as reader:
-        for batch in reader:
-            yield batch
+        yield from reader
 
 
 def check_line_ending(raw_header: str) -> str:

@@ -1,5 +1,5 @@
 import logging
-from typing import cast
+from typing import ClassVar, cast
 
 import numpy as np
 import pandas as pd
@@ -543,7 +543,7 @@ def test_clean_nulls_passthrough():
 def test_nullable_column_with_nan_does_not_crash(session, engine, tmp_path):
     class NullableTable(Base, CSVLoadableTableInterface):
         __tablename__ = "nullable_table"
-        __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+        __table_args__: ClassVar[dict[str, str]] = {"schema": SchemaRole.PRIMARY.value}
 
         id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
         flag: so.Mapped[str | None] = so.mapped_column(sa.String, nullable=True)
@@ -580,7 +580,7 @@ def test_nullable_column_with_nan_does_not_crash(session, engine, tmp_path):
 def test_embedded_newline_in_field_is_preserved(session, engine, tmp_path):
     class TextTable(Base, CSVLoadableTableInterface):
         __tablename__ = "text_table"
-        __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+        __table_args__: ClassVar[dict[str, str]] = {"schema": SchemaRole.PRIMARY.value}
 
         id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
         name: so.Mapped[str] = so.mapped_column(sa.String)
@@ -608,7 +608,7 @@ def test_embedded_newline_in_field_is_preserved(session, engine, tmp_path):
 def test_embedded_tab_in_field(session, engine, tmp_path):
     class TextTable2(Base, CSVLoadableTableInterface):
         __tablename__ = "tab_table"
-        __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+        __table_args__: ClassVar[dict[str, str]] = {"schema": SchemaRole.PRIMARY.value}
 
         id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
         name: so.Mapped[str] = so.mapped_column(sa.String)
@@ -641,7 +641,7 @@ def _make_ddl_tracker(engine):
     def _capture(*args):
         statement: str = args[2]
         upper = statement.strip().upper()
-        if upper.startswith("DROP INDEX") or upper.startswith("CREATE INDEX"):
+        if upper.startswith(("DROP INDEX", "CREATE INDEX")):
             ddl_log.append(statement.strip())
 
     sae.listen(engine, "before_cursor_execute", _capture)

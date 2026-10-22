@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import importlib
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 import sqlalchemy as sa
@@ -96,10 +96,12 @@ def test_refresh_mv_concurrently_against_postgres(pg_db) -> None:
     The eligibility check and error translation are already proven at the
     backend level directly in test_postgres_backend.py.
     This proves the mixin wires into that correctly end to end."""
-    with scoped_test_schema(pg_db.resolved, prefix="mv_refresh") as scoped:
-        with scoped.engine.begin() as conn:
-            _IndexedPgMv.create_mv(conn)
-            _IndexedPgMv.refresh_mv(conn, concurrently=True)
+    with (
+        scoped_test_schema(pg_db.resolved, prefix="mv_refresh") as scoped,
+        scoped.engine.begin() as conn,
+    ):
+        _IndexedPgMv.create_mv(conn)
+        _IndexedPgMv.refresh_mv(conn, concurrently=True)
 
 
 class _FakeBackend:
@@ -213,7 +215,7 @@ class _MappedVocabMv(_MappedMvBase, MaterializedViewMixin):
     __mv_name__ = "mv_mapped_vocab"
     __mv_select__ = _SELECT
     __tablename__ = "mv_mapped_vocab"
-    __table_args__ = {"schema": Role.VOCAB.value}
+    __table_args__: ClassVar[dict[str, str]] = {"schema": Role.VOCAB.value}
 
     row_id = sa.Column(sa.Integer, primary_key=True)
 
@@ -372,13 +374,13 @@ class _MvA(MaterializedViewMixin):
 class _MvB(MaterializedViewMixin):
     __mv_name__ = "mv_b"
     __mv_select__ = _SELECT
-    __mv_dependencies__ = {"mv_a"}
+    __mv_dependencies__ = frozenset({"mv_a"})
 
 
 class _MvC(MaterializedViewMixin):
     __mv_name__ = "mv_c"
     __mv_select__ = _SELECT
-    __mv_dependencies__ = {"mv_a", "mv_b"}
+    __mv_dependencies__ = frozenset({"mv_a", "mv_b"})
 
 
 def test_resolve_mv_refresh_order_linear_dependency():
@@ -395,7 +397,7 @@ def test_resolve_mv_refresh_order_ignores_dependencies_outside_the_given_set():
     class _StandaloneMv(MaterializedViewMixin):
         __mv_name__ = "mv_standalone"
         __mv_select__ = _SELECT
-        __mv_dependencies__ = {"some_other_table_not_in_this_registry"}
+        __mv_dependencies__ = frozenset({"some_other_table_not_in_this_registry"})
 
     assert resolve_mv_refresh_order([_StandaloneMv]) == [_StandaloneMv]
 
@@ -404,12 +406,12 @@ def test_resolve_mv_refresh_order_raises_on_cycle():
     class _CycleA(MaterializedViewMixin):
         __mv_name__ = "mv_cycle_a"
         __mv_select__ = _SELECT
-        __mv_dependencies__ = {"mv_cycle_b"}
+        __mv_dependencies__ = frozenset({"mv_cycle_b"})
 
     class _CycleB(MaterializedViewMixin):
         __mv_name__ = "mv_cycle_b"
         __mv_select__ = _SELECT
-        __mv_dependencies__ = {"mv_cycle_a"}
+        __mv_dependencies__ = frozenset({"mv_cycle_a"})
 
     with pytest.raises(RuntimeError, match="Cycle detected"):
         resolve_mv_refresh_order([_CycleA, _CycleB])

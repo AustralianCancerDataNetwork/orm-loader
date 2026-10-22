@@ -138,7 +138,7 @@ class PostgresBackend(DatabaseBackend):
     @staticmethod
     def _normalize_fk_check_state(previous_state: str | int) -> str:
         if isinstance(previous_state, int):
-            raise ValueError(
+            raise ValueError(  # noqa: TRY004 - int is an accepted type, never a valid role
                 f"Invalid PostgreSQL session_replication_role {previous_state!r}: "
                 "Postgres uses string roles ('origin', 'local', 'replica'), not integers. "
                 "The value passed here should always come from this backend's own "
@@ -159,7 +159,7 @@ class PostgresBackend(DatabaseBackend):
         ).scalar()
         session.execute(sa.text("SET session_replication_role = 'replica'"), **execute_options)
         if not isinstance(previous_state, str):
-            raise RuntimeError("Expected PostgreSQL FK state to be a string")
+            raise RuntimeError("Expected PostgreSQL FK state to be a string")  # noqa: TRY004 - bad database result
         return previous_state
 
     def enable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int:
@@ -169,7 +169,7 @@ class PostgresBackend(DatabaseBackend):
         ).scalar()
         session.execute(sa.text("SET session_replication_role = 'origin'"), **execute_options)
         if not isinstance(previous_state, str):
-            raise RuntimeError("Expected PostgreSQL FK state to be a string")
+            raise RuntimeError("Expected PostgreSQL FK state to be a string")  # noqa: TRY004 - bad database result
         return previous_state
 
     def restore_fk_check(
@@ -393,16 +393,15 @@ class PostgresBackend(DatabaseBackend):
         declared_indexes: tuple[MaterializedViewIndex, ...] = (),
     ) -> None:
         with self._as_connection(bind) as conn:
-            if concurrently:
-                if not any(index.unique for index in declared_indexes):
-                    raise ConcurrentRefreshNotEligibleError(
-                        MaterializationFailure(
-                            operation=MaterializationOperation.REFRESH,
-                            schema=schema,
-                            name=name,
-                            reason="no simple unique index is declared",
-                        )
+            if concurrently and not any(index.unique for index in declared_indexes):
+                raise ConcurrentRefreshNotEligibleError(
+                    MaterializationFailure(
+                        operation=MaterializationOperation.REFRESH,
+                        schema=schema,
+                        name=name,
+                        reason="no simple unique index is declared",
                     )
+                )
 
             safe_name = qualified(conn, name, physical_schema=schema)
             concurrency = "CONCURRENTLY " if concurrently else ""

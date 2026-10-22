@@ -76,7 +76,7 @@ class ColumnPresenceValidator:
         issues: list[ValidationIssue] = []
         model_cols = set(model.columns.keys())
 
-        for field_name, field_spec in fields.items():
+        for field_name in fields:
             if field_name not in model_cols:
                 issues.append(
                     ValidationIssue(

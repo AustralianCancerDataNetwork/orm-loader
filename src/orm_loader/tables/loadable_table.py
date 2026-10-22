@@ -213,9 +213,9 @@ class CSVLoadableTableInterface(ORMTableBase):
                                 f"Table `{table_name}`: Commit after restoring index `{idx.name}` "
                                 f"completed in {_format_elapsed(perf_counter() - commit_started)}."
                             )
-                        except Exception as e:
+                        except Exception:
                             session.rollback()
-                            logger.error(f"Table `{table_name}`: Failed to restore {idx.name}: {e}")
+                            logger.exception(f"Table `{table_name}`: Failed to restore {idx.name}")
                     else:
                         logger.debug(
                             f"Table `{table_name}`: Index {idx.name} already exists on disk. Skipping."
@@ -325,7 +325,7 @@ class CSVLoadableTableInterface(ORMTableBase):
                 return total
         except Exception as e:
             loader_context.session.rollback()
-            logger.warning(f"Fast-path load failed for {cls.__tablename__}: {e}")
+            logger.warning(f"Fast-path load failed for {cls.__tablename__}: {e}", exc_info=True)
             logger.info("Falling back to ORM-based load functionality")
 
         total = cls.orm_staging_load(loader=loader, loader_context=loader_context)
