@@ -5,7 +5,7 @@ from collections.abc import Callable, Generator
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from functools import wraps
-from typing import TYPE_CHECKING, Any, ParamSpec, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Concatenate
 
 import sqlalchemy as sa
 import sqlalchemy.orm as so
@@ -64,28 +64,21 @@ def staging_schema_claim(
     )
 
 
-P = ParamSpec("P")
-R = TypeVar("R")
-
-
-def requires_capability(
+def requires_capability[B: DatabaseBackend, **P, R](
     capability_name: str,
     feature_name: str,
-) -> Callable[[Callable[P, R]], Callable[P, R]]:
+) -> Callable[[Callable[Concatenate[B, P], R]], Callable[Concatenate[B, P], R]]:
     """Guard a concrete backend method with a capability requirement.
 
     Subclass overrides must apply this decorator themselves; Python does not
     automatically retain decorators when a method is overridden.
     """
 
-    def decorator(method: Callable[P, R]) -> Callable[P, R]:
+    def decorator(method: Callable[Concatenate[B, P], R]) -> Callable[Concatenate[B, P], R]:
         @wraps(method)
-        def guarded(*args: P.args, **kwargs: P.kwargs) -> R:
-            # ParamSpec keeps the complete method signature, but type checkers
-            # cannot infer that args[0] is the backend instance here.
-            self = cast("DatabaseBackend", args[0])
+        def guarded(self: B, *args: P.args, **kwargs: P.kwargs) -> R:
             self._require_capability(capability_name, feature_name)
-            return method(*args, **kwargs)
+            return method(self, *args, **kwargs)
 
         return guarded
 

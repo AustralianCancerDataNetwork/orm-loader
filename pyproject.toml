@@ -54,6 +54,7 @@ dev = [
     "pytest>=9.0.3",
     "ty==0.0.90",
     "ruff==0.17.1",
+    "pyarrow-stubs==20.0.0.20260819",
     "mkdocs-material>=9.7.7",
     "mkdocstrings-python>=2.0.1",
     "requests>=2.33.0",

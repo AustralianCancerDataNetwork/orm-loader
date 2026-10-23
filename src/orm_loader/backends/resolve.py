@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any
 
 import sqlalchemy.orm as so
 from oa_configurator import Bindable, UnregisteredSchemaTagError, physical_schema_of
@@ -16,10 +16,10 @@ _BACKEND_TYPES: dict[Dialect, type[DatabaseBackend]] = {
 
 
 def _dialect(bindable: Bindable) -> Dialect:
-    if hasattr(bindable, "dialect"):
-        dialect_name = cast(Any, bindable).dialect.name
-    else:
+    dialect = getattr(bindable, "dialect", None)
+    if dialect is None:
         raise TypeError(f"Unsupported bindable type: {type(bindable)!r}")
+    dialect_name = dialect.name
 
     try:
         return Dialect(dialect_name)

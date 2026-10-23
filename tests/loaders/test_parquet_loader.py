@@ -93,7 +93,7 @@ def test_arrow_and_pandas_paths_agree_on_null_sentinels(session, engine, tmp_pat
 
     col = NullSentinelTable.__table__.c.name
     for raw in _SENTINELS + [" keep me ", "plain"]:
-        arrow = cast_arrow_column(pa.array([raw], type=pa.string()), col)[0].as_py()
+        arrow = cast_arrow_column(pa.array([raw], type=pa.string()), col).to_pylist()[0]
         scalar = cast_scalar(raw, col.type)
         assert arrow == scalar, f"{raw!r}: arrow={arrow!r} scalar={scalar!r}"
 

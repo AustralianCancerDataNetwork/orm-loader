@@ -4,8 +4,10 @@ import csv as _csv
 import io
 import logging
 import re
+from collections.abc import Iterator
+from functools import reduce
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import chardet
 import pyarrow as pa
@@ -196,21 +198,17 @@ def arrow_drop_duplicates(
     if table.num_rows == 0:
         return table
 
-    sort_keys = [(name, "ascending") for name in pk_names]
-    sorted_idx = pc.sort_indices(table, sort_keys=sort_keys)  # type: ignore
+    sort_keys: list[tuple[str, Literal["ascending"]]] = [(name, "ascending") for name in pk_names]
+    sorted_idx = pc.sort_indices(table, sort_keys=sort_keys)
     sorted_table = table.take(sorted_idx)
-    diffs = []
+    # pyarrow-stubs resolve these compute calls to a union of scalar, array and
+    # expression results, so the intermediate masks are typed Any.
+    diffs: list[Any] = []
     for name in pk_names:
         col = sorted_table[name]
-        previous_arr = col[:-1]
-        this_arr = col[1:]
-        diffs.append(
-            pc.not_equal(previous_arr, this_arr)  # type: ignore
-        )
-    keep_tail = diffs[0]
-    for d in diffs[1:]:
-        keep_tail = pc.or_(keep_tail, d)  # type: ignore
-    keep = pc.fill_null(keep_tail, True)
+        diffs.append(pc.not_equal(col[:-1], col[1:]))
+    keep_tail: Any = reduce(pc.or_, diffs)
+    keep: Any = pc.fill_null(keep_tail, pa.scalar(True))
     if isinstance(keep, pa.ChunkedArray):
         keep = keep.combine_chunks()
     keep = pa.concat_arrays(
@@ -226,7 +224,7 @@ def arrow_drop_duplicates(
 
 def conservative_load_parquet(
     path: Path, wanted_cols: list[str], chunksize: int | None = None
-) -> pa.Table:
+) -> Iterator[pa.RecordBatch]:
     delimiter = infer_delim(path)
     encoding = infer_encoding(path)["encoding"]
     convert_opts = pv.ConvertOptions(

@@ -78,20 +78,23 @@ def _normalise_null(value: Any) -> Any | None:
 _ARROW_NULL_STRINGS = pa.array(sorted(_NULL_STRINGS | {""}), type=pa.string())
 
 
-def _normalise_null_arrow(arr: pa.Array | pa.ChunkedArray) -> pa.Array | pa.ChunkedArray:
+type ArrowArray = pa.Array | pa.ChunkedArray
+
+
+def _normalise_null_arrow(arr: ArrowArray) -> ArrowArray:
     arrow_type = arr.type
 
     if pa.types.is_string(arrow_type) or pa.types.is_large_string(arrow_type):
-        probe = pc.utf8_lower(pc.utf8_trim_whitespace(arr))  # type: ignore
-        return pc.if_else(  # type: ignore
-            pc.is_in(probe, value_set=_ARROW_NULL_STRINGS),  # type: ignore
+        probe = pc.utf8_lower(pc.utf8_trim_whitespace(arr))
+        return pc.if_else(
+            pc.is_in(probe, value_set=_ARROW_NULL_STRINGS),
             pa.nulls(len(arr), arrow_type),
             arr,
         )
 
     if pa.types.is_floating(arrow_type):
-        return pc.if_else(  # type: ignore
-            pc.is_nan(arr),  # type: ignore
+        return pc.if_else(
+            pc.is_nan(arr),
             pa.nulls(len(arr), arrow_type),
             arr,
         )
@@ -425,8 +428,8 @@ def perform_cast(
 
 
 def cast_arrow_column(
-    arr: pa.Array, sa_col: ColumnElement[Any], stats: TableCastingStats | None = None
-) -> pa.Array:
+    arr: ArrowArray, sa_col: ColumnElement[Any], stats: TableCastingStats | None = None
+) -> ArrowArray:
     arr = _normalise_null_arrow(arr)
 
     column_rule = _COLUMN_CAST_RULES.get((sa_col.table.name, sa_col.name))
@@ -450,9 +453,8 @@ def cast_arrow_column(
                 try:
                     return pc.cast(arr, arrow_type)
                 except pa.ArrowInvalid:
-                    validity = pc.is_valid(arr)  # type: ignore
-                    invalid_mask = pc.invert(validity)  # type: ignore
-                    invalid_count = pc.sum(invalid_mask).as_py()  # type: ignore
+                    invalid_mask = pc.is_null(arr)
+                    invalid_count = arr.null_count
                     if invalid_count == 0:
                         return arr
 

@@ -12,7 +12,7 @@ import pyarrow.compute as pc
 import pyarrow.dataset as ds
 
 from ..helpers import IngestError
-from .data import cast_arrow_column, perform_cast
+from .data import ArrowArray, cast_arrow_column, perform_cast
 from .data_classes import LoaderContext, LoaderInterface, TableCastingStats
 from .loading_helpers import (
     arrow_drop_duplicates,
@@ -136,7 +136,7 @@ class PandasLoader(LoaderInterface):
         if required_cols:
             null_mask = df[required_cols].isna()
             for col in required_cols:
-                null_count = int(null_mask[col].sum())  # type: ignore[arg-type]
+                null_count = int(null_mask[col].sum())
                 if null_count > 0:
                     logger.warning(
                         "Found %d rows with unexpected nulls in %s.%s",
@@ -226,7 +226,7 @@ class ParquetLoader(LoaderInterface):
         table_name = ctx.tableclass.__tablename__
         stats = TableCastingStats(table_name=table_name)
         model_columns = ctx.tableclass.model_columns()
-        arrays: dict[str, pa.Array] = {}
+        arrays: dict[str, ArrowArray] = {}
         for col_name, sa_col in model_columns.items():
             if col_name not in data.schema.names:
                 continue
@@ -238,23 +238,23 @@ class ParquetLoader(LoaderInterface):
                 stats=stats,
             )
 
-        out = pa.table(arrays)
+        out = pa.table(list(arrays.values()), names=list(arrays))
         _require_columns_present(ctx.tableclass, out.schema.names)
         required_cols = list(ctx.tableclass.required_columns())
 
         if required_cols:
-            masks = [pc.is_valid(out[c]) for c in required_cols]  # type: ignore
-            valid_mask = reduce(pc.and_, masks)  # type: ignore
+            masks = [pc.is_valid(out[c]) for c in required_cols]
+            valid_mask = reduce(lambda left, right: pc.and_(left, right), masks)
 
-            dropped = out.num_rows - pc.sum(valid_mask).as_py()  # type: ignore
+            before = out.num_rows
+            out = out.filter(valid_mask)
+            dropped = before - out.num_rows
             if dropped > 0:
                 logger.warning(
                     "Dropped %d rows with unexpected nulls in %s",
                     dropped,
                     table_name,
                 )
-
-            out = out.filter(valid_mask)
 
         if stats.has_failures():
             for col, col_stats in stats.columns.items():
@@ -265,7 +265,9 @@ class ParquetLoader(LoaderInterface):
         return out
 
     @classmethod
-    def dedupe(cls, data: pa.Table, ctx: LoaderContext) -> pa.Table:
+    def dedupe(cls, data: pd.DataFrame | pa.Table, ctx: LoaderContext) -> Any:
+        if isinstance(data, pd.DataFrame):
+            return super().dedupe(data, ctx)
         if data.num_rows == 0:
             return data
 
@@ -303,16 +305,13 @@ class ParquetLoader(LoaderInterface):
         for record_batch in cls._scan_batches(ctx):
             if record_batch.num_rows == 0:
                 continue
-            data: pa.Table | pa.RecordBatch = record_batch
+            data = pa.Table.from_batches([record_batch])
             if ctx.normalise:
                 data = cls.cast_to_model(data, ctx=ctx)
             if ctx.dedupe:
                 data = cls.dedupe(data, ctx)
 
-            if isinstance(data, (pa.RecordBatch, pa.Table)):
-                df = data.to_pandas()
-            else:
-                df = data
+            df = data.to_pandas()
             if df.empty:
                 continue
 

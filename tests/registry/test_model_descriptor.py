@@ -1,4 +1,4 @@
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import pytest
 import sqlalchemy as sa
@@ -45,5 +45,6 @@ def test_model_descriptor_rejects_unmapped_class():
     class NotMapped:
         pass
 
+    not_mapped: Any = NotMapped
     with pytest.raises(NoInspectionAvailable):
-        ModelDescriptor.from_model(NotMapped)  # type: ignore
+        ModelDescriptor.from_model(not_mapped)

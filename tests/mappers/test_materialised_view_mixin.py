@@ -168,8 +168,9 @@ def test_create_mv_forwards_default_args_to_backend(fake_backend: _FakeBackend, 
 
 
 def test_create_mv_rejects_invalid_bind(fake_backend: _FakeBackend):
+    invalid_bind: Any = "bind"
     with pytest.raises(TypeError, match="bind must be a SQLAlchemy Engine or Connection"):
-        _NoIndexMv.create_mv("bind")  # ty: ignore[invalid-argument-type]
+        _NoIndexMv.create_mv(invalid_bind)
 
     assert fake_backend.calls == []
 

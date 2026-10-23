@@ -368,7 +368,9 @@ class MaterializedViewMixin:
         )
 
 
-def resolve_mv_refresh_order(mv_classes: list[type[MaterializedViewMixin]]) -> list[type]:
+def resolve_mv_refresh_order(
+    mv_classes: list[type[MaterializedViewMixin]],
+) -> list[type[MaterializedViewMixin]]:
     """
     `resolve_mv_refresh_order`
 
@@ -432,7 +434,7 @@ def refresh_all_mvs(
         refresh_all_mvs(engine, ALL_MVS)
     ```
     """
-    ordered: list[type[MaterializedViewMixin]] = resolve_mv_refresh_order(mv_classes)  # ty: ignore[invalid-assignment]
+    ordered = resolve_mv_refresh_order(mv_classes)
 
     for mv in ordered:
         mv.refresh_mv(bind)

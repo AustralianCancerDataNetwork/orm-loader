@@ -634,5 +634,5 @@ class CSVLoadableTableInterface(ORMTableBase):
             Mapping of input column names to SQLAlchemy columns.
         """
         cols = cls.model_columns()
-        computed_names = {c.name for c in cls.__table__.columns if c.computed is not None}  # type: ignore
+        computed_names = {c.name for c in cls.__table__.columns if c.computed is not None}  # ty: ignore[unresolved-attribute]
         return {k: v for k, v in cols.items() if k not in computed_names}
