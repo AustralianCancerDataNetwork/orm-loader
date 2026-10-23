@@ -1,9 +1,10 @@
 # pyright: reportPrivateUsage=false
 import logging
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from time import perf_counter
-from typing import Any, Generator, Type
+from typing import Any
 
 import sqlalchemy as sa
 import sqlalchemy.orm as so
@@ -69,7 +70,7 @@ class CSVLoadableTableInterface(ORMTableBase):
 
     @classmethod
     def create_staging_table(
-        cls: Type[CSVTableProtocol],
+        cls: type[CSVTableProtocol],
         session: so.Session,
         *,
         staging_schema_tag: str | None = None,
@@ -103,7 +104,7 @@ class CSVLoadableTableInterface(ORMTableBase):
     @classmethod
     @contextmanager
     def manage_indices(
-        cls: Type['CSVTableProtocol'],
+        cls: type["CSVTableProtocol"],
         session: so.Session,
         index_strategy: str = "auto",
         *,
@@ -127,9 +128,11 @@ class CSVLoadableTableInterface(ORMTableBase):
             connection = session.connection(bind_arguments={"mapper": cls})
             inspector = sa.inspect(connection)
             schema = physical_schema_of(connection, schema_tag=cls.__table__.schema)
-            existing_in_db = {idx['name'] for idx in inspector.get_indexes(cls.__tablename__, schema=schema)}
+            existing_in_db = {
+                idx["name"] for idx in inspector.get_indexes(cls.__tablename__, schema=schema)
+            }
             to_drop = [i for i in indices if i.name in existing_in_db]
-            
+
             if to_drop:
                 logger.info(f"Table `{table_name}`: Dropping {len(to_drop)} active indices.")
                 drop_started = perf_counter()
@@ -168,7 +171,7 @@ class CSVLoadableTableInterface(ORMTableBase):
                 finally:
                     logger.info(f"Table `{table_name}`: Restoring foreign key checks.")
                     fk_restore_started = perf_counter()
-            
+
         except Exception as e:
             session.rollback()
             logger.error(f"Table `{table_name}`: Merge operation failed - {e}")
@@ -185,39 +188,46 @@ class CSVLoadableTableInterface(ORMTableBase):
                 connection = session.connection(bind_arguments={"mapper": cls})
                 inspector = sa.inspect(connection)
                 schema = physical_schema_of(connection, schema_tag=cls.__table__.schema)
-                existing_idx_names = {idx['name'] for idx in inspector.get_indexes(table_name, schema=schema)}
-               
+                existing_idx_names = {
+                    idx["name"] for idx in inspector.get_indexes(table_name, schema=schema)
+                }
+
                 for idx in indices:
                     if idx.name not in existing_idx_names:
                         try:
-                            logger.info(f"Table `{table_name}`: Restoring missing index: {idx.name}")
+                            logger.info(
+                                f"Table `{table_name}`: Restoring missing index: {idx.name}"
+                            )
                             create_started = perf_counter()
                             session.execute(sa.schema.CreateIndex(idx))
                             logger.info(
                                 f"Table `{table_name}`: Restored missing index `{idx.name}` in "
                                 f"{_format_elapsed(perf_counter() - create_started)}."
                             )
-                            logger.info(f"Table `{table_name}`: Committing restored index `{idx.name}`.")
+                            logger.info(
+                                f"Table `{table_name}`: Committing restored index `{idx.name}`."
+                            )
                             commit_started = perf_counter()
                             session.commit()
                             logger.info(
                                 f"Table `{table_name}`: Commit after restoring index `{idx.name}` "
                                 f"completed in {_format_elapsed(perf_counter() - commit_started)}."
-                           )
-                        except Exception as e:
+                            )
+                        except Exception:
                             session.rollback()
-                            logger.error(f"Table `{table_name}`: Failed to restore {idx.name}: {e}")
+                            logger.exception(f"Table `{table_name}`: Failed to restore {idx.name}")
                     else:
-                        logger.debug(f"Table `{table_name}`: Index {idx.name} already exists on disk. Skipping.")
+                        logger.debug(
+                            f"Table `{table_name}`: Index {idx.name} already exists on disk. Skipping."
+                        )
                 logger.info(
                     f"Table `{table_name}`: Index verification/rebuild completed in "
                     f"{_format_elapsed(perf_counter() - rebuild_started)}."
                 )
 
-
     @classmethod
     def get_staging_table(
-        cls: Type[CSVTableProtocol],
+        cls: type[CSVTableProtocol],
         session: so.Session,
         *,
         staging_schema_tag: str | None = None,
@@ -260,7 +270,9 @@ class CSVLoadableTableInterface(ORMTableBase):
         if staging_schema is None and backend.dialect == Dialect.SQLITE:
             staging_schema = cls.__table__.schema
         if not inspector.has_table(staging_name, schema=backend.staging_schema):
-            logger.debug(f"Staging table {staging_name} does not exist; recreating",)
+            logger.debug(
+                f"Staging table {staging_name} does not exist; recreating",
+            )
             cls.create_staging_table(session, staging_schema_tag=staging_schema_tag)
 
         connection = session.connection(bind_arguments={"mapper": cls})
@@ -274,7 +286,7 @@ class CSVLoadableTableInterface(ORMTableBase):
 
     @classmethod
     def load_staging(
-        cls: Type[CSVTableProtocol],
+        cls: type[CSVTableProtocol],
         loader: LoaderInterface,
         loader_context: LoaderContext,
     ) -> int:
@@ -303,7 +315,9 @@ class CSVLoadableTableInterface(ORMTableBase):
         )
         total = 0
 
-        cls.create_staging_table(loader_context.session, staging_schema_tag=loader_context.staging_schema_tag)
+        cls.create_staging_table(
+            loader_context.session, staging_schema_tag=loader_context.staging_schema_tag
+        )
 
         try:
             total = backend.load_staging_fast(loader_context=loader_context)
@@ -311,20 +325,15 @@ class CSVLoadableTableInterface(ORMTableBase):
                 return total
         except Exception as e:
             loader_context.session.rollback()
-            logger.warning(f"Fast-path load failed for {cls.__tablename__}: {e}")
-            logger.info('Falling back to ORM-based load functionality')
+            logger.warning(f"Fast-path load failed for {cls.__tablename__}: {e}", exc_info=True)
+            logger.info("Falling back to ORM-based load functionality")
 
-        total = cls.orm_staging_load(
-            loader=loader,
-            loader_context=loader_context
-        )
+        total = cls.orm_staging_load(loader=loader, loader_context=loader_context)
         return total
 
     @classmethod
     def orm_staging_load(
-        cls: Type[CSVTableProtocol],
-        loader: LoaderInterface,
-        loader_context: LoaderContext
+        cls: type[CSVTableProtocol], loader: LoaderInterface, loader_context: LoaderContext
     ) -> int:
         """
         Load data into the staging table using an ORM-based loader.
@@ -337,7 +346,7 @@ class CSVLoadableTableInterface(ORMTableBase):
         return loader.orm_file_load(ctx=loader_context)
 
     @classmethod
-    def _select_loader(cls: Type[CSVTableProtocol], path: Path) -> LoaderInterface:
+    def _select_loader(cls: type[CSVTableProtocol], path: Path) -> LoaderInterface:
         """
         Select an appropriate loader based on file type.
 
@@ -357,10 +366,9 @@ class CSVLoadableTableInterface(ORMTableBase):
         else:
             return PandasLoader()
 
-
     @classmethod
     def load_csv(
-        cls: Type[CSVTableProtocol],
+        cls: type[CSVTableProtocol],
         session: so.Session,
         path: Path,
         *,
@@ -374,7 +382,6 @@ class CSVLoadableTableInterface(ORMTableBase):
         merge_batch_size: int | None = None,
         staging_schema_tag: str | None = None,
     ) -> int:
-
         """
         Load a CSV (or CSV-like) file into the target table.
 
@@ -465,7 +472,9 @@ class CSVLoadableTableInterface(ORMTableBase):
 
         # Merge staging to target (Wrapped in our index dropper!)
         logger.info(f"Table `{cls.__tablename__}`: Merging staging data into target table")
-        with cls.manage_indices(session, index_strategy=index_strategy, staging_schema_tag=staging_schema_tag):
+        with cls.manage_indices(
+            session, index_strategy=index_strategy, staging_schema_tag=staging_schema_tag
+        ):
             cls.merge_from_staging(
                 session,
                 merge_strategy=merge_strategy,
@@ -475,13 +484,14 @@ class CSVLoadableTableInterface(ORMTableBase):
 
         cls.drop_staging_table(session, staging_schema_tag=staging_schema_tag)
 
-        logger.info(f"Table `{cls.__tablename__}`: Successfully finished ingestion. Total rows: {total}")
+        logger.info(
+            f"Table `{cls.__tablename__}`: Successfully finished ingestion. Total rows: {total}"
+        )
         return total
-        
 
     @classmethod
     def _target_has_rows(
-        cls: Type[CSVTableProtocol],
+        cls: type[CSVTableProtocol],
         session: so.Session,
     ) -> bool:
         """
@@ -493,10 +503,9 @@ class CSVLoadableTableInterface(ORMTableBase):
         ).first()
         return row is not None
 
-
     @classmethod
     def merge_from_staging(
-        cls: Type[CSVTableProtocol],
+        cls: type[CSVTableProtocol],
         session: so.Session,
         merge_strategy: str = "replace",
         *,
@@ -589,10 +598,10 @@ class CSVLoadableTableInterface(ORMTableBase):
             )
         else:
             raise ValueError(f"Unknown merge strategy '{merge_strategy}'")
-    
+
     @classmethod
     def drop_staging_table(
-        cls: Type[CSVTableProtocol],
+        cls: type[CSVTableProtocol],
         session: so.Session,
         *,
         staging_schema_tag: str | None = None,
@@ -625,5 +634,5 @@ class CSVLoadableTableInterface(ORMTableBase):
             Mapping of input column names to SQLAlchemy columns.
         """
         cols = cls.model_columns()
-        computed_names = {c.name for c in cls.__table__.columns if c.computed is not None}  # type: ignore
+        computed_names = {c.name for c in cls.__table__.columns if c.computed is not None}  # ty: ignore[unresolved-attribute]
         return {k: v for k, v in cols.items() if k not in computed_names}

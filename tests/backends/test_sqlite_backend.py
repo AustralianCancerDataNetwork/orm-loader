@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from typing import TYPE_CHECKING, Type, cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
 import sqlalchemy as sa
@@ -37,7 +37,7 @@ class _FakeSession:
         return _Result(self.scalar_result)
 
 
-_ComputedTableCls = cast("Type[CSVTableProtocol]", ComputedColumnTable)
+_ComputedTableCls = cast("type[CSVTableProtocol]", ComputedColumnTable)
 
 
 def _sess(s: _FakeSession) -> so.Session:
@@ -92,7 +92,6 @@ def test_sqlite_backend_drop_staging_table():
     assert session.statements == [f'DROP TABLE IF EXISTS "{_STAGING_TABLE}"']
 
 
-
 def test_sqlite_backend_disable_fk_reads_then_sets():
     backend = SQLiteBackend()
     session = _FakeSession(scalar_result=1)
@@ -101,8 +100,8 @@ def test_sqlite_backend_disable_fk_reads_then_sets():
 
     assert previous == 1
     assert session.statements == [
-        "PRAGMA foreign_keys",       # read current state
-        "PRAGMA foreign_keys = OFF", # set to OFF
+        "PRAGMA foreign_keys",  # read current state
+        "PRAGMA foreign_keys = OFF",  # set to OFF
     ]
 
 
@@ -114,8 +113,8 @@ def test_sqlite_backend_enable_fk_reads_then_sets():
 
     assert previous == 0
     assert session.statements == [
-        "PRAGMA foreign_keys",      # read current state
-        "PRAGMA foreign_keys = ON", # set to ON
+        "PRAGMA foreign_keys",  # read current state
+        "PRAGMA foreign_keys = ON",  # set to ON
     ]
 
 

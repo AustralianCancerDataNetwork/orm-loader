@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import importlib
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 import sqlalchemy as sa
 import sqlalchemy.orm as so
-
 from oa_configurator import Role
 from oa_configurator.testing import scoped_test_schema
+
 from orm_loader.mappers.materialised_view_contracts import MaterializedViewIndex
 from orm_loader.mappers.materialised_view_mixin import (
     MaterializedViewMixin,
@@ -48,7 +48,11 @@ def test_refresh_all_mvs_resolves_each_views_own_schema_tag(pg_db) -> None:
 class _IndexedPgMv(MaterializedViewMixin):
     __mv_name__ = "mv_indexed_pg_test"
     __mv_select__ = sa.select(sa.literal(1).label("row_id"))
-    __mv_indexes__ = (MaterializedViewIndex(name="mv_indexed_pg_test_row_id_uq", columns=("row_id",), unique=True),)
+    __mv_indexes__ = (
+        MaterializedViewIndex(
+            name="mv_indexed_pg_test_row_id_uq", columns=("row_id",), unique=True
+        ),
+    )
 
 
 def test_create_mv_with_declared_index_against_postgres(pg_db) -> None:
@@ -63,7 +67,9 @@ def test_create_mv_with_declared_index_against_postgres(pg_db) -> None:
         with scoped.engine.connect() as conn:
             inspector = sa.inspect(conn)
             assert inspector.has_table("mv_indexed_pg_test", schema=schema)
-            index_names = {idx["name"] for idx in inspector.get_indexes("mv_indexed_pg_test", schema=schema)}
+            index_names = {
+                idx["name"] for idx in inspector.get_indexes("mv_indexed_pg_test", schema=schema)
+            }
             assert "mv_indexed_pg_test_row_id_uq" in index_names
 
 
@@ -87,13 +93,15 @@ def test_drop_mv_cascade_against_postgres(pg_db) -> None:
 def test_refresh_mv_concurrently_against_postgres(pg_db) -> None:
     """refresh_mv(concurrently=True) through the mixin succeeds against a
     real database when a unique index is declared.
-    The eligibility check and error translation are already proven at the 
-    backend level directly in test_postgres_backend.py. 
+    The eligibility check and error translation are already proven at the
+    backend level directly in test_postgres_backend.py.
     This proves the mixin wires into that correctly end to end."""
-    with scoped_test_schema(pg_db.resolved, prefix="mv_refresh") as scoped:
-        with scoped.engine.begin() as conn:
-            _IndexedPgMv.create_mv(conn)
-            _IndexedPgMv.refresh_mv(conn, concurrently=True)
+    with (
+        scoped_test_schema(pg_db.resolved, prefix="mv_refresh") as scoped,
+        scoped.engine.begin() as conn,
+    ):
+        _IndexedPgMv.create_mv(conn)
+        _IndexedPgMv.refresh_mv(conn, concurrently=True)
 
 
 class _FakeBackend:
@@ -160,8 +168,9 @@ def test_create_mv_forwards_default_args_to_backend(fake_backend: _FakeBackend, 
 
 
 def test_create_mv_rejects_invalid_bind(fake_backend: _FakeBackend):
+    invalid_bind: Any = "bind"
     with pytest.raises(TypeError, match="bind must be a SQLAlchemy Engine or Connection"):
-        _NoIndexMv.create_mv("bind")
+        _NoIndexMv.create_mv(invalid_bind)
 
     assert fake_backend.calls == []
 
@@ -207,7 +216,7 @@ class _MappedVocabMv(_MappedMvBase, MaterializedViewMixin):
     __mv_name__ = "mv_mapped_vocab"
     __mv_select__ = _SELECT
     __tablename__ = "mv_mapped_vocab"
-    __table_args__ = {"schema": Role.VOCAB.value}
+    __table_args__: ClassVar[dict[str, str]] = {"schema": Role.VOCAB.value}
 
     row_id = sa.Column(sa.Integer, primary_key=True)
 
@@ -264,12 +273,12 @@ def test_create_mv_forwards_if_not_exists_to_declared_indexes(fake_backend: _Fak
     assert fake_backend.calls[1][2] == {"schema": None, "if_not_exists": False}
 
 
-def test_create_mv_engine_uses_one_transaction_for_view_and_indexes(monkeypatch: pytest.MonkeyPatch):
+def test_create_mv_engine_uses_one_transaction_for_view_and_indexes(
+    monkeypatch: pytest.MonkeyPatch,
+):
     engine = sa.create_engine("sqlite:///:memory:", future=True)
     with engine.begin() as connection:
-        connection.execute(
-            sa.text("CREATE TABLE materialization_steps (step TEXT NOT NULL)")
-        )
+        connection.execute(sa.text("CREATE TABLE materialization_steps (step TEXT NOT NULL)"))
 
     connections: list[sa.engine.Connection] = []
     fail_once = True
@@ -277,16 +286,12 @@ def test_create_mv_engine_uses_one_transaction_for_view_and_indexes(monkeypatch:
     class TransactionalBackend(_FakeBackend):
         def create_materialized_view(self, bind, name, selectable, **kwargs):
             connections.append(bind)
-            bind.execute(
-                sa.text("INSERT INTO materialization_steps (step) VALUES ('view')")
-            )
+            bind.execute(sa.text("INSERT INTO materialization_steps (step) VALUES ('view')"))
 
         def create_materialized_view_index(self, bind, name, index, **kwargs):
             nonlocal fail_once
             connections.append(bind)
-            bind.execute(
-                sa.text("INSERT INTO materialization_steps (step) VALUES ('index')")
-            )
+            bind.execute(sa.text("INSERT INTO materialization_steps (step) VALUES ('index')"))
             if fail_once:
                 fail_once = False
                 raise RuntimeError("index failed")
@@ -305,9 +310,10 @@ def test_create_mv_engine_uses_one_transaction_for_view_and_indexes(monkeypatch:
 
     assert connections[0] is connections[1]
     with engine.connect() as connection:
-        assert connection.execute(
-            sa.text("SELECT COUNT(*) FROM materialization_steps")
-        ).scalar_one() == 0
+        assert (
+            connection.execute(sa.text("SELECT COUNT(*) FROM materialization_steps")).scalar_one()
+            == 0
+        )
 
     TransactionalMv.create_mv(engine)
     with engine.connect() as connection:
@@ -369,13 +375,13 @@ class _MvA(MaterializedViewMixin):
 class _MvB(MaterializedViewMixin):
     __mv_name__ = "mv_b"
     __mv_select__ = _SELECT
-    __mv_dependencies__ = {"mv_a"}
+    __mv_dependencies__ = frozenset({"mv_a"})
 
 
 class _MvC(MaterializedViewMixin):
     __mv_name__ = "mv_c"
     __mv_select__ = _SELECT
-    __mv_dependencies__ = {"mv_a", "mv_b"}
+    __mv_dependencies__ = frozenset({"mv_a", "mv_b"})
 
 
 def test_resolve_mv_refresh_order_linear_dependency():
@@ -392,7 +398,7 @@ def test_resolve_mv_refresh_order_ignores_dependencies_outside_the_given_set():
     class _StandaloneMv(MaterializedViewMixin):
         __mv_name__ = "mv_standalone"
         __mv_select__ = _SELECT
-        __mv_dependencies__ = {"some_other_table_not_in_this_registry"}
+        __mv_dependencies__ = frozenset({"some_other_table_not_in_this_registry"})
 
     assert resolve_mv_refresh_order([_StandaloneMv]) == [_StandaloneMv]
 
@@ -401,12 +407,12 @@ def test_resolve_mv_refresh_order_raises_on_cycle():
     class _CycleA(MaterializedViewMixin):
         __mv_name__ = "mv_cycle_a"
         __mv_select__ = _SELECT
-        __mv_dependencies__ = {"mv_cycle_b"}
+        __mv_dependencies__ = frozenset({"mv_cycle_b"})
 
     class _CycleB(MaterializedViewMixin):
         __mv_name__ = "mv_cycle_b"
         __mv_select__ = _SELECT
-        __mv_dependencies__ = {"mv_cycle_a"}
+        __mv_dependencies__ = frozenset({"mv_cycle_a"})
 
     with pytest.raises(RuntimeError, match="Cycle detected"):
         resolve_mv_refresh_order([_CycleA, _CycleB])

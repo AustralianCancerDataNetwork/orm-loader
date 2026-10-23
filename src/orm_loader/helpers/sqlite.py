@@ -20,7 +20,7 @@ def attach_sqlite_bulk_load_pragmas(
     enforcement, and can also enable deferred foreign-key checking for the
     connection.
 
-    Note that this is the replacement for old ``enable_sqlite_foreign_keys()`` 
+    Note that this is the replacement for old ``enable_sqlite_foreign_keys()``
     workaround - this should be no longer needed.
     """
     SQLiteBackend(
@@ -30,9 +30,7 @@ def attach_sqlite_bulk_load_pragmas(
     ).install_engine_hooks(engine)
 
 
-def explain_sqlite_fk_error(
-    session, exc: IntegrityError, raise_error: bool = True, *, mapper=None
-):
+def explain_sqlite_fk_error(session, exc: IntegrityError, raise_error: bool = True, *, mapper=None):
     """Log SQLite foreign-key check details before re-raising an error."""
     SQLiteBackend().explain_fk_error(session, exc, mapper=mapper, raise_error=raise_error)
 

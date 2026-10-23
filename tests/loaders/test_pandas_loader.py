@@ -1,14 +1,21 @@
 from pathlib import Path
-import sqlalchemy as sa
-from orm_loader.loaders.data_classes import LoaderContext
+from typing import cast
+
 import pandas as pd
+import sqlalchemy as sa
+
+from orm_loader.loaders.data_classes import LoaderContext
 from orm_loader.loaders.loader_interface import PandasLoader
+from orm_loader.tables.typing import CSVTableProtocol
 from tests.models import PandasLoaderTable
+
+_PandasLoaderTableCls = cast(type[CSVTableProtocol], PandasLoaderTable)
+
 
 def test_loader_context_fields(session):
 
     ctx = LoaderContext(
-        tableclass=PandasLoaderTable,
+        tableclass=_PandasLoaderTableCls,
         session=session,
         path=Path("file.csv"),
         staging_table=PandasLoaderTable.__table__,
@@ -21,6 +28,7 @@ def test_loader_context_fields(session):
     assert ctx.normalise is False
     assert ctx.dedupe is True
 
+
 def test_pandas_loader_case_insensitive_headers(tmp_path, session):
     """
     PandasLoader should accept mixed-case CSV headers and map them
@@ -28,14 +36,10 @@ def test_pandas_loader_case_insensitive_headers(tmp_path, session):
     """
 
     csv = tmp_path / "test_case_headers.csv"
-    csv.write_text(
-        "ID,Value\n"
-        "1,alpha\n"
-        "2,beta\n"
-    )
+    csv.write_text("ID,Value\n1,alpha\n2,beta\n")
 
     ctx = LoaderContext(
-        tableclass=PandasLoaderTable,
+        tableclass=_PandasLoaderTableCls,
         session=session,
         path=csv,
         staging_table=PandasLoaderTable.__table__,
@@ -46,9 +50,7 @@ def test_pandas_loader_case_insensitive_headers(tmp_path, session):
 
     n = PandasLoader.orm_file_load(ctx)
 
-    rows = session.execute(
-        sa.text('SELECT id, value FROM test_pandas_loader ORDER BY id')
-    ).all()
+    rows = session.execute(sa.text("SELECT id, value FROM test_pandas_loader ORDER BY id")).all()
 
     assert n == 2
     assert rows == [(1, "alpha"), (2, "beta")]
@@ -62,14 +64,10 @@ def test_pandas_loader_literal_mode_preserves_quotes(tmp_path, session):
     """
 
     csv = tmp_path / "quoted.csv"
-    csv.write_text(
-        'id,value\n'
-        '1,"hello"\n'
-        '2,"world"\n'
-    )
+    csv.write_text('id,value\n1,"hello"\n2,"world"\n')
 
     ctx = LoaderContext(
-        tableclass=PandasLoaderTable,
+        tableclass=_PandasLoaderTableCls,
         session=session,
         path=csv,
         staging_table=PandasLoaderTable.__table__,
@@ -81,9 +79,7 @@ def test_pandas_loader_literal_mode_preserves_quotes(tmp_path, session):
 
     n = PandasLoader.orm_file_load(ctx)
 
-    rows = session.execute(
-        sa.text('SELECT id, value FROM test_pandas_loader ORDER BY id')
-    ).all()
+    rows = session.execute(sa.text("SELECT id, value FROM test_pandas_loader ORDER BY id")).all()
 
     assert n == 2
     assert rows == [(1, '"hello"'), (2, '"world"')]
@@ -97,14 +93,10 @@ def test_pandas_loader_csv_mode_strips_quotes(tmp_path, session):
     """
 
     csv = tmp_path / "quoted.csv"
-    csv.write_text(
-        'id,value\n'
-        '1,"hello"\n'
-        '2,"world"\n'
-    )
+    csv.write_text('id,value\n1,"hello"\n2,"world"\n')
 
     ctx = LoaderContext(
-        tableclass=PandasLoaderTable,
+        tableclass=_PandasLoaderTableCls,
         session=session,
         path=csv,
         staging_table=PandasLoaderTable.__table__,
@@ -116,9 +108,7 @@ def test_pandas_loader_csv_mode_strips_quotes(tmp_path, session):
 
     n = PandasLoader.orm_file_load(ctx)
 
-    rows = session.execute(
-        sa.text('SELECT id, value FROM test_pandas_loader ORDER BY id')
-    ).all()
+    rows = session.execute(sa.text("SELECT id, value FROM test_pandas_loader ORDER BY id")).all()
 
     assert n == 2
     assert rows == [(1, "hello"), (2, "world")]
@@ -131,14 +121,10 @@ def test_pandas_loader_by_delimiter_tab_preserves_quotes(tmp_path, session):
     """
 
     tsv = tmp_path / "tab.tsv"
-    tsv.write_text(
-        'id\tvalue\n'
-        '1\t"hi"\n'
-        '2\tbye\n'
-    )
+    tsv.write_text('id\tvalue\n1\t"hi"\n2\tbye\n')
 
     ctx = LoaderContext(
-        tableclass=PandasLoaderTable,
+        tableclass=_PandasLoaderTableCls,
         session=session,
         path=tsv,
         staging_table=PandasLoaderTable.__table__,
@@ -150,22 +136,22 @@ def test_pandas_loader_by_delimiter_tab_preserves_quotes(tmp_path, session):
 
     n = PandasLoader.orm_file_load(ctx)
 
-    rows = session.execute(
-        sa.text('SELECT id, value FROM test_pandas_loader ORDER BY id')
-    ).all()
+    rows = session.execute(sa.text("SELECT id, value FROM test_pandas_loader ORDER BY id")).all()
 
     assert n == 2
     assert rows == [(1, '"hi"'), (2, "bye")]
 
 
 def test_pandas_dedupe_internal(session, tmp_path):
-    df = pd.DataFrame({
-        "id": [1, 1, 2],
-        "value": [10, 10, 20],
-    })
+    df = pd.DataFrame(
+        {
+            "id": [1, 1, 2],
+            "value": [10, 10, 20],
+        }
+    )
 
     ctx = LoaderContext(
-        tableclass=PandasLoaderTable,
+        tableclass=_PandasLoaderTableCls,
         session=session,
         path=Path("file.csv"),
         staging_table=PandasLoaderTable.__table__,

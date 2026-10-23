@@ -11,5 +11,6 @@ NAMING_CONVENTIONS = {
 
 metadata = MetaData(naming_convention=NAMING_CONVENTIONS)
 
+
 class Base(DeclarativeBase):
     metadata = metadata

@@ -1,16 +1,26 @@
 from __future__ import annotations
-from typing import Any, Iterable, Type, TYPE_CHECKING
+
 import csv as _csv
-import pandas as pd
 import logging
+from collections.abc import Iterable
+from functools import partial, reduce
+from typing import TYPE_CHECKING, Any
+
+import pandas as pd
 import pyarrow as pa
-import pyarrow.dataset as ds
 import pyarrow.compute as pc
-from functools import reduce
-from .data_classes import LoaderContext, TableCastingStats, LoaderInterface
-from .loading_helpers import infer_delim, infer_encoding, conservative_load_parquet, arrow_drop_duplicates, resolve_quote_mode
-from .data import perform_cast, cast_arrow_column
+import pyarrow.dataset as ds
+
 from ..helpers import IngestError
+from .data import ArrowArray, cast_arrow_column, perform_cast
+from .data_classes import LoaderContext, LoaderInterface, TableCastingStats
+from .loading_helpers import (
+    arrow_drop_duplicates,
+    conservative_load_parquet,
+    infer_delim,
+    infer_encoding,
+    resolve_quote_mode,
+)
 
 if TYPE_CHECKING:
     from ..tables.typing import CSVTableProtocol
@@ -39,7 +49,10 @@ from untrusted sources and accommodating updates and deletes for incremental loa
 
 """
 
-def _require_columns_present(tableclass: Type["CSVTableProtocol"], present_columns: Iterable[str]) -> None:
+
+def _require_columns_present(
+    tableclass: type[CSVTableProtocol], present_columns: Iterable[str]
+) -> None:
     """
     Raise before staging if a genuinely required column is entirely
     absent from the incoming data.
@@ -54,14 +67,15 @@ def _require_columns_present(tableclass: Type["CSVTableProtocol"], present_colum
             f"{tableclass.__tablename__}: source data is missing required column(s) {missing} (non-nullable, no default)"
         )
 
+
 @staticmethod
 def _normalise_columns(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
-    df.columns = [c.lower().replace('_hash', '').strip() for c in df.columns]
+    df.columns = [c.lower().replace("_hash", "").strip() for c in df.columns]
     return df
 
-class PandasLoader(LoaderInterface):
 
+class PandasLoader(LoaderInterface):
     """
     For initial dataloads, pandasloader may not be sufficiently performant for very large files.
     However, it provides a very flexible and easy-to-debug pathway for data ingestion, especially
@@ -79,10 +93,12 @@ class PandasLoader(LoaderInterface):
             return df
         pk_names = ctx.tableclass.pk_names()
         before = len(df)
-        df = df.drop_duplicates(subset=pk_names, keep='first')
+        df = df.drop_duplicates(subset=pk_names, keep="first")
         dropped_internal = before - len(df)
         if dropped_internal > 0:
-            logger.info(f"Dropped {dropped_internal} duplicate rows internally in staging for {ctx.tableclass.__tablename__}")        
+            logger.info(
+                f"Dropped {dropped_internal} duplicate rows internally in staging for {ctx.tableclass.__tablename__}"
+            )
         return df.copy()
 
     @classmethod
@@ -93,7 +109,7 @@ class PandasLoader(LoaderInterface):
             df = data
         if df.empty:
             return df
-        
+
         table_name = ctx.tableclass.__tablename__
         stats = TableCastingStats(table_name=table_name)
 
@@ -105,11 +121,14 @@ class PandasLoader(LoaderInterface):
             def _on_cast_error(value, *, _col=col_name):
                 stats.record(column=_col, value=value)
 
-            df[col_name] = df[col_name].map(
-                lambda v: perform_cast(
-                    v, sa_col.type, on_error=_on_cast_error, table_name=table_name, column_name=col_name
-                )
+            cast_value = partial(
+                perform_cast,
+                sa_type=sa_col.type,
+                on_error=_on_cast_error,
+                table_name=table_name,
+                column_name=col_name,
             )
+            df[col_name] = df[col_name].map(cast_value)
 
         _require_columns_present(ctx.tableclass, df.columns)
         required_cols = list(ctx.tableclass.required_columns())
@@ -117,7 +136,7 @@ class PandasLoader(LoaderInterface):
         if required_cols:
             null_mask = df[required_cols].isna()
             for col in required_cols:
-                null_count = int(null_mask[col].sum())  # type: ignore[arg-type]
+                null_count = int(null_mask[col].sum())
                 if null_count > 0:
                     logger.warning(
                         "Found %d rows with unexpected nulls in %s.%s",
@@ -129,10 +148,12 @@ class PandasLoader(LoaderInterface):
             df = df.loc[~null_mask.any(axis=1)]
         if stats.has_failures():
             for col, col_stats in stats.columns.items():
-                logger.warning(f"CAST {table_name}.{col}: {col_stats.count} row(s) failed. Examples: {col_stats.examples}")
+                logger.warning(
+                    f"CAST {table_name}.{col}: {col_stats.count} row(s) failed. Examples: {col_stats.examples}"
+                )
 
         return df
-    
+
     @classmethod
     def orm_file_load(cls, ctx: LoaderContext) -> int:
         """
@@ -143,7 +164,7 @@ class PandasLoader(LoaderInterface):
         """
 
         delimiter = infer_delim(ctx.path)
-        encoding = infer_encoding(ctx.path)['encoding']
+        encoding = infer_encoding(ctx.path)["encoding"]
 
         # Resolve to the same concrete mode the COPY fast-path would use, so a
         # file that falls back here is parsed identically. Without this the
@@ -163,17 +184,21 @@ class PandasLoader(LoaderInterface):
                 quoting=quoting,
             )
         except pd.errors.EmptyDataError:
-            logger.info(f"File {ctx.path.name} is empty — skipping load for {ctx.tableclass.__tablename__}")
+            logger.info(
+                f"File {ctx.path.name} is empty — skipping load for {ctx.tableclass.__tablename__}"
+            )
             return 0
-        
+
         logger.info(f"Detected encoding {encoding} for file {ctx.path.name}")
-        logger.info(f"Detected delimiter '{delimiter}' for file {ctx.path.name}")       
-        logger.info(f"Loading with chunksize '{ctx.chunksize}' for file {ctx.path.name}")       
+        logger.info(f"Detected delimiter '{delimiter}' for file {ctx.path.name}")
+        logger.info(f"Loading with chunksize '{ctx.chunksize}' for file {ctx.path.name}")
         chunks = (reader,) if isinstance(reader, pd.DataFrame) else reader
 
         total = 0
         for i, chunk in enumerate(chunks):
-            logger.debug(f"Processing chunk {i} with {len(chunk)} rows for {ctx.tableclass.__tablename__}")
+            logger.debug(
+                f"Processing chunk {i} with {len(chunk)} rows for {ctx.tableclass.__tablename__}"
+            )
             chunk = _normalise_columns(chunk)
             if ctx.dedupe:
                 chunk = cls.dedupe(chunk, ctx)
@@ -187,8 +212,8 @@ class PandasLoader(LoaderInterface):
             )
         return total
 
-class ParquetLoader(LoaderInterface):
 
+class ParquetLoader(LoaderInterface):
     """
     Overhead from this loader is worthwhile with processing and cleaning of very large files.
     """
@@ -197,11 +222,11 @@ class ParquetLoader(LoaderInterface):
     def cast_to_model(cls, data: pa.Table, ctx: LoaderContext) -> pa.Table:
         if data.num_rows == 0:
             return data
-        
+
         table_name = ctx.tableclass.__tablename__
         stats = TableCastingStats(table_name=table_name)
         model_columns = ctx.tableclass.model_columns()
-        arrays: dict[str, pa.Array] = {}
+        arrays: dict[str, ArrowArray] = {}
         for col_name, sa_col in model_columns.items():
             if col_name not in data.schema.names:
                 continue
@@ -213,15 +238,17 @@ class ParquetLoader(LoaderInterface):
                 stats=stats,
             )
 
-        out = pa.table(arrays)
+        out = pa.table(list(arrays.values()), names=list(arrays))
         _require_columns_present(ctx.tableclass, out.schema.names)
         required_cols = list(ctx.tableclass.required_columns())
 
         if required_cols:
-            masks = [pc.is_valid(out[c]) for c in required_cols]            # type: ignore
-            valid_mask = reduce(pc.and_, masks)                             # type: ignore
+            masks = [pc.is_valid(out[c]) for c in required_cols]
+            valid_mask = reduce(lambda left, right: pc.and_(left, right), masks)
 
-            dropped = out.num_rows - pc.sum(valid_mask).as_py()             # type: ignore
+            before = out.num_rows
+            out = out.filter(valid_mask)
+            dropped = before - out.num_rows
             if dropped > 0:
                 logger.warning(
                     "Dropped %d rows with unexpected nulls in %s",
@@ -229,16 +256,18 @@ class ParquetLoader(LoaderInterface):
                     table_name,
                 )
 
-            out = out.filter(valid_mask)
-
         if stats.has_failures():
             for col, col_stats in stats.columns.items():
-                logger.warning(f"CAST {table_name}.{col}: {col_stats.count} failures. Examples: {col_stats.examples}")
+                logger.warning(
+                    f"CAST {table_name}.{col}: {col_stats.count} failures. Examples: {col_stats.examples}"
+                )
 
         return out
 
     @classmethod
-    def dedupe(cls, data: pa.Table, ctx: LoaderContext) -> pa.Table:
+    def dedupe(cls, data: pd.DataFrame | pa.Table, ctx: LoaderContext) -> Any:
+        if isinstance(data, pd.DataFrame):
+            return super().dedupe(data, ctx)
         if data.num_rows == 0:
             return data
 
@@ -264,10 +293,11 @@ class ParquetLoader(LoaderInterface):
             yield from dataset.to_batches(batch_size=ctx.chunksize or 64_000)
 
         elif suffix in {".csv", ".tsv"}:
-            yield from conservative_load_parquet(ctx.path, wanted_cols=wanted_cols, chunksize=ctx.chunksize)
+            yield from conservative_load_parquet(
+                ctx.path, wanted_cols=wanted_cols, chunksize=ctx.chunksize
+            )
         else:
             raise ValueError(f"Unsupported file type: {ctx.path}")
-
 
     @classmethod
     def orm_file_load(cls, ctx: LoaderContext) -> int:
@@ -275,18 +305,14 @@ class ParquetLoader(LoaderInterface):
         for record_batch in cls._scan_batches(ctx):
             if record_batch.num_rows == 0:
                 continue
-            data: pa.Table | pa.RecordBatch = record_batch
+            data = pa.Table.from_batches([record_batch])
             if ctx.normalise:
                 data = cls.cast_to_model(data, ctx=ctx)
             if ctx.dedupe:
                 data = cls.dedupe(data, ctx)
 
-            if isinstance(data, pa.RecordBatch) or isinstance(data, pa.Table):
-                df = data.to_pandas()
-            else:
-                df = data 
+            df = data.to_pandas()
             if df.empty:
-                
                 continue
 
             total += cls._load_chunk(

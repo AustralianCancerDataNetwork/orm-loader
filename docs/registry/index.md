@@ -66,14 +66,15 @@ from orm_loader.tables import ORMTableBase
 
 Base = declarative_base()
 
+
 class Person(ORMTableBase, Base):
     __tablename__ = "person"
     # columns omitted for brevity
 
+
 class VisitOccurrence(ORMTableBase, Base):
     __tablename__ = "visit_occurrence"
     # columns omitted for brevity
-
 ```
 
 ## 2. Create a ModelRegistry
@@ -81,14 +82,9 @@ class VisitOccurrence(ORMTableBase, Base):
 The registry is the coordination object that holds models and specs.
 
 ```python
-
 from orm_loader.registry import ModelRegistry
 
-registry = ModelRegistry(
-    model_version="5.4",
-    model_name="OMOP"
-)
-
+registry = ModelRegistry(model_version="5.4", model_name="OMOP")
 ```
 
 ## 3. Load Specifications
@@ -116,10 +112,12 @@ At this point, the registry knows:
 Models can be registered explicitly:
 
 ```python
-registry.register_models([
-    Person,
-    VisitOccurrence,
-])
+registry.register_models(
+    [
+        Person,
+        VisitOccurrence,
+    ]
+)
 ```
 
 Or discovered automatically from a package:

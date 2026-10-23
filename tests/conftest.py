@@ -1,4 +1,4 @@
-from collections.abc import Iterable, Iterator
+from collections.abc import Generator, Iterable
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -6,9 +6,9 @@ import pytest
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 from dotenv import load_dotenv
-
 from oa_configurator import Role
 from oa_configurator.testing import ScopedTestSchema, isolated_test_database, scoped_test_schema
+
 from orm_loader.backends import staging_schema_claim
 from orm_loader.config import OrmLoaderConfig
 from tests.models import Base
@@ -19,7 +19,9 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 @pytest.fixture
 def engine():
     with isolated_test_database(
-        OrmLoaderConfig, "test_orm_db_sqlite", dialect="sqlite",
+        OrmLoaderConfig,
+        "test_orm_db_sqlite",
+        dialect="sqlite",
     ) as db:
         engine = db.connection.engine
         Base.metadata.create_all(engine)
@@ -36,6 +38,7 @@ def session(engine):
 # Postgres fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def pg_db(request):
     """Isolated PostgreSQL test database. Everything done through
@@ -43,7 +46,10 @@ def pg_db(request):
     that's rolled back on exit, so concurrent test runs can't collide and
     nothing needs manual cleanup."""
     with isolated_test_database(
-        OrmLoaderConfig, "test_orm_db_pg", request=request, schema_claims=[staging_schema_claim()],
+        OrmLoaderConfig,
+        "test_orm_db_pg",
+        request=request,
+        schema_claims=[staging_schema_claim()],
     ) as db:
         yield db
 
@@ -61,11 +67,14 @@ def pg_session(pg_db):
 @contextmanager
 def schema_scoped_session(
     pg_db, table: sa.Table, *, prefix: str, split_roles: Iterable[Role] = ()
-) -> Iterator[tuple[ScopedTestSchema, so.Session]]:
+) -> Generator[tuple[ScopedTestSchema, so.Session]]:
     """A Session on committed scoped test schemas, with the staging schema
     claimed and *table* already created."""
     with scoped_test_schema(
-        pg_db.resolved, prefix=prefix, split_roles=split_roles, schema_claims=[staging_schema_claim()]
+        pg_db.resolved,
+        prefix=prefix,
+        split_roles=split_roles,
+        schema_claims=[staging_schema_claim()],
     ) as scoped:
         with scoped.engine.begin() as conn:
             table.create(conn, checkfirst=True)

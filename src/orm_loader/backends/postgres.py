@@ -35,7 +35,9 @@ _VALID_PG_REPLICATION_ROLES = frozenset({"origin", "local", "replica"})
 
 
 class PostgresBackend(DatabaseBackend):
-    def __init__(self, *, staging_schema_tag: str | None = None, staging_schema: str | None = None) -> None:
+    def __init__(
+        self, *, staging_schema_tag: str | None = None, staging_schema: str | None = None
+    ) -> None:
         super().__init__(staging_schema_tag=staging_schema_tag, staging_schema=staging_schema)
 
     @staticmethod
@@ -65,7 +67,7 @@ class PostgresBackend(DatabaseBackend):
 
     def create_staging_table(
         self,
-        table_cls: type["CSVTableProtocol"],
+        table_cls: type[CSVTableProtocol],
         session: so.Session,
     ) -> None:
         table = table_cls.__table__
@@ -76,13 +78,15 @@ class PostgresBackend(DatabaseBackend):
             bind, table.name, physical_schema=physical_schema_of(bind, schema_tag=table.schema)
         )
         bind_arguments = {"mapper": table_cls}
-        session.execute(sa.text(f'DROP TABLE IF EXISTS {staging_ref};'), bind_arguments=bind_arguments)
+        session.execute(
+            sa.text(f"DROP TABLE IF EXISTS {staging_ref};"), bind_arguments=bind_arguments
+        )
         session.execute(
             sa.text(
-                f'''
+                f"""
                 CREATE UNLOGGED TABLE {staging_ref}
                 (LIKE {source_ref} INCLUDING DEFAULTS INCLUDING CONSTRAINTS);
-                '''
+                """
             ),
             bind_arguments=bind_arguments,
         )
@@ -90,14 +94,14 @@ class PostgresBackend(DatabaseBackend):
         computed_cols = [c.name for c in table.columns if c.computed is not None]
         for col in computed_cols:
             session.execute(
-                sa.text(f'ALTER TABLE {staging_ref} DROP COLUMN {preparer.quote_identifier(col)};'),
+                sa.text(f"ALTER TABLE {staging_ref} DROP COLUMN {preparer.quote_identifier(col)};"),
                 bind_arguments=bind_arguments,
             )
 
         # allows pagination in O(N log N) time for large tables in merge_insert without needing to add an index on every staging table
         session.execute(
             sa.text(
-                f'ALTER TABLE {staging_ref} ADD COLUMN _rownum BIGINT'
+                f"ALTER TABLE {staging_ref} ADD COLUMN _rownum BIGINT"
                 f" GENERATED ALWAYS AS IDENTITY (CACHE 1000);"
             ),
             bind_arguments=bind_arguments,
@@ -107,17 +111,17 @@ class PostgresBackend(DatabaseBackend):
 
     def drop_staging_table(
         self,
-        table_cls: type["CSVTableProtocol"],
+        table_cls: type[CSVTableProtocol],
         session: so.Session,
     ) -> None:
         session.execute(
-            sa.text(f'DROP TABLE IF EXISTS {self.qualified_staging_name(table_cls.__tablename__)}'),
+            sa.text(f"DROP TABLE IF EXISTS {self.qualified_staging_name(table_cls.__tablename__)}"),
             bind_arguments={"mapper": table_cls},
         )
 
     def load_staging_fast(
         self,
-        loader_context: "LoaderContext",
+        loader_context: LoaderContext,
     ) -> int | None:
         from ..loaders.loading_helpers import quick_load_pg
 
@@ -134,7 +138,7 @@ class PostgresBackend(DatabaseBackend):
     @staticmethod
     def _normalize_fk_check_state(previous_state: str | int) -> str:
         if isinstance(previous_state, int):
-            raise ValueError(
+            raise ValueError(  # noqa: TRY004 - int is an accepted type, never a valid role
                 f"Invalid PostgreSQL session_replication_role {previous_state!r}: "
                 "Postgres uses string roles ('origin', 'local', 'replica'), not integers. "
                 "The value passed here should always come from this backend's own "
@@ -155,7 +159,7 @@ class PostgresBackend(DatabaseBackend):
         ).scalar()
         session.execute(sa.text("SET session_replication_role = 'replica'"), **execute_options)
         if not isinstance(previous_state, str):
-            raise RuntimeError("Expected PostgreSQL FK state to be a string")
+            raise RuntimeError("Expected PostgreSQL FK state to be a string")  # noqa: TRY004 - bad database result
         return previous_state
 
     def enable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int:
@@ -165,7 +169,7 @@ class PostgresBackend(DatabaseBackend):
         ).scalar()
         session.execute(sa.text("SET session_replication_role = 'origin'"), **execute_options)
         if not isinstance(previous_state, str):
-            raise RuntimeError("Expected PostgreSQL FK state to be a string")
+            raise RuntimeError("Expected PostgreSQL FK state to be a string")  # noqa: TRY004 - bad database result
         return previous_state
 
     def restore_fk_check(
@@ -182,7 +186,7 @@ class PostgresBackend(DatabaseBackend):
         )
 
     def _staging_rownum_index(
-        self, table_cls: type["CSVTableProtocol"], staging: sa.Table, session: so.Session
+        self, table_cls: type[CSVTableProtocol], staging: sa.Table, session: so.Session
     ) -> None:
         staging_name = self.staging_name_for_table(table_cls.__tablename__)
         idx = sa.Index(f"{staging_name}_rownum_idx", staging.c._rownum)
@@ -214,7 +218,7 @@ class PostgresBackend(DatabaseBackend):
 
     def merge_replace(
         self,
-        table_cls: type["CSVTableProtocol"],
+        table_cls: type[CSVTableProtocol],
         session: so.Session,
         pk_cols: list[str],
         *,
@@ -259,7 +263,7 @@ class PostgresBackend(DatabaseBackend):
 
     def merge_upsert(
         self,
-        table_cls: type["CSVTableProtocol"],
+        table_cls: type[CSVTableProtocol],
         session: so.Session,
         pk_cols: list[str],
         *,
@@ -304,7 +308,7 @@ class PostgresBackend(DatabaseBackend):
 
     def merge_insert(
         self,
-        table_cls: type["CSVTableProtocol"],
+        table_cls: type[CSVTableProtocol],
         session: so.Session,
         *,
         merge_batch_size: int | None = None,
@@ -386,19 +390,18 @@ class PostgresBackend(DatabaseBackend):
         *,
         schema: str | None = None,
         concurrently: bool = False,
-        declared_indexes: tuple["MaterializedViewIndex", ...] = (),
+        declared_indexes: tuple[MaterializedViewIndex, ...] = (),
     ) -> None:
         with self._as_connection(bind) as conn:
-            if concurrently:
-                if not any(index.unique for index in declared_indexes):
-                    raise ConcurrentRefreshNotEligibleError(
-                        MaterializationFailure(
-                            operation=MaterializationOperation.REFRESH,
-                            schema=schema,
-                            name=name,
-                            reason="no simple unique index is declared",
-                        )
+            if concurrently and not any(index.unique for index in declared_indexes):
+                raise ConcurrentRefreshNotEligibleError(
+                    MaterializationFailure(
+                        operation=MaterializationOperation.REFRESH,
+                        schema=schema,
+                        name=name,
+                        reason="no simple unique index is declared",
                     )
+                )
 
             safe_name = qualified(conn, name, physical_schema=schema)
             concurrency = "CONCURRENTLY " if concurrently else ""
@@ -440,7 +443,9 @@ class PostgresBackend(DatabaseBackend):
             try:
                 conn.execute(
                     DropMaterializedView(
-                        qualified(conn, name, physical_schema=schema), if_exists=if_exists, cascade=cascade
+                        qualified(conn, name, physical_schema=schema),
+                        if_exists=if_exists,
+                        cascade=cascade,
                     )
                 )
             except Exception as error:
@@ -459,7 +464,7 @@ class PostgresBackend(DatabaseBackend):
         self,
         bind: Engine | Connection,
         name: str,
-        index: "MaterializedViewIndex",
+        index: MaterializedViewIndex,
         *,
         schema: str | None = None,
         if_not_exists: bool = True,
@@ -470,7 +475,9 @@ class PostgresBackend(DatabaseBackend):
             try:
                 conn.execute(
                     CreateMaterializedViewIndex(
-                        qualified(conn, name, physical_schema=schema), index, if_not_exists=if_not_exists
+                        qualified(conn, name, physical_schema=schema),
+                        index,
+                        if_not_exists=if_not_exists,
                     )
                 )
             except Exception as error:
@@ -486,7 +493,7 @@ class PostgresBackend(DatabaseBackend):
                 ) from error
 
     @contextmanager
-    def engine_with_replica_role(self, engine: "Engine"):
+    def engine_with_replica_role(self, engine: Engine):
         def _set_replica_role(
             dbapi_conn: sa.engine.interfaces.DBAPIConnection,
             _,

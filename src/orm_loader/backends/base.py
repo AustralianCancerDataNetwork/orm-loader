@@ -1,18 +1,17 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable, Generator
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
-from collections.abc import Generator
 from functools import wraps
-from typing import TYPE_CHECKING, Any, Callable, ParamSpec, Type, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Concatenate
 
 import sqlalchemy as sa
 import sqlalchemy.orm as so
+from oa_configurator import Dialect, SchemaClaim, open_connection, qualified
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.sql.compiler import IdentifierPreparer
-
-from oa_configurator import Dialect, SchemaClaim, open_connection, qualified
 
 if TYPE_CHECKING:
     from ..loaders.data_classes import LoaderContext
@@ -38,10 +37,12 @@ class BackendCapabilities:
 STAGING_SCHEMA: str = "staging"
 
 
-def staging_schema_claim(physical_schema: str | None = None, *, reserved: bool = True) -> SchemaClaim:
+def staging_schema_claim(
+    physical_schema: str | None = None, *, reserved: bool = True
+) -> SchemaClaim:
     """SchemaClaim reserving orm-loader's staging schema.
     Since orm-loader doesn't have an engine creation step of its own,
-    this claim needs to be registered by the caller ingesting tables into 
+    this claim needs to be registered by the caller ingesting tables into
     the database through orm-loader.
 
     Add to your own ``create_engines(schema_claims=[...])`` call before
@@ -63,28 +64,21 @@ def staging_schema_claim(physical_schema: str | None = None, *, reserved: bool =
     )
 
 
-P = ParamSpec("P")
-R = TypeVar("R")
-
-
-def requires_capability(
+def requires_capability[B: DatabaseBackend, **P, R](
     capability_name: str,
     feature_name: str,
-) -> Callable[[Callable[P, R]], Callable[P, R]]:
+) -> Callable[[Callable[Concatenate[B, P], R]], Callable[Concatenate[B, P], R]]:
     """Guard a concrete backend method with a capability requirement.
 
     Subclass overrides must apply this decorator themselves; Python does not
     automatically retain decorators when a method is overridden.
     """
 
-    def decorator(method: Callable[P, R]) -> Callable[P, R]:
+    def decorator(method: Callable[Concatenate[B, P], R]) -> Callable[Concatenate[B, P], R]:
         @wraps(method)
-        def guarded(*args: P.args, **kwargs: P.kwargs) -> R:
-            # ParamSpec keeps the complete method signature, but type checkers
-            # cannot infer that args[0] is the backend instance here.
-            self = cast("DatabaseBackend", args[0])
+        def guarded(self: B, *args: P.args, **kwargs: P.kwargs) -> R:
             self._require_capability(capability_name, feature_name)
-            return method(*args, **kwargs)
+            return method(self, *args, **kwargs)
 
         return guarded
 
@@ -99,7 +93,9 @@ class DatabaseBackend(ABC):
     without changing existing loader orchestration yet.
     """
 
-    def __init__(self, *, staging_schema_tag: str | None = None, staging_schema: str | None = None) -> None:
+    def __init__(
+        self, *, staging_schema_tag: str | None = None, staging_schema: str | None = None
+    ) -> None:
         """
         Parameters
         ----------
@@ -156,7 +152,9 @@ class DatabaseBackend(ABC):
             e.g. '"staging"."_staging_concept"' or '"_staging_concept"'.
         """
         return qualified(
-            self.identifier_preparer, self.staging_name_for_table(tablename), physical_schema=self.staging_schema
+            self.identifier_preparer,
+            self.staging_name_for_table(tablename),
+            physical_schema=self.staging_schema,
         )
 
     @property
@@ -210,10 +208,8 @@ class DatabaseBackend(ABC):
                 f"Unknown backend capability {capability_name!r} on {type(self.capabilities).__name__}"
             )
         if not getattr(self.capabilities, capability_name):
-            raise NotImplementedError(
-                f"Backend '{self.name}' does not support {feature_name}"
-            )
-        
+            raise NotImplementedError(f"Backend '{self.name}' does not support {feature_name}")
+
     @contextmanager
     def _as_connection(
         self,
@@ -259,7 +255,7 @@ class DatabaseBackend(ABC):
 
     def _insertable_column_names(
         self,
-        table_cls: Type["CSVTableProtocol"],
+        table_cls: type[CSVTableProtocol],
     ) -> list[str]:
         """
         Return column names safe to include in generic insert statements.
@@ -272,7 +268,7 @@ class DatabaseBackend(ABC):
     @abstractmethod
     def create_staging_table(
         self,
-        table_cls: Type["CSVTableProtocol"],
+        table_cls: type[CSVTableProtocol],
         session: so.Session,
     ) -> None:
         """Create a staging table for the supplied ORM table class."""
@@ -280,14 +276,14 @@ class DatabaseBackend(ABC):
     @abstractmethod
     def drop_staging_table(
         self,
-        table_cls: Type["CSVTableProtocol"],
+        table_cls: type[CSVTableProtocol],
         session: so.Session,
     ) -> None:
         """Drop a staging table if it exists."""
 
     def load_staging_fast(
         self,
-        loader_context: "LoaderContext",
+        loader_context: LoaderContext,
     ) -> int | None:
         """
         Attempt a backend-native fast-path load.
@@ -327,7 +323,7 @@ class DatabaseBackend(ABC):
     @abstractmethod
     def merge_replace(
         self,
-        table_cls: Type["CSVTableProtocol"],
+        table_cls: type[CSVTableProtocol],
         session: so.Session,
         pk_cols: list[str],
         *,
@@ -338,7 +334,7 @@ class DatabaseBackend(ABC):
     @abstractmethod
     def merge_upsert(
         self,
-        table_cls: Type["CSVTableProtocol"],
+        table_cls: type[CSVTableProtocol],
         session: so.Session,
         pk_cols: list[str],
         *,
@@ -349,7 +345,7 @@ class DatabaseBackend(ABC):
     @abstractmethod
     def merge_insert(
         self,
-        table_cls: Type["CSVTableProtocol"],
+        table_cls: type[CSVTableProtocol],
         session: so.Session,
         *,
         merge_batch_size: int | None = None,
@@ -358,7 +354,7 @@ class DatabaseBackend(ABC):
 
     def merge_context(
         self,
-        table_cls: Type["CSVTableProtocol"],
+        table_cls: type[CSVTableProtocol],
         session: so.Session,
     ) -> AbstractContextManager[None]:
         """Disable backend FK checks for a table's merge and restore them afterward."""
@@ -409,7 +405,7 @@ class DatabaseBackend(ABC):
     @requires_capability("supports_materialized_views", "materialized views")
     def create_materialized_view(
         self,
-        bind: "Engine | Connection",
+        bind: Engine | Connection,
         name: str,
         selectable: sa.sql.Select[Any],
         *,
@@ -430,12 +426,12 @@ class DatabaseBackend(ABC):
     @requires_capability("supports_materialized_views", "materialized views")
     def refresh_materialized_view(
         self,
-        bind: "Engine | Connection",
+        bind: Engine | Connection,
         name: str,
         *,
         schema: str | None = None,
         concurrently: bool = False,
-        declared_indexes: tuple["MaterializedViewIndex", ...] = (),
+        declared_indexes: tuple[MaterializedViewIndex, ...] = (),
     ) -> None:
         """Refresh a materialized view.
 
@@ -453,7 +449,7 @@ class DatabaseBackend(ABC):
     @requires_capability("supports_materialized_views", "materialized views")
     def drop_materialized_view(
         self,
-        bind: "Engine | Connection",
+        bind: Engine | Connection,
         name: str,
         *,
         schema: str | None = None,
@@ -476,9 +472,9 @@ class DatabaseBackend(ABC):
     @requires_capability("supports_materialized_views", "materialized views")
     def create_materialized_view_index(
         self,
-        bind: "Engine | Connection",
+        bind: Engine | Connection,
         name: str,
-        index: "MaterializedViewIndex",
+        index: MaterializedViewIndex,
         *,
         schema: str | None = None,
         if_not_exists: bool = True,
@@ -490,6 +486,5 @@ class DatabaseBackend(ABC):
         the same compatibility reason as :meth:`drop_materialized_view`.
         """
         raise NotImplementedError(
-            f"Backend '{self.name}' has not implemented "
-            "create_materialized_view_index()"
+            f"Backend '{self.name}' has not implemented create_materialized_view_index()"
         )

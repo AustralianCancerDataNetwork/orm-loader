@@ -15,8 +15,7 @@ _DIALECT = postgresql.dialect()
 
 
 def test_mappers_package_exports_materialized_view_api():
-    import orm_loader.mappers as mappers
-
+    from orm_loader import mappers
     from orm_loader.mappers.materialised_view_errors import MaterializationError
 
     assert mappers.MaterializedViewIndex is MaterializedViewIndex
@@ -55,7 +54,9 @@ def test_materialized_view_index_defaults_to_non_unique():
 def test_drop_materialized_view_default_compiles_with_if_exists():
     ddl = DropMaterializedView("reporting.mv_test")
 
-    assert str(ddl.compile(dialect=_DIALECT)) == "DROP MATERIALIZED VIEW IF EXISTS reporting.mv_test"
+    assert (
+        str(ddl.compile(dialect=_DIALECT)) == "DROP MATERIALIZED VIEW IF EXISTS reporting.mv_test"
+    )
 
 
 def test_drop_materialized_view_if_exists_false_and_cascade():
@@ -69,8 +70,7 @@ def test_create_materialized_view_index_compiles_unique_index_ddl():
     ddl = CreateMaterializedViewIndex("reporting.mv_test", index)
 
     assert str(ddl.compile(dialect=_DIALECT)) == (
-        'CREATE UNIQUE INDEX IF NOT EXISTS "mv_test_id_uq" '
-        'ON reporting.mv_test ("id", "person_id")'
+        'CREATE UNIQUE INDEX IF NOT EXISTS "mv_test_id_uq" ON reporting.mv_test ("id", "person_id")'
     )
 
 

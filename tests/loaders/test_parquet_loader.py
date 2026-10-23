@@ -1,15 +1,16 @@
+from typing import cast
+
+import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
-import pandas as pd
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 from oa_configurator import Role
 from sqlalchemy.orm import DeclarativeBase
-from typing import cast, Type
 
+from orm_loader.loaders.loader_interface import ParquetLoader
 from orm_loader.tables.loadable_table import CSVLoadableTableInterface
 from orm_loader.tables.typing import CSVTableProtocol
-from orm_loader.loaders.loader_interface import ParquetLoader
 
 
 class Base(DeclarativeBase):
@@ -18,13 +19,13 @@ class Base(DeclarativeBase):
 
 class ParquetTable(Base, CSVLoadableTableInterface):
     __tablename__ = "parquet_table"
-    __table_args__ = {"schema": Role.PRIMARY.value}
+    __table_args__ = ({"schema": Role.PRIMARY.value},)
 
     id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     value: so.Mapped[int] = so.mapped_column(sa.Integer, nullable=False)
 
 
-_ParquetTable = cast(Type[CSVTableProtocol], ParquetTable)
+_ParquetTable = cast(type[CSVTableProtocol], ParquetTable)
 
 
 def test_parquet_loader(session, engine, tmp_path):
@@ -56,14 +57,14 @@ class NullSentinelTable(Base, CSVLoadableTableInterface):
     treats text null sentinels the same way the scalar path does."""
 
     __tablename__ = "null_sentinel_table"
-    __table_args__ = {"schema": Role.PRIMARY.value}
+    __table_args__ = ({"schema": Role.PRIMARY.value},)
 
     id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     name: so.Mapped[str | None] = so.mapped_column(sa.String, nullable=True)
     role: so.Mapped[str | None] = so.mapped_column(sa.String, nullable=True)
 
 
-_NullSentinelTable = cast(Type[CSVTableProtocol], NullSentinelTable)
+_NullSentinelTable = cast(type[CSVTableProtocol], NullSentinelTable)
 
 _SENTINELS = ["NULL", "null", " NULL ", "n/a", "N/A", "NaN", "none", "None", "  ", ""]
 
@@ -92,7 +93,7 @@ def test_arrow_and_pandas_paths_agree_on_null_sentinels(session, engine, tmp_pat
 
     col = NullSentinelTable.__table__.c.name
     for raw in _SENTINELS + [" keep me ", "plain"]:
-        arrow = cast_arrow_column(pa.array([raw], type=pa.string()), col)[0].as_py()
+        arrow = cast_arrow_column(pa.array([raw], type=pa.string()), col).to_pylist()[0]
         scalar = cast_scalar(raw, col.type)
         assert arrow == scalar, f"{raw!r}: arrow={arrow!r} scalar={scalar!r}"
 
@@ -133,7 +134,7 @@ def test_arrow_path_nulls_float_nan(session, engine, tmp_path):
 
     class FloatTable(Base, CSVLoadableTableInterface):
         __tablename__ = "float_sentinel_table"
-        __table_args__ = {"schema": Role.PRIMARY.value}
+        __table_args__ = ({"schema": Role.PRIMARY.value},)
         id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
         score: so.Mapped[float | None] = so.mapped_column(sa.Float, nullable=True)
 

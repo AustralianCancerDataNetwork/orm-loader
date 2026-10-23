@@ -1,6 +1,6 @@
-from typing import Type, cast
-
 import logging
+from typing import ClassVar, cast
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -8,6 +8,7 @@ import sqlalchemy as sa
 import sqlalchemy.event as sae
 import sqlalchemy.orm as so
 from oa_configurator import Role as SchemaRole
+from sqlalchemy.exc import IntegrityError
 
 from orm_loader.backends import resolve_backend
 from orm_loader.helpers import IngestError
@@ -30,12 +31,12 @@ from tests.models import (
 
 # Typed aliases: Pylance cannot verify SQLAlchemy metaclass-generated attrs
 # satisfy CSVTableProtocol structurally, so we cast once per class here.
-_SimpleTable = cast(Type[CSVTableProtocol], SimpleTable)
-_RequiredTable = cast(Type[CSVTableProtocol], RequiredTable)
-_CompositeTable = cast(Type[CSVTableProtocol], CompositeTable)
-_EnumTable = cast(Type[CSVTableProtocol], EnumTable)
-_ImpliedEnumTable = cast(Type[CSVTableProtocol], ImpliedEnumTable)
-_VocabSchemaTable = cast(Type[CSVTableProtocol], VocabSchemaTable)
+_SimpleTable = cast(type[CSVTableProtocol], SimpleTable)
+_RequiredTable = cast(type[CSVTableProtocol], RequiredTable)
+_CompositeTable = cast(type[CSVTableProtocol], CompositeTable)
+_EnumTable = cast(type[CSVTableProtocol], EnumTable)
+_ImpliedEnumTable = cast(type[CSVTableProtocol], ImpliedEnumTable)
+_VocabSchemaTable = cast(type[CSVTableProtocol], VocabSchemaTable)
 
 
 @pytest.fixture(autouse=True)
@@ -86,20 +87,18 @@ def test_initial_csv_load_for_a_non_primary_schema_table(session, tmp_path):
     schema-tag coverage."""
     csv_path = tmp_path / "test_vocab_role_table.csv"
 
-    pd.DataFrame(
-        [{"id": 1, "name": "alpha"}, {"id": 2, "name": "beta"}]
-    ).to_csv(csv_path, index=False, sep="\t")
-
-    inserted = _VocabSchemaTable.load_csv(
-        session, csv_path, dedupe=False, loader=PandasLoader()
+    pd.DataFrame([{"id": 1, "name": "alpha"}, {"id": 2, "name": "beta"}]).to_csv(
+        csv_path, index=False, sep="\t"
     )
+
+    inserted = _VocabSchemaTable.load_csv(session, csv_path, dedupe=False, loader=PandasLoader())
     session.commit()
 
     assert inserted == 2
 
-    rows = session.execute(
-        sa.select(VocabSchemaTable).order_by(VocabSchemaTable.id)
-    ).scalars().all()
+    rows = (
+        session.execute(sa.select(VocabSchemaTable).order_by(VocabSchemaTable.id)).scalars().all()
+    )
 
     assert [(r.id, r.name) for r in rows] == [(1, "alpha"), (2, "beta")]
 
@@ -396,7 +395,9 @@ def test_insert_if_empty_raises_on_non_empty_target(session, engine, tmp_path):
 
     pd.DataFrame([{"id": 2, "name": "beta"}]).to_csv(csv_path, index=False, sep="\t")
 
-    with pytest.raises(ValueError, match="is not empty; cannot use merge strategy 'insert_if_empty'"):
+    with pytest.raises(
+        ValueError, match="is not empty; cannot use merge strategy 'insert_if_empty'"
+    ):
         _SimpleTable.load_csv(
             session,
             csv_path,
@@ -442,7 +443,10 @@ def test_empty_target_routes_merge_to_insert_if_empty(session, tmp_path, caplog,
 
     messages = [record.getMessage() for record in caplog.records]
 
-    assert any("Checking whether target table is empty for merge optimisation." in message for message in messages)
+    assert any(
+        "Checking whether target table is empty for merge optimisation." in message
+        for message in messages
+    )
     assert any(
         f"Target table is empty; routing merge strategy `{merge_strategy}` to insert-if-empty fast path."
         in message
@@ -540,13 +544,13 @@ def test_clean_nulls_passthrough():
 def test_nullable_column_with_nan_does_not_crash(session, engine, tmp_path):
     class NullableTable(Base, CSVLoadableTableInterface):
         __tablename__ = "nullable_table"
-        __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+        __table_args__: ClassVar[dict[str, str]] = {"schema": SchemaRole.PRIMARY.value}
 
         id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
         flag: so.Mapped[str | None] = so.mapped_column(sa.String, nullable=True)
 
     Base.metadata.create_all(engine)
-    _NullableTable = cast(Type[CSVTableProtocol], NullableTable)
+    _NullableTable = cast(type[CSVTableProtocol], NullableTable)
 
     csv = tmp_path / "nullable_table.csv"
     pd.DataFrame(
@@ -577,13 +581,13 @@ def test_nullable_column_with_nan_does_not_crash(session, engine, tmp_path):
 def test_embedded_newline_in_field_is_preserved(session, engine, tmp_path):
     class TextTable(Base, CSVLoadableTableInterface):
         __tablename__ = "text_table"
-        __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+        __table_args__: ClassVar[dict[str, str]] = {"schema": SchemaRole.PRIMARY.value}
 
         id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
         name: so.Mapped[str] = so.mapped_column(sa.String)
 
     Base.metadata.create_all(engine)
-    _TextTable = cast(Type[CSVTableProtocol], TextTable)
+    _TextTable = cast(type[CSVTableProtocol], TextTable)
 
     csv = tmp_path / "text_table.csv"
 
@@ -605,13 +609,13 @@ def test_embedded_newline_in_field_is_preserved(session, engine, tmp_path):
 def test_embedded_tab_in_field(session, engine, tmp_path):
     class TextTable2(Base, CSVLoadableTableInterface):
         __tablename__ = "tab_table"
-        __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+        __table_args__: ClassVar[dict[str, str]] = {"schema": SchemaRole.PRIMARY.value}
 
         id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
         name: so.Mapped[str] = so.mapped_column(sa.String)
 
     Base.metadata.create_all(engine)
-    _TextTable2 = cast(Type[CSVTableProtocol], TextTable2)
+    _TextTable2 = cast(type[CSVTableProtocol], TextTable2)
 
     csv = tmp_path / "tab_table.csv"
     csv.write_text('id\tname\n1\t"foo\tbar"\n')
@@ -638,7 +642,7 @@ def _make_ddl_tracker(engine):
     def _capture(*args):
         statement: str = args[2]
         upper = statement.strip().upper()
-        if upper.startswith("DROP INDEX") or upper.startswith("CREATE INDEX"):
+        if upper.startswith(("DROP INDEX", "CREATE INDEX")):
             ddl_log.append(statement.strip())
 
     sae.listen(engine, "before_cursor_execute", _capture)
@@ -825,7 +829,7 @@ def test_sqlite_failed_batched_replace_keeps_original_target_rows(session, tmp_p
         ]
     ).to_csv(csv_path, index=False, sep="\t")
 
-    with pytest.raises(sa.exc.IntegrityError):
+    with pytest.raises(IntegrityError):
         SimpleTable.load_csv(
             session,
             csv_path,

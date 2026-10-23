@@ -1,25 +1,30 @@
-from sqlalchemy import ColumnElement
-from sqlalchemy.types import Integer, Float, Boolean, Date, DateTime, String, Text, TypeEngine
-from typing import Any, Callable
-from enum import Enum
 import math
+import re
+from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import date, datetime
+from enum import Enum
+from typing import Any
+
+import pandas as pd
 import pyarrow as pa
 import pyarrow.compute as pc
-import pandas as pd
-import re
-from datetime import datetime, date
 from dateutil import parser
+from sqlalchemy import ColumnElement
+from sqlalchemy.types import Boolean, Date, DateTime, Float, Integer, String, Text, TypeEngine
 
 from ..data_classes import TableCastingStats
 
 _NUMERIC_RE = re.compile(r"^[+-]?\d+(\.\d+)?$")
 
+# What an unparseable value raises. Any other exception is a bug and propagates.
+_CAST_ERRORS = (ValueError, TypeError, ArithmeticError)
+
 _AVAILABLE_DATE_FORMATS = (
-    "%Y%m%d",          # 20170824 (athena standard)
-    "%d-%b-%Y",        # 24-AUG-2017 (oncology-branch vocab)
-    "%Y-%m-%d",        # 2017-08-24 (ISO)
-    "%d/%m/%Y",        # 24/08/2017
+    "%Y%m%d",  # 20170824 (athena standard)
+    "%d-%b-%Y",  # 24-AUG-2017 (oncology-branch vocab)
+    "%Y-%m-%d",  # 2017-08-24 (ISO)
+    "%d/%m/%Y",  # 24/08/2017
 )
 
 
@@ -31,11 +36,14 @@ _ARROW_TYPE_MAP: dict[type, pa.DataType] = {
     DateTime: pa.timestamp("us"),
 }
 
+
 @dataclass(frozen=True)
 class CastRule:
     sa_type: type
     scalar: Callable[[Any, Any], Any]
-    arrow: Callable[..., Any] | None = None   # optional vectorised impl, never actually set/read today
+    arrow: Callable[..., Any] | None = (
+        None  # optional vectorised impl, never actually set/read today
+    )
 
 
 _NULL_STRINGS = {
@@ -46,10 +54,11 @@ _NULL_STRINGS = {
     "nan",
 }
 
+
 def _normalise_null(value: Any) -> Any | None:
     if value is None:
         return None
-    
+
     if value is pd.NA or value is pd.NaT:
         return None
 
@@ -69,20 +78,23 @@ def _normalise_null(value: Any) -> Any | None:
 _ARROW_NULL_STRINGS = pa.array(sorted(_NULL_STRINGS | {""}), type=pa.string())
 
 
-def _normalise_null_arrow(arr: pa.Array | pa.ChunkedArray) -> pa.Array | pa.ChunkedArray:
+type ArrowArray = pa.Array | pa.ChunkedArray
+
+
+def _normalise_null_arrow(arr: ArrowArray) -> ArrowArray:
     arrow_type = arr.type
 
     if pa.types.is_string(arrow_type) or pa.types.is_large_string(arrow_type):
-        probe = pc.utf8_lower(pc.utf8_trim_whitespace(arr))                 # type: ignore
-        return pc.if_else(                                                  # type: ignore
-            pc.is_in(probe, value_set=_ARROW_NULL_STRINGS),                 # type: ignore
+        probe = pc.utf8_lower(pc.utf8_trim_whitespace(arr))
+        return pc.if_else(
+            pc.is_in(probe, value_set=_ARROW_NULL_STRINGS),
             pa.nulls(len(arr), arrow_type),
             arr,
         )
 
     if pa.types.is_floating(arrow_type):
-        return pc.if_else(                                                  # type: ignore
-            pc.is_nan(arr),                                                 # type: ignore
+        return pc.if_else(
+            pc.is_nan(arr),
             pa.nulls(len(arr), arrow_type),
             arr,
         )
@@ -95,7 +107,7 @@ def _to_numeric_string(value: str | None) -> str | None:
         return None
 
     if not _NUMERIC_RE.match(value):
-        return value  
+        return value
 
     if "." in value:
         f = float(value)
@@ -104,6 +116,7 @@ def _to_numeric_string(value: str | None) -> str | None:
         return str(f)
 
     return str(int(value))
+
 
 def _to_number(value: Any) -> int | float | None:
     if value is None:
@@ -127,7 +140,7 @@ def _to_number(value: Any) -> int | float | None:
         s = _to_numeric_string(s)
         if s is None:
             return None
-        
+
         return int(s)
 
 
@@ -140,6 +153,7 @@ def _to_int(value: Any) -> int | None:
         return n
 
     raise ValueError(f"Non-integer numeric value: {value}")
+
 
 def _cast_string(value: Any, sa_type: TypeEngine[Any]) -> str | None:
     if value is None:
@@ -154,11 +168,11 @@ def _cast_string(value: Any, sa_type: TypeEngine[Any]) -> str | None:
 
     s = _to_numeric_string(s) or ""
 
-    if isinstance(sa_type, (String, Text)) and sa_type.length:
-        if len(s) > sa_type.length:
-            return s[: sa_type.length]
+    if isinstance(sa_type, (String, Text)) and sa_type.length and len(s) > sa_type.length:
+        return s[: sa_type.length]
 
     return s
+
 
 def _to_float(value: Any) -> float | None:
     if value is None:
@@ -186,12 +200,12 @@ def _to_float(value: Any) -> float | None:
 
 CAST_RULES: list[CastRule] = [
     CastRule(Integer, lambda v, _: _to_int(v) if v is not None else None),
-    CastRule(Float,   lambda v, _: _to_float(v) if v is not None else None),
+    CastRule(Float, lambda v, _: _to_float(v) if v is not None else None),
     CastRule(Boolean, lambda v, _: _to_bool(v)),
-    CastRule(Date,    lambda v, _: _parse_date(v)),
-    CastRule(DateTime,lambda v, _: _parse_datetime(v)),
-    CastRule(String,  _cast_string),
-    CastRule(Text,    _cast_string),
+    CastRule(Date, lambda v, _: _parse_date(v)),
+    CastRule(DateTime, lambda v, _: _parse_datetime(v)),
+    CastRule(String, _cast_string),
+    CastRule(Text, _cast_string),
 ]
 
 # Per-column overrides, keyed by (table_name, column_name). Checked ahead of
@@ -199,7 +213,7 @@ CAST_RULES: list[CastRule] = [
 # target one specific column (e.g. a plain String(1) column with no
 # type-level signal of the enum it's meant to hold) or safely disambiguate
 # sa.Enum from its own String supertype without a caller telling it which
-# column actually means "enum" 
+# column actually means "enum"
 _COLUMN_CAST_RULES: dict[tuple[str, str], Callable[[Any], Any]] = {}
 
 
@@ -247,6 +261,7 @@ def _enum_member_scalar(enum_type: type[Enum]) -> Callable[[Any], Any]:
             # Raise rather than return None, so an unmatched value goes through
             # the on_error/TableCastingStats path like every other cast failure.
             raise ValueError(f"{value!r} matches no {enum_type.__name__} member value")
+
     return _scalar
 
 
@@ -264,7 +279,7 @@ def register_column_cast_rule(
     by `.value` and coerced to the matching member's `.name`. Member values
     need not be strings -- an `IntEnum` matches both `1` (a parquet int64
     column) and `"1"` (any CSV column, since those are read with dtype=str).
-    
+
     This is `sa.Enum`'s default column-storage convention, and covers genuine
     `sa.Enum(enum_type)` columns with no further setup. An unmatched value
     goes through the existing on_error/TableCastingStats path and the
@@ -275,25 +290,30 @@ def register_column_cast_rule(
     convention at all (e.g. OMOP CDM's `concept.standard_concept`:
     `String(1)`, values 'S'/'C'/NULL, where the column expects `.value`
     directly, not `.name`), or a genuine `sa.Enum` column configured with a
-    custom `values_callable` such as in HemOnc) use `scalar` instead. 
-    Resolution logic for the scalar callable is then tailored to what 
+    custom `values_callable` such as in HemOnc) use `scalar` instead.
+    Resolution logic for the scalar callable is then tailored to what
     that specific column actually expects to store (e.g.
     `lambda v: SomeEnum(v).value` for the plain-String case above).
-    
+
     Registering the same (table_name, column_name) again replaces the
     previous rule rather than stacking, so repeated registration is
     safe/idempotent.
     """
     if enum_type is not None:
         if scalar is not None:
-            raise ValueError("register_column_cast_rule requires exactly one of `scalar` or `enum_type`.")
+            raise ValueError(
+                "register_column_cast_rule requires exactly one of `scalar` or `enum_type`."
+            )
         resolved_scalar = _enum_member_scalar(enum_type)
     elif scalar is not None:
         resolved_scalar = scalar
     else:
-        raise ValueError("register_column_cast_rule requires exactly one of `scalar` or `enum_type`.")
+        raise ValueError(
+            "register_column_cast_rule requires exactly one of `scalar` or `enum_type`."
+        )
 
     _COLUMN_CAST_RULES[(table_name, column_name)] = resolved_scalar
+
 
 def _dateutil_fallback(value: str) -> datetime | None:
     try:
@@ -301,7 +321,7 @@ def _dateutil_fallback(value: str) -> datetime | None:
             value,
             dayfirst=True,
             yearfirst=False,
-            fuzzy=False,  
+            fuzzy=False,
         )
     except (ValueError, OverflowError):
         return None
@@ -311,6 +331,7 @@ def _dateutil_fallback(value: str) -> datetime | None:
         return None
 
     return dt
+
 
 def _parse_date(value: Any) -> date | None:
     if isinstance(value, date) and not isinstance(value, datetime):
@@ -324,6 +345,7 @@ def _parse_date(value: Any) -> date | None:
             except ValueError:
                 continue
         return None
+
 
 def _parse_datetime(value: Any) -> datetime | None:
     if isinstance(value, datetime):
@@ -343,6 +365,7 @@ def _parse_datetime(value: Any) -> datetime | None:
 
     return _dateutil_fallback(value)
 
+
 def _to_bool(value: Any) -> bool | None:
     if value is None or (isinstance(value, float) and math.isnan(value)):
         return None
@@ -354,6 +377,7 @@ def _to_bool(value: Any) -> bool | None:
     if s in {"false", "f", "no", "n", "0"}:
         return False
     return None
+
 
 def cast_scalar(
     value: Any,
@@ -367,11 +391,13 @@ def cast_scalar(
     if value is None:
         return None
 
-    column_rule = _COLUMN_CAST_RULES.get((table_name, column_name)) if table_name and column_name else None
+    column_rule = (
+        _COLUMN_CAST_RULES.get((table_name, column_name)) if table_name and column_name else None
+    )
     if column_rule is not None:
         try:
             return column_rule(value)
-        except Exception:
+        except _CAST_ERRORS:
             if on_error:
                 on_error(value)
             return None
@@ -380,7 +406,7 @@ def cast_scalar(
         if isinstance(sa_type, rule.sa_type):
             try:
                 return rule.scalar(value, sa_type)
-            except Exception:
+            except _CAST_ERRORS:
                 if on_error:
                     on_error(value)
                 return None
@@ -396,10 +422,14 @@ def perform_cast(
     table_name: str | None = None,
     column_name: str | None = None,
 ) -> Any:
-    return cast_scalar(value, sa_type, on_error=on_error, table_name=table_name, column_name=column_name)
+    return cast_scalar(
+        value, sa_type, on_error=on_error, table_name=table_name, column_name=column_name
+    )
 
 
-def cast_arrow_column(arr: pa.Array, sa_col: ColumnElement[Any], stats: TableCastingStats | None = None) -> pa.Array:
+def cast_arrow_column(
+    arr: ArrowArray, sa_col: ColumnElement[Any], stats: TableCastingStats | None = None
+) -> ArrowArray:
     arr = _normalise_null_arrow(arr)
 
     column_rule = _COLUMN_CAST_RULES.get((sa_col.table.name, sa_col.name))
@@ -409,7 +439,7 @@ def cast_arrow_column(arr: pa.Array, sa_col: ColumnElement[Any], stats: TableCas
             raw = v.as_py()
             try:
                 values.append(column_rule(raw) if raw is not None else None)
-            except Exception:
+            except _CAST_ERRORS:
                 if stats:
                     stats.record(column=sa_col.name, value=raw)
                 values.append(None)
@@ -421,26 +451,21 @@ def cast_arrow_column(arr: pa.Array, sa_col: ColumnElement[Any], stats: TableCas
             arrow_type = _ARROW_TYPE_MAP.get(rule.sa_type)
             if arrow_type:
                 try:
-                    return pc.cast(arr, arrow_type)                 
+                    return pc.cast(arr, arrow_type)
                 except pa.ArrowInvalid:
-                    validity = pc.is_valid(arr)                     # type: ignore
-                    invalid_mask = pc.invert(validity)              # type: ignore
-                    invalid_count = pc.sum(invalid_mask).as_py()    # type: ignore
+                    invalid_mask = pc.is_null(arr)
+                    invalid_count = arr.null_count
                     if invalid_count == 0:
                         return arr
 
-                    bad_values = [
-                        v.as_py()
-                        for v, bad in zip(arr, invalid_mask)      
-                        if bad
-                    ][:3]
+                    bad_values = [v.as_py() for v, bad in zip(arr, invalid_mask) if bad][:3]
                     if stats:
                         stats.record(
                             column=sa_col.name,
                             value={
                                 "count": invalid_count,
                                 "examples": bad_values,
-                                "reason": f"Arrow cast to {arrow_type} failed"
+                                "reason": f"Arrow cast to {arrow_type} failed",
                             },
                         )
                     return arr

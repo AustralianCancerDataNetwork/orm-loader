@@ -1,9 +1,7 @@
+import json
 from collections import defaultdict
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
-import json
-
 
 """
 Validation Reporting
@@ -30,6 +28,7 @@ class SeverityLevel(Enum):
     WARN = "WARN"
     INFO = "INFO"
 
+
 @dataclass
 class ValidationIssue:
     """
@@ -55,13 +54,15 @@ class ValidationIssue:
     hint
         Optional human-readable guidance.
     """
+
     table: str
-    level: SeverityLevel 
+    level: SeverityLevel
     message: str
-    field: Optional[str] = None
-    expected: Optional[str] = None
-    actual: Optional[str] = None
-    hint: Optional[str] = None
+    field: str | None = None
+    expected: str | None = None
+    actual: str | None = None
+    hint: str | None = None
+
 
 @dataclass
 class ValidationReport:
@@ -75,7 +76,8 @@ class ValidationReport:
     - JSON serialisation
     - CI/CD pipeline integration
     """
-    def __init__(self, *, model_version: str, model_name: Optional[str] = None):
+
+    def __init__(self, *, model_version: str, model_name: str | None = None):
         """
         Initialise a new validation report.
 
@@ -89,7 +91,7 @@ class ValidationReport:
         self.model_version = model_version
         self.model_name = model_name
         self.issues: list[ValidationIssue] = []
-    
+
     def add(self, issue: ValidationIssue) -> None:
         """
         Add a validation issue to the report.
@@ -100,7 +102,7 @@ class ValidationReport:
             Validation issue to record.
         """
         self.issues.append(issue)
-        
+
     def is_valid(self) -> bool:
         """
         Return whether the report contains no issues.
@@ -113,7 +115,6 @@ class ValidationReport:
         return not self.issues
 
     def summary(self) -> str:
-
         """
         Return a one-line human-readable summary.
 
@@ -127,7 +128,7 @@ class ValidationReport:
             by[i.level] += 1
         model = self.model_name.upper() if self.model_name else "MODEL"
         return f"{model} v{self.model_version}: {by[SeverityLevel.ERROR]} error(s), {by[SeverityLevel.WARN]} warning(s), {by[SeverityLevel.INFO]} info"
-    
+
     def render_text_report(self) -> str:
         """
         Render a human-readable multi-line text report.
@@ -155,7 +156,7 @@ class ValidationReport:
                 lines.append(f"  {icon} {i.message}{field}{hint}")
 
         return "\n".join(lines)
-    
+
     def to_dict(self) -> dict:
         """
         Return a structured dictionary representation of the report.
@@ -187,7 +188,7 @@ class ValidationReport:
                 for i in self.issues
             ],
         }
-    
+
     def to_json(self) -> str:
         """
         Serialise the report to a JSON string.
@@ -198,7 +199,7 @@ class ValidationReport:
             JSON-formatted validation report.
         """
         return json.dumps(self.to_dict(), indent=2)
-    
+
     def exit_code(self) -> int:
         """
         Return a process exit code suitable for CI/CD pipelines.

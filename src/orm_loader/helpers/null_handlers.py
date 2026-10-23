@@ -1,18 +1,17 @@
-import pandas as pd
 from typing import Any
 
+import pandas as pd
+
 _NULL_STRINGS = {"", "nan", "null", "none", "na", "n/a"}
+
 
 def normalise_null(value: Any) -> Any | None:
     if value is None:
         return None
 
-    # pandas / numpy NaN
-    try:
-        if pd.isna(value):
-            return None
-    except Exception:
-        pass
+    # pandas / numpy NaN. Only scalars are nullable; array-likes are returned unchanged.
+    if pd.api.types.is_scalar(value) and pd.isna(value):
+        return None
 
     # string garbage
     if isinstance(value, str):

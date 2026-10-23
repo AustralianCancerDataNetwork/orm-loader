@@ -1,8 +1,8 @@
-from typing import Any, Unpack
-from collections.abc import Iterator
-import json
-import hashlib
 import datetime
+import hashlib
+import json
+from collections.abc import Iterator
+from typing import Any, Unpack
 
 from .orm_table import ORMTableBase
 from .typing import ToDictKwargs
@@ -34,7 +34,7 @@ def json_default(obj: Any) -> str:
         return obj.isoformat()
     raise TypeError(f"Object of type {type(obj)} is not JSON serialisable")
 
-    
+
 class SerialisableTableInterface(ORMTableBase):
     """
     Mixin for SQLAlchemy ORM tables providing explicit serialisation helpers.
@@ -60,7 +60,6 @@ class SerialisableTableInterface(ORMTableBase):
         only: set[str] | None = None,
         exclude: set[str] | None = None,
     ) -> dict[str, Any]:
-        
         """
         Convert the ORM instance into a dictionary.
 
@@ -84,7 +83,7 @@ class SerialisableTableInterface(ORMTableBase):
             A dictionary representation of the ORM row.
         """
         data: dict[str, Any] = {}
-        for key, _ in self.model_columns().items():
+        for key in self.model_columns():
             if only and key not in only:
                 continue
             if exclude and key in exclude:
@@ -117,7 +116,7 @@ class SerialisableTableInterface(ORMTableBase):
             default=json_default,
             sort_keys=True,
         )
-    
+
     def fingerprint(self) -> str:
         """
         Compute a stable fingerprint for the ORM instance.
@@ -136,7 +135,7 @@ class SerialisableTableInterface(ORMTableBase):
         """
         payload = self.to_json(include_nulls=True)
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-    
+
     def __iter__(self) -> Iterator[tuple[str, Any]]:
         """
         Iterate over the ORM instance as ``(key, value)`` pairs.

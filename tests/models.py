@@ -1,10 +1,11 @@
-
 from enum import Enum
+from typing import ClassVar
 
 import sqlalchemy as sa
+import sqlalchemy.orm as so
 from oa_configurator import Role as SchemaRole
 from sqlalchemy.orm import declarative_base
-import sqlalchemy.orm as so
+
 from orm_loader.tables import CSVLoadableTableInterface
 
 Base = declarative_base()
@@ -19,9 +20,10 @@ class Flag(str, Enum):
     STANDARD = "S"
     CLASSIFICATION = "C"
 
+
 class PandasLoaderTable(CSVLoadableTableInterface, Base):
     __tablename__ = "test_pandas_loader"
-    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+    __table_args__: ClassVar[dict[str, str]] = {"schema": SchemaRole.PRIMARY.value}
     id = sa.Column(sa.Integer, primary_key=True)
     value = sa.Column(sa.String, nullable=False)
 
@@ -39,7 +41,7 @@ class SimpleTable(Base, CSVLoadableTableInterface):
 
 class RequiredTable(Base, CSVLoadableTableInterface):
     __tablename__ = "required_table"
-    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+    __table_args__: ClassVar[dict[str, str]] = {"schema": SchemaRole.PRIMARY.value}
 
     id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     name: so.Mapped[str] = so.mapped_column(sa.String, nullable=False)
@@ -47,7 +49,7 @@ class RequiredTable(Base, CSVLoadableTableInterface):
 
 class CompositeTable(Base, CSVLoadableTableInterface):
     __tablename__ = "composite_table"
-    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+    __table_args__: ClassVar[dict[str, str]] = {"schema": SchemaRole.PRIMARY.value}
 
     a: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     b: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
@@ -63,7 +65,7 @@ class EnumTable(Base, CSVLoadableTableInterface):
     """
 
     __tablename__ = "enum_table"
-    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+    __table_args__: ClassVar[dict[str, str]] = {"schema": SchemaRole.PRIMARY.value}
 
     id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     role: so.Mapped[Role | None] = so.mapped_column(sa.Enum(Role), nullable=True)
@@ -76,7 +78,7 @@ class ComputedColumnTable(Base, CSVLoadableTableInterface):
     CSVLoadableTableInterface."""
 
     __tablename__ = "computed_column_table"
-    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+    __table_args__: ClassVar[dict[str, str]] = {"schema": SchemaRole.PRIMARY.value}
 
     id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     name: so.Mapped[str] = so.mapped_column(sa.String)
@@ -90,7 +92,7 @@ class ImpliedEnumTable(Base, CSVLoadableTableInterface):
     """
 
     __tablename__ = "implied_enum_table"
-    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+    __table_args__: ClassVar[dict[str, str]] = {"schema": SchemaRole.PRIMARY.value}
 
     id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     flag: so.Mapped[str | None] = so.mapped_column(sa.String(1), nullable=True)

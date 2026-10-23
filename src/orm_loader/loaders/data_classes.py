@@ -1,16 +1,18 @@
-from typing import Any, Type, List, Dict, TYPE_CHECKING
 from dataclasses import dataclass, field
-import sqlalchemy as sa
-import sqlalchemy.orm as so
+from logging import getLogger
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
 import pandas as pd
 import pyarrow as pa
-from logging import getLogger
+import sqlalchemy as sa
+import sqlalchemy.orm as so
 
 logger = getLogger(__name__)
 
 if TYPE_CHECKING:
     from ..tables.typing import CSVTableProtocol
+
 
 def _clean_nulls(v):
     if v is None:
@@ -20,6 +22,8 @@ def _clean_nulls(v):
     if isinstance(v, float) and pd.isna(v):
         return None
     return v
+
+
 """
 Loader Data Structures
 ======================
@@ -38,7 +42,6 @@ No file I/O or database-specific loading logic is implemented here.
 
 @dataclass(frozen=True)
 class LoaderContext:
-
     """
     Immutable context object passed through loader operations.
 
@@ -69,7 +72,8 @@ class LoaderContext:
         resolve_backend() so every backend resolution within this load
         resolves the same schema.
     """
-    tableclass: Type["CSVTableProtocol"]
+
+    tableclass: type["CSVTableProtocol"]
     session: so.Session
     path: Path
     staging_table: sa.Table
@@ -80,8 +84,8 @@ class LoaderContext:
     quote_mode: str = "auto"
     staging_schema_tag: str | None = None
 
-class LoaderInterface:
 
+class LoaderInterface:
     """
     Abstract interface for file loaders.
 
@@ -141,24 +145,18 @@ class LoaderInterface:
             return 0
 
         raw_records = dataframe.to_dict(orient="records")
-        records = [
-            {
-                f'{k}': _clean_nulls(v)
-                for k, v in record.items()
-            }
-            for record in raw_records
-        ]    
+        records = [{f"{k}": _clean_nulls(v) for k, v in record.items()} for record in raw_records]
 
-        session.execute( 
+        session.execute(
             staging_cls.insert(),
-            records, 
+            records,
             bind_arguments={"mapper": mapper},
         )
         session.flush()
         session.expunge_all()
 
         return len(dataframe)
-    
+
     @classmethod
     def dedupe(cls, data: pd.DataFrame | pa.Table, ctx: LoaderContext) -> Any:
         """
@@ -179,28 +177,31 @@ class LoaderInterface:
             Deduplicated data.
         """
         raise NotImplementedError
-    
+
 
 @dataclass
 class ColumnCastingStats:
     """
     Casting statistics for a single column.
     """
+
     count: int = 0
-    examples: List[Any] = field(default_factory=list)
+    examples: list[Any] = field(default_factory=list)
 
     def record(self, value: Any, example_limit: int = 3):
         self.count += 1
         if len(self.examples) < example_limit:
             self.examples.append(value)
 
+
 @dataclass
 class TableCastingStats:
     """
     Aggregated casting statistics for a table, keyed by column.
     """
+
     table_name: str
-    columns: Dict[str, ColumnCastingStats] = field(default_factory=dict)
+    columns: dict[str, ColumnCastingStats] = field(default_factory=dict)
 
     def record(
         self,
@@ -228,7 +229,7 @@ class TableCastingStats:
         Whether any casting failures occurred.
         """
         return self.total_failures > 0
-    
+
     def to_dict(self) -> dict[str, dict[str, Any]]:
         """
         Return a dictionary representation of casting statistics.
@@ -240,4 +241,3 @@ class TableCastingStats:
             }
             for col, stats in self.columns.items()
         }
-    
