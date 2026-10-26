@@ -12,6 +12,7 @@ from oa_configurator import (
     declared_schema_tags,
     is_ephemeral_url,
     open_connection,
+    physical_schema_of,
     referred_schema_tag,
     without_cross_engine_foreign_keys,
 )
@@ -91,9 +92,16 @@ def create_tables(
             "create_tables() requires all tables to share one database transaction; "
             f"got schema tags {sorted(schema_tags)}."
         )
+    # Includes tags claimed only via schema_claims=[...] so 
+    # foreign_key_can_span() can resolve them too.
+    physical_schemas = {
+        tag: physical_schema_of(connection, schema_tag=tag) for tag in claimed_schema_tags(connection)
+    }
     crossing = any(
         not resolved.foreign_key_can_span(
-            cast(str, table.schema), referred_schema_tag(fk, cast(str, table.schema))
+            cast(str, table.schema),
+            referred_schema_tag(fk, cast(str, table.schema)),
+            physical_schemas=physical_schemas,
         )
         for table in tables
         for fk in table.foreign_keys
@@ -122,7 +130,9 @@ def create_tables(
 
     for metadata, related in related_by_metadata.items():
         local_tables = [table for table in metadata.tables.values() if table in related]
-        copies = without_cross_engine_foreign_keys(local_tables, resolved=resolved)
+        copies = without_cross_engine_foreign_keys(
+            local_tables, resolved=resolved, physical_schemas=physical_schemas
+        )
         requested = [table for table in copies if table.key in requested_by_metadata[metadata]]
         copies[0].metadata.create_all(connection, tables=requested, checkfirst=True)
 

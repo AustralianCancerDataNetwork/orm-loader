@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 import sqlalchemy as sa
-from oa_configurator import CDMDatabaseConfig, ConnectionConfig, Resolver, StackConfig
+from oa_configurator import CDMDatabaseConfig, ConnectionConfig, Resolver, SchemaClaim, StackConfig
 
 from orm_loader.helpers import bootstrap, create_db, create_tables
 
@@ -159,4 +159,41 @@ def test_bootstrap_entry_points_require_resolved_database(entry):
     engine = _engine()
     with pytest.raises(TypeError, match="requires a ResolvedDatabase"):
         entry(engine)
+    engine.dispose()
+
+
+@pytest.mark.duckdb
+@pytest.mark.db_dialect
+def test_create_tables_resolves_a_schema_claims_only_tag_on_duckdb():
+    """A tag claimed only via create_engine(schema_claims=[...]), not present in
+    resolved's own config, must still resolve inside foreign_key_can_span()
+    instead of raising UnregisteredSchemaTagError."""
+    stack = StackConfig.for_session(
+        connections={"main": ConnectionConfig(dialect="duckdb", database_name=":memory:")},
+        databases={
+            "test_cdm": CDMDatabaseConfig(connection="main", cdm_schema="cdm", vocab_schema="vocab")
+        },
+    )
+    resolved = Resolver(stack).resolve_database("test_cdm")
+    engine, _ = resolved.create_engines(
+        schema_claims=[SchemaClaim(schema_tag="custom", physical_schema="cdm")]
+    )
+
+    metadata = sa.MetaData()
+    primary = sa.Table(
+        "primary_table", metadata, sa.Column("id", sa.Integer, primary_key=True), schema="primary"
+    )
+    custom = sa.Table(
+        "custom_table",
+        metadata,
+        sa.Column("id", sa.Integer, primary_key=True),
+        sa.Column("primary_id", sa.Integer, sa.ForeignKey("primary.primary_table.id")),
+        schema="custom",
+    )
+
+    with engine.begin() as connection:
+        create_tables(connection, [primary, custom], resolved=resolved)
+        foreign_keys = sa.inspect(connection).get_foreign_keys("custom_table", schema="cdm")
+
+    assert [fk["referred_table"] for fk in foreign_keys] == ["primary_table"]
     engine.dispose()
