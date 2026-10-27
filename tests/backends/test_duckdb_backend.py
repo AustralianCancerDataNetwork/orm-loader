@@ -417,6 +417,64 @@ def test_duckdb_backend_merge_upsert_loads_self_referential_rows_in_dependency_o
 
 @pytest.mark.duckdb
 @pytest.mark.db_dialect
+def test_duckdb_backend_merge_replace_updates_and_inserts_self_referential_rows_together(
+    duckdb_session, duckdb_backend,
+):
+    """An existing row's self-referential FK is re-pointed at a row that
+    only this same load adds. Processed as two sealed phases (replace,
+    then insert), the update would be validated before its new target
+    exists. merge_replace must do both together, in dependency order, so
+    the update only lands once its target is actually there -- and drain
+    staging itself, leaving nothing for merge_insert() to do.
+    """
+    duckdb_session.execute(sa.insert(SelfReferentialTable), [{"id": 1, "parent_id": None}])
+    duckdb_backend.create_staging_table(_SelfReferentialTableCls, duckdb_session)
+    staging = _SelfReferentialTableCls.get_staging_table(
+        duckdb_session, staging_schema_tag=duckdb_backend.staging_schema_tag
+    )
+    duckdb_session.execute(
+        sa.insert(staging), [{"id": 1, "parent_id": 2}, {"id": 2, "parent_id": None}]
+    )
+
+    duckdb_backend.merge_replace(_SelfReferentialTableCls, duckdb_session, ["id"], merge_batch_size=1)
+
+    rows = {r.id: r.parent_id for r in duckdb_session.execute(sa.select(SelfReferentialTable)).scalars().all()}
+    assert rows == {1: 2, 2: None}
+    assert duckdb_session.execute(sa.select(staging.c.id)).scalars().all() == []
+
+    duckdb_backend.merge_insert(_SelfReferentialTableCls, duckdb_session)
+    rows_after_insert = {
+        r.id: r.parent_id for r in duckdb_session.execute(sa.select(SelfReferentialTable)).scalars().all()
+    }
+    assert rows_after_insert == rows
+
+
+@pytest.mark.duckdb
+@pytest.mark.db_dialect
+def test_duckdb_backend_merge_replace_dependency_waves_catch_a_genuine_orphan(
+    duckdb_session_with_committed_schema, duckdb_backend,
+):
+    """A replace batch re-pointing an existing row at a genuine orphan (not
+    merely a not-yet-inserted new row) must still be caught, not mistaken
+    for a forward reference that will resolve later.
+    """
+    session = duckdb_session_with_committed_schema
+    session.execute(sa.insert(SelfReferentialTable), [{"id": 1, "parent_id": None}])
+    duckdb_backend.create_staging_table(_SelfReferentialTableCls, session)
+    staging = _SelfReferentialTableCls.get_staging_table(
+        session, staging_schema_tag=duckdb_backend.staging_schema_tag
+    )
+    session.execute(sa.insert(staging), [{"id": 1, "parent_id": 999}])
+
+    with pytest.raises(DeferredForeignKeyViolationError, match="self_referential_table"):
+        duckdb_backend.merge_replace(_SelfReferentialTableCls, session, ["id"], merge_batch_size=1)
+
+    assert session.execute(sa.select(SelfReferentialTable.parent_id)).scalars().all() == [None]
+    assert session.execute(sa.select(staging.c.id)).scalars().all() == [1]
+
+
+@pytest.mark.duckdb
+@pytest.mark.db_dialect
 def test_duckdb_backend_merge_insert_dependency_waves_catch_a_genuine_orphan(
     duckdb_session_with_committed_schema, duckdb_backend,
 ):

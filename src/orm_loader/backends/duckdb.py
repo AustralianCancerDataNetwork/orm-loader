@@ -358,6 +358,17 @@ class DuckDBBackend(DatabaseBackend):
         dropped indexes first; capabilities.supports_replace_with_kept_indexes
         is False for this reason.
 
+        If table_cls has a self-referential deferred FK, an existing row's
+        FK column can be re-pointed at a row that doesn't exist yet -- one
+        this same load will only add via the merge_insert() call that
+        normally follows. Processing replace and insert as two sealed
+        phases would validate that update before the row it points at
+        exists. Instead, both the update (for a row already in target) and
+        the insert (for one that isn't) are done together, wave by wave,
+        through merge_insert()'s dependency-ordered loop (see
+        _merge_in_dependency_waves()); staging ends up fully drained here,
+        so the merge_insert() call that follows has nothing left to do.
+
         Raises
         ------
         ValueError
@@ -401,6 +412,29 @@ class DuckDBBackend(DatabaseBackend):
         if not update_cols:
             # No non-pk columns to update: matching rows are already identical, just drop them.
             _drop_matched_from_staging()
+            return
+
+        self_referential_fks = self._self_referential_deferred_fks(table_cls)
+        if self_referential_fks:
+            insertable_cols = self._insertable_column_names(table_cls)
+            non_paginated_select = sa.select(*(staging.c[c] for c in insertable_cols))
+
+            def _insert(select_: Any) -> sa.Insert:
+                return sa.insert(target).from_select(insertable_cols, select_)
+
+            def _process_chunk(chunk: sa.ColumnElement[bool]) -> None:
+                # Rows in chunk already in target are updated in place; whatever
+                # staging rows chunk still matches afterward are new, and get
+                # inserted. _merge_in_dependency_waves() removes them from
+                # staging once this returns.
+                _update(chunk)
+                _drop_matched_from_staging(chunk)
+                session.execute(_insert(non_paginated_select.where(chunk)))
+
+            self._merge_in_dependency_waves(
+                table_cls, session, staging, target, self_referential_fks,
+                merge_batch_size, validate_deferred_fks, insert_chunk=_process_chunk,
+            )
             return
 
         for batch_range in self._paginate_batches(table_cls, staging, session, merge_batch_size):
