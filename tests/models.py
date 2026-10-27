@@ -2,9 +2,10 @@
 from enum import Enum
 
 import sqlalchemy as sa
+import sqlalchemy.orm as so
 from oa_configurator import Role as SchemaRole
 from sqlalchemy.orm import declarative_base
-import sqlalchemy.orm as so
+
 from orm_loader.tables import CSVLoadableTableInterface
 
 Base = declarative_base()
@@ -181,4 +182,22 @@ class VocabReferencingTable(Base, CSVLoadableTableInterface):
     id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     vocab_id: so.Mapped[int | None] = so.mapped_column(
         sa.Integer, sa.ForeignKey(f"{SchemaRole.VOCAB.value}.test_vocab_role_table.id")
+    )
+
+
+class SelfReferentialTable(Base, CSVLoadableTableInterface):
+    """A table referencing its own rows, for dependency-ordered batching
+    tests: a child row's parent may legitimately land in a later
+    pagination batch of the same load. use_alter=True since DuckDB can't
+    ALTER TABLE ADD this constraint, making it deferred/unenforced like a
+    cross-table cycle, rather than a plain inline (and thus DuckDB-enforced)
+    self-reference."""
+
+    __tablename__ = "self_referential_table"
+    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+
+    id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
+    parent_id: so.Mapped[int | None] = so.mapped_column(
+        sa.Integer,
+        sa.ForeignKey(f"{SchemaRole.PRIMARY.value}.self_referential_table.id", use_alter=True),
     )

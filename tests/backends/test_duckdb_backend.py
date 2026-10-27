@@ -19,6 +19,7 @@ from tests.models import (
     CycleBTable,
     ReferencedParentTable,
     ReferencingChildTable,
+    SelfReferentialTable,
     UnreferencedGrandparentTable,
     VocabReferencingTable,
     VocabSchemaTable,
@@ -31,6 +32,7 @@ _ComputedTableCls = cast("Type[CSVTableProtocol]", ComputedColumnTable)
 _CycleATableCls = cast("Type[CSVTableProtocol]", CycleATable)
 _CycleBTableCls = cast("Type[CSVTableProtocol]", CycleBTable)
 _ReferencedParentTableCls = cast("Type[CSVTableProtocol]", ReferencedParentTable)
+_SelfReferentialTableCls = cast("Type[CSVTableProtocol]", SelfReferentialTable)
 _VocabReferencingTableCls = cast("Type[CSVTableProtocol]", VocabReferencingTable)
 _VocabSchemaTableCls = cast("Type[CSVTableProtocol]", VocabSchemaTable)
 _TARGET_TABLE = ComputedColumnTable.__tablename__
@@ -88,6 +90,40 @@ def duckdb_split_schema_session():
                     yield resolved, session
         finally:
             primary_engine.dispose()
+
+
+@pytest.fixture
+def duckdb_split_database_session():
+    """PRIMARY and VOCAB on two separate DuckDB files/connections, so
+    VocabReferencingTable's foreign key is classified "cross_database"
+    rather than "cross_schema". No single query can join the two.
+    """
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        stack = StackConfig.for_session(
+            connections={
+                "primary": ConnectionConfig(
+                    dialect="duckdb", database_name=str(Path(tmp_dir) / "primary.duckdb"), test_only=True
+                ),
+                "vocab": ConnectionConfig(
+                    dialect="duckdb", database_name=str(Path(tmp_dir) / "vocab.duckdb"), test_only=True
+                ),
+            },
+            databases={"cdm": CDMDatabaseConfig(connection="primary", vocab_connection="vocab")},
+        )
+        resolved = Resolver(stack).resolve_database("cdm")
+        primary_engine, vocab_engine = resolved.create_engines(schema_claims=[staging_schema_claim()])
+        try:
+            with vocab_engine.connect() as vocab_conn:
+                create_tables(vocab_conn, [VocabSchemaTable.__table__], resolved=resolved)
+                vocab_conn.commit()
+            with primary_engine.connect() as conn:
+                create_tables(conn, [VocabReferencingTable.__table__], resolved=resolved)
+                conn.commit()
+                with so.Session(bind=conn) as session:
+                    yield resolved, session
+        finally:
+            primary_engine.dispose()
+            vocab_engine.dispose()
 
 
 def test_duckdb_backend_identity_and_capabilities():
@@ -336,6 +372,111 @@ def test_duckdb_backend_merge_insert_batch_validation_prevents_partial_commit(
     session.rollback()
     remaining = session.execute(sa.select(CycleATable.id).order_by(CycleATable.id)).scalars().all()
     assert remaining == [1, 2]
+
+
+@pytest.mark.duckdb
+@pytest.mark.db_dialect
+def test_duckdb_backend_merge_insert_loads_self_referential_rows_in_dependency_order(
+    duckdb_session, duckdb_backend,
+):
+    """Staging rows arrive in reverse dependency order (each pointing at a
+    row not yet committed); merge_insert must still load every row, in
+    however many waves that takes, regardless of insertion order.
+    """
+    duckdb_backend.create_staging_table(_SelfReferentialTableCls, duckdb_session)
+    staging = _SelfReferentialTableCls.get_staging_table(
+        duckdb_session, staging_schema_tag=duckdb_backend.staging_schema_tag
+    )
+    duckdb_session.execute(
+        sa.insert(staging),
+        [{"id": 3, "parent_id": 2}, {"id": 2, "parent_id": 1}, {"id": 1, "parent_id": None}],
+    )
+
+    duckdb_backend.merge_insert(_SelfReferentialTableCls, duckdb_session, merge_batch_size=1)
+
+    rows = {r.id: r.parent_id for r in duckdb_session.execute(sa.select(SelfReferentialTable)).scalars().all()}
+    assert rows == {1: None, 2: 1, 3: 2}
+
+
+@pytest.mark.duckdb
+@pytest.mark.db_dialect
+def test_duckdb_backend_merge_upsert_loads_self_referential_rows_in_dependency_order(
+    duckdb_session, duckdb_backend,
+):
+    duckdb_backend.create_staging_table(_SelfReferentialTableCls, duckdb_session)
+    staging = _SelfReferentialTableCls.get_staging_table(
+        duckdb_session, staging_schema_tag=duckdb_backend.staging_schema_tag
+    )
+    duckdb_session.execute(sa.insert(staging), [{"id": 2, "parent_id": 1}, {"id": 1, "parent_id": None}])
+
+    duckdb_backend.merge_upsert(_SelfReferentialTableCls, duckdb_session, ["id"], merge_batch_size=1)
+
+    rows = {r.id: r.parent_id for r in duckdb_session.execute(sa.select(SelfReferentialTable)).scalars().all()}
+    assert rows == {1: None, 2: 1}
+
+
+@pytest.mark.duckdb
+@pytest.mark.db_dialect
+def test_duckdb_backend_merge_insert_dependency_waves_catch_a_genuine_orphan(
+    duckdb_session_with_committed_schema, duckdb_backend,
+):
+    """A row whose parent never arrives in any wave is a genuine violation.
+    A row that did become ready must still be committed. Only the stuck
+    row is left behind in staging and reported.
+    """
+    session = duckdb_session_with_committed_schema
+    duckdb_backend.create_staging_table(_SelfReferentialTableCls, session)
+    staging = _SelfReferentialTableCls.get_staging_table(
+        session, staging_schema_tag=duckdb_backend.staging_schema_tag
+    )
+    session.execute(sa.insert(staging), [{"id": 1, "parent_id": None}, {"id": 2, "parent_id": 999}])
+
+    with pytest.raises(DeferredForeignKeyViolationError, match="self_referential_table"):
+        duckdb_backend.merge_insert(_SelfReferentialTableCls, session, merge_batch_size=1)
+
+    assert session.execute(sa.select(SelfReferentialTable.id)).scalars().all() == [1]
+    assert session.execute(sa.select(staging.c.id)).scalars().all() == [2]
+
+
+@pytest.mark.duckdb
+@pytest.mark.db_dialect
+def test_duckdb_backend_validate_deferred_fks_catches_a_cross_database_orphan(duckdb_split_database_session):
+    """A cross-database FK is genuinely checked, via a second connection,
+    not skipped. An orphan on the other database must still be caught.
+    """
+    resolved, session = duckdb_split_database_session
+    backend = DuckDBBackend(resolved=resolved)
+    session.execute(sa.insert(VocabReferencingTable), [{"id": 1, "vocab_id": 999}])
+
+    with pytest.raises(DeferredForeignKeyViolationError, match="vocab_referencing_table"):
+        backend.validate_deferred_fks(_VocabReferencingTableCls, session)
+
+
+@pytest.mark.duckdb
+@pytest.mark.db_dialect
+def test_duckdb_backend_validate_deferred_fks_passes_a_real_cross_database_reference(
+    duckdb_split_database_session,
+):
+    """A cross-database FK pointing at a row that genuinely exists on the
+    other connection must pass, proving the check is real rather than a
+    pass-through.
+    """
+    resolved, session = duckdb_split_database_session
+    backend = DuckDBBackend(resolved=resolved)
+
+    primary_engine, vocab_engine = resolved.create_engines(register_claims=False)
+    try:
+        with vocab_engine.connect() as vocab_conn:
+            vocab_conn.execute(sa.insert(VocabSchemaTable), [{"id": 1, "name": "v1"}])
+            vocab_conn.commit()
+    finally:
+        primary_engine.dispose()
+        if vocab_engine is not primary_engine:
+            vocab_engine.dispose()
+
+    session.execute(sa.insert(VocabReferencingTable), [{"id": 1, "vocab_id": 1}])
+
+    backend.validate_deferred_fks(_VocabReferencingTableCls, session)
 
 
 @pytest.mark.duckdb

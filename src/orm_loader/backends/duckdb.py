@@ -4,11 +4,18 @@ from typing import TYPE_CHECKING, Any, Type
 
 import sqlalchemy as sa
 import sqlalchemy.orm as so
-from oa_configurator import physical_schema_of, qualified, unenforced_foreign_keys
+from oa_configurator import (
+    ResolvedCDMDatabase,
+    Role,
+    UnenforcedForeignKey,
+    physical_schema_of,
+    qualified,
+    unenforced_foreign_keys,
+)
 from sqlalchemy.schema import CreateSequence, DropSequence, DropTable
 from sqlalchemy.sql.compiler import IdentifierPreparer
 
-from .base import BackendCapabilities, DatabaseBackend, Dialect
+from .base import BackendCapabilities, DatabaseBackend, DeferredForeignKeyViolationError, Dialect
 
 if TYPE_CHECKING:
     from ..tables.typing import CSVTableProtocol
@@ -43,9 +50,12 @@ class DuckDBBackend(DatabaseBackend):
             supports_replace_with_kept_indexes=False,
         )
 
-    def _unenforced_constraints(self, tables: tuple[sa.Table, ...]) -> frozenset[sa.ForeignKeyConstraint]:
-        """Every FK in *tables* DuckDB will not enforce: omitted (cross-database/
-        cross-schema) or created but never added (cyclic/``use_alter=True``).
+    def _unenforced_constraints(
+        self, tables: tuple[sa.Table, ...]
+    ) -> tuple[UnenforcedForeignKey, ...]:
+        """Every FK in *tables* DuckDB will not enforce, including reason: 
+        - omitted (cross-database/cross-schema) or 
+        - created but never added (cyclic/``use_alter=True``).
 
         Delegates to oa-configurator's :func:`unenforced_foreign_keys`, the
         same classification DDL creation itself uses.
@@ -60,26 +70,96 @@ class DuckDBBackend(DatabaseBackend):
                 "DuckDBBackend needs resolved=<ResolvedDatabase> to classify foreign-key "
                 "enforcement. Pass it to load_csv(...) or resolve_backend(...)."
             )
-        unenforced = unenforced_foreign_keys(
+        return unenforced_foreign_keys(
             tables, resolved=self.resolved, physical_schemas=self.physical_schemas
         )
-        return frozenset(entry.constraint for entry in unenforced)
 
     def deferred_fk_constraints(
         self,
         table_cls: Type["CSVTableProtocol"],
     ) -> tuple[sa.ForeignKeyConstraint, ...]:
         """FK constraints on *table_cls* this backend's database will not enforce:
-        - omitted (cross-database/cross-schema), or 
-        - created but never added (cyclic/``use_alter=True``). 
+        - omitted (cross-database/cross-schema), or
+        - created but never added (cyclic/``use_alter=True``).
         See :meth:`validate_deferred_fks`.
         """
         own_fks = tuple(table_cls.__table__.foreign_key_constraints)
         if not own_fks:
             return ()
         metadata = table_cls.__table__.metadata
-        unenforced = self._unenforced_constraints(tuple(metadata.tables.values()))
+        unenforced = {entry.constraint for entry in self._unenforced_constraints(tuple(metadata.tables.values()))}
         return tuple(fk for fk in own_fks if fk in unenforced)
+
+    def validate_deferred_fks(self, table_cls: Type["CSVTableProtocol"], session: so.Session) -> None:
+        """Validate every deferred FK on table_cls, including a cross-database one.
+
+        A cross-schema or cyclic deferred FK points to a table in the same
+        database, so one query can check both tables directly. A
+        cross-database FK points to a table in a different database: a
+        query touching both would raise CrossDatabaseStatementError no
+        matter what the data actually is, so _validate_cross_database_fk
+        runs one query per database instead.
+        """
+        own_fks = tuple(table_cls.__table__.foreign_key_constraints)
+        if not own_fks:
+            return
+        metadata = table_cls.__table__.metadata
+        for entry in self._unenforced_constraints(tuple(metadata.tables.values())):
+            if entry.constraint not in own_fks:
+                continue
+            if entry.reason == "cross_database":
+                self._validate_cross_database_fk(entry.constraint, session)
+            else:
+                self._validate_one_deferred_fk(entry.constraint, session)
+
+    def _validate_cross_database_fk(self, fk: sa.ForeignKeyConstraint, session: so.Session) -> None:
+        """Anti-join fk across two connections by comparing both sides in Python.
+
+        Pulls fk's distinct non-null local values from *session*'s own
+        connection, then opens the referred table's own connection (via
+        self.resolved) to check which of them actually exist there. One
+        bulk query per side instead of one query spanning both.
+
+        Raises
+        ------
+        TypeError
+            self.resolved is not a ResolvedCDMDatabase: a cross-database FK
+            can only arise when PRIMARY/VOCAB are split across connections,
+            which only a CDM-aware resolved can describe.
+        DeferredForeignKeyViolationError
+            A local value has no match on the referred connection.
+        """
+        if not isinstance(self.resolved, ResolvedCDMDatabase):
+            raise TypeError(
+                f"{fk.name} was classified cross_database, which requires split PRIMARY/VOCAB "
+                f"connections, but self.resolved is {type(self.resolved).__name__}, not "
+                "ResolvedCDMDatabase."
+            )
+        local_cols = list(fk.columns)
+        remote_cols = [element.column for element in fk.elements]
+        not_null = sa.and_(*(col.isnot(None) for col in local_cols))
+        local_values = session.execute(sa.select(*local_cols).where(not_null).distinct()).all()
+        if not local_values:
+            return
+
+        remote_tag = remote_cols[0].table.schema
+        primary_engine, vocab_engine = self.resolved.create_engines(register_claims=False)
+        try:
+            remote_engine = vocab_engine if remote_tag == Role.VOCAB.value else primary_engine
+            with remote_engine.connect() as remote_conn:
+                if len(remote_cols) == 1:
+                    condition = remote_cols[0].in_(value for (value,) in local_values)
+                else:
+                    condition = sa.tuple_(*remote_cols).in_(tuple(value) for value in local_values)
+                existing = {tuple(row) for row in remote_conn.execute(sa.select(*remote_cols).where(condition))}
+        finally:
+            primary_engine.dispose()
+            if vocab_engine is not primary_engine:
+                vocab_engine.dispose()
+
+        missing = [tuple(value) for value in local_values if tuple(value) not in existing]
+        if missing:
+            raise DeferredForeignKeyViolationError(fk, missing[:5])
 
     def _tables_referencing(self, target: sa.Table) -> set[sa.Table]:
         """Other tables with an enforced FK pointing at target.
@@ -95,7 +175,7 @@ class DuckDBBackend(DatabaseBackend):
         )
         if not incoming:
             return set()
-        unenforced = self._unenforced_constraints(tables)
+        unenforced = {entry.constraint for entry in self._unenforced_constraints(tables)}
         return {fk.table for fk in incoming if fk not in unenforced}
 
     def _is_referenced_by_existing_rows(self, target: sa.Table, session: so.Session) -> bool:
@@ -355,6 +435,15 @@ class DuckDBBackend(DatabaseBackend):
 
         non_paginated_select = sa.select(*(staging.c[c] for c in insertable_cols))
 
+        self_referential_fks = self._self_referential_deferred_fks(table_cls)
+        if self_referential_fks:
+            self._merge_in_dependency_waves(
+                table_cls, session, staging, target, self_referential_fks,
+                merge_batch_size, validate_deferred_fks,
+                insert_chunk=lambda chunk: session.execute(_upsert(non_paginated_select.where(chunk))),
+            )
+            return
+
         for batch_range in self._paginate_batches(table_cls, staging, session, merge_batch_size):
             select_ = non_paginated_select if batch_range is None else non_paginated_select.where(batch_range)
             session.execute(_upsert(select_))
@@ -378,6 +467,15 @@ class DuckDBBackend(DatabaseBackend):
 
         def _insert(select_: Any) -> sa.Insert:
             return sa.insert(target).from_select(insertable_cols, select_)
+
+        self_referential_fks = self._self_referential_deferred_fks(table_cls)
+        if self_referential_fks:
+            self._merge_in_dependency_waves(
+                table_cls, session, staging, target, self_referential_fks,
+                merge_batch_size, validate_deferred_fks,
+                insert_chunk=lambda chunk: session.execute(_insert(non_paginated_select.where(chunk))),
+            )
+            return
 
         for batch_range in self._paginate_batches(table_cls, staging, session, merge_batch_size):
             select_ = non_paginated_select if batch_range is None else non_paginated_select.where(batch_range)
