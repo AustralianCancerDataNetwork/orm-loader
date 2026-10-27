@@ -358,16 +358,12 @@ class DuckDBBackend(DatabaseBackend):
         dropped indexes first; capabilities.supports_replace_with_kept_indexes
         is False for this reason.
 
-        If table_cls has a self-referential deferred FK, an existing row's
-        FK column can be re-pointed at a row that doesn't exist yet -- one
-        this same load will only add via the merge_insert() call that
-        normally follows. Processing replace and insert as two sealed
-        phases would validate that update before the row it points at
-        exists. Instead, both the update (for a row already in target) and
-        the insert (for one that isn't) are done together, wave by wave,
-        through merge_insert()'s dependency-ordered loop (see
-        _merge_in_dependency_waves()); staging ends up fully drained here,
-        so the merge_insert() call that follows has nothing left to do.
+        A self-referential FK can point an existing row at one this load
+        hasn't inserted yet. Doing replace then insert as separate phases
+        would validate that before the target exists, so both happen
+        together here, wave by wave (see _merge_in_dependency_waves()),
+        draining staging. The merge_insert() call that follows has
+        nothing left to do.
 
         Raises
         ------
@@ -423,10 +419,8 @@ class DuckDBBackend(DatabaseBackend):
                 return sa.insert(target).from_select(insertable_cols, select_)
 
             def _process_chunk(chunk: sa.ColumnElement[bool]) -> None:
-                # Rows in chunk already in target are updated in place; whatever
-                # staging rows chunk still matches afterward are new, and get
-                # inserted. _merge_in_dependency_waves() removes them from
-                # staging once this returns.
+                # chunk's rows already in target are updated; what's left in
+                # staging afterward is new and gets inserted here.
                 _update(chunk)
                 _drop_matched_from_staging(chunk)
                 session.execute(_insert(non_paginated_select.where(chunk)))

@@ -420,12 +420,9 @@ def test_duckdb_backend_merge_upsert_loads_self_referential_rows_in_dependency_o
 def test_duckdb_backend_merge_replace_updates_and_inserts_self_referential_rows_together(
     duckdb_session, duckdb_backend,
 ):
-    """An existing row's self-referential FK is re-pointed at a row that
-    only this same load adds. Processed as two sealed phases (replace,
-    then insert), the update would be validated before its new target
-    exists. merge_replace must do both together, in dependency order, so
-    the update only lands once its target is actually there -- and drain
-    staging itself, leaving nothing for merge_insert() to do.
+    """An existing row is re-pointed at one only this load adds. Processed
+    as two sealed phases, the update would be validated before its target
+    exists; merge_replace must do both together, in dependency order.
     """
     duckdb_session.execute(sa.insert(SelfReferentialTable), [{"id": 1, "parent_id": None}])
     duckdb_backend.create_staging_table(_SelfReferentialTableCls, duckdb_session)
