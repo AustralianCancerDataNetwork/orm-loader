@@ -166,3 +166,19 @@ class VocabSchemaTable(Base, CSVLoadableTableInterface):
 
     id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     name: so.Mapped[str] = so.mapped_column(sa.String, nullable=False)
+
+
+class VocabReferencingTable(Base, CSVLoadableTableInterface):
+    """PRIMARY-tagged table with a foreign key into VocabSchemaTable (VOCAB),
+    for cross-schema foreign-key classification tests: DuckDB cannot
+    enforce a key between two physical schemas, so oa-configurator omits
+    it from DDL, same practical outcome as a cyclic/deferred key but
+    reached a different way."""
+
+    __tablename__ = "vocab_referencing_table"
+    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+
+    id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
+    vocab_id: so.Mapped[int | None] = so.mapped_column(
+        sa.Integer, sa.ForeignKey(f"{SchemaRole.VOCAB.value}.test_vocab_role_table.id")
+    )

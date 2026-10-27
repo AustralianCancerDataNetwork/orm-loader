@@ -1,9 +1,12 @@
 from typing import Protocol, ClassVar, runtime_checkable, TYPE_CHECKING, Optional, Type, Dict, Any, Unpack, TypedDict
 import sqlalchemy.orm as so
 import sqlalchemy as sa
+from collections.abc import Mapping
 from pathlib import Path
 from contextlib import AbstractContextManager
 if TYPE_CHECKING:
+    from oa_configurator import ResolvedDatabase
+
     from ..loaders import LoaderContext, LoaderInterface
 
 class ToDictKwargs(TypedDict, total=False):
@@ -88,6 +91,8 @@ class CSVTableProtocol(ORMTableProtocol, Protocol):
         merge_batch_size: int | None = None,
         staging_schema_tag: str | None = None,
         validate_deferred_fks: bool = True,
+        resolved: Optional["ResolvedDatabase"] = None,
+        physical_schemas: Optional[Mapping[str, str | None]] = None,
     ) -> int: ...
 
     @classmethod
@@ -104,6 +109,9 @@ class CSVTableProtocol(ORMTableProtocol, Protocol):
         *,
         merge_batch_size: int | None = None,
         staging_schema_tag: str | None = None,
+        validate_deferred_fks: bool = True,
+        resolved: Optional["ResolvedDatabase"] = None,
+        physical_schemas: Optional[Mapping[str, str | None]] = None,
     ) -> None: ...
 
     @classmethod

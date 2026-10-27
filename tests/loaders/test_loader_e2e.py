@@ -845,7 +845,7 @@ def test_sqlite_failed_batched_replace_keeps_original_target_rows(sqlite_session
 
 @pytest.mark.duckdb
 @pytest.mark.db_dialect
-def test_validate_deferred_fks_catches_an_orphan_introduced_by_load_csv(duckdb_session, tmp_path):
+def test_validate_deferred_fks_catches_an_orphan_introduced_by_load_csv(duckdb_session, duckdb_db, tmp_path):
     """cycle_a_table.b_id is part of a genuine FK cycle with cycle_b_table, so
     DuckDB never got a real constraint for it (oa-configurator's
     _skip_deferred_fk_on_duckdb no-oped the ALTER TABLE ADD CONSTRAINT): a
@@ -863,7 +863,12 @@ def test_validate_deferred_fks_catches_an_orphan_introduced_by_load_csv(duckdb_s
 
     with pytest.raises(DeferredForeignKeyViolationError, match="cycle_a_table"):
         _CycleATable.load_csv(
-            duckdb_session, csv_path, dedupe=False, loader=PandasLoader(), validate_deferred_fks=True
+            duckdb_session,
+            csv_path,
+            dedupe=False,
+            loader=PandasLoader(),
+            validate_deferred_fks=True,
+            resolved=duckdb_db.resolved,
         )
 
     staging_name = resolve_backend(duckdb_session, mapper=_CycleATable).staging_name_for_table(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 import logging
 import sqlite3
 from pathlib import Path
@@ -16,6 +17,7 @@ from sqlalchemy.sql.compiler import IdentifierPreparer
 from .base import BackendCapabilities, DatabaseBackend, Dialect
 
 if TYPE_CHECKING:
+    from oa_configurator import ResolvedDatabase
     from sqlalchemy.engine import Connection, Engine
 
     from ..tables.typing import CSVTableProtocol
@@ -37,6 +39,8 @@ class SQLiteBackend(DatabaseBackend):
         *,
         staging_schema_tag: str | None = None,
         staging_schema: str | None = None,
+        resolved: ResolvedDatabase | None = None,
+        physical_schemas: Mapping[str, str | None] | None = None,
         busy_timeout_ms: int = 60000,
         journal_mode: str = "WAL",
         defer_foreign_keys: bool = True,
@@ -46,7 +50,12 @@ class SQLiteBackend(DatabaseBackend):
                 "SQLite has no schema concept, so staging_schema must be None. "
                 "physical_schema_of() already resolves it to None for this dialect."
             )
-        super().__init__(staging_schema_tag=staging_schema_tag, staging_schema=staging_schema)
+        super().__init__(
+            staging_schema_tag=staging_schema_tag,
+            staging_schema=staging_schema,
+            resolved=resolved,
+            physical_schemas=physical_schemas,
+        )
         self.busy_timeout_ms = busy_timeout_ms
         self.journal_mode = self._validate_journal_mode(journal_mode)
         self.defer_foreign_keys = defer_foreign_keys
@@ -188,8 +197,16 @@ class SQLiteBackend(DatabaseBackend):
         pk_cols: list[str],
         *,
         merge_batch_size: int | None = None,
+        validate_deferred_fks: bool = True,
     ) -> None:
-        """Delete every target row whose primary key appears in staging."""
+        """Delete every target row whose primary key appears in staging.
+
+        Notes
+        -----
+        validate_deferred_fks is accepted for interface parity only:
+        _commits_between_pagination_batches is always False here, so no
+        intermediate commit, and nothing to validate ahead of, ever happens.
+        """
         self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
         staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
@@ -217,6 +234,7 @@ class SQLiteBackend(DatabaseBackend):
         pk_cols: list[str],
         *,
         merge_batch_size: int | None = None,
+        validate_deferred_fks: bool = True,
     ) -> None:
         self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
@@ -243,6 +261,7 @@ class SQLiteBackend(DatabaseBackend):
         session: so.Session,
         *,
         merge_batch_size: int | None = None,
+        validate_deferred_fks: bool = True,
     ) -> None:
         self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__

@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
-from collections.abc import Generator, Iterator
+from collections.abc import Generator, Iterator, Mapping
 from functools import wraps
 from typing import TYPE_CHECKING, Any, Callable, ParamSpec, Type, TypeVar, cast
 
@@ -12,7 +12,7 @@ import sqlalchemy.orm as so
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.sql.compiler import IdentifierPreparer
 
-from oa_configurator import Dialect, SchemaClaim, open_connection, qualified
+from oa_configurator import Dialect, ResolvedDatabase, SchemaClaim, open_connection, qualified
 
 if TYPE_CHECKING:
     from ..loaders.data_classes import LoaderContext
@@ -116,7 +116,14 @@ class DatabaseBackend(ABC):
     without changing existing loader orchestration yet.
     """
 
-    def __init__(self, *, staging_schema_tag: str | None = None, staging_schema: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        staging_schema_tag: str | None = None,
+        staging_schema: str | None = None,
+        resolved: ResolvedDatabase | None = None,
+        physical_schemas: Mapping[str, str | None] | None = None,
+    ) -> None:
         """
         Parameters
         ----------
@@ -132,9 +139,19 @@ class DatabaseBackend(ABC):
             qualification — staging tables land in whatever schema the
             connection's search_path resolves to. SQLite has no schema
             concept and always resolves to ``None``.
+        resolved
+            Used by DuckDBBackend to classify a foreign key crossing a
+            schema or database boundary, via oa-configurator's
+            ``unenforced_foreign_keys()``. Ignored by every other backend.
+        physical_schemas
+            A schema tag's physical name beyond ``resolved``'s own
+            configured ones (e.g. one claimed via ``schema_claims``).
+            Forwarded alongside ``resolved``.
         """
         self.staging_schema_tag = staging_schema_tag
         self.staging_schema = staging_schema
+        self.resolved = resolved
+        self.physical_schemas = physical_schemas
 
     @staticmethod
     def _validate_merge_batch_size(merge_batch_size: int | None) -> None:
@@ -434,8 +451,15 @@ class DatabaseBackend(ABC):
         pk_cols: list[str],
         *,
         merge_batch_size: int | None = None,
+        validate_deferred_fks: bool = True,
     ) -> None:
-        """Merge staging rows by replacing matching target rows first."""
+        """Merge staging rows by replacing matching target rows first.
+
+        validate_deferred_fks
+            Forwarded to :meth:`_commit_batch_if_needed` for each
+            intermediate commit, so a batch that violates a deferred FK is
+            caught before it commits instead of only after the whole merge.
+        """
 
     @abstractmethod
     def merge_upsert(
@@ -445,8 +469,13 @@ class DatabaseBackend(ABC):
         pk_cols: list[str],
         *,
         merge_batch_size: int | None = None,
+        validate_deferred_fks: bool = True,
     ) -> None:
-        """Merge staging rows using backend-specific upsert semantics."""
+        """Merge staging rows using backend-specific upsert semantics.
+
+        validate_deferred_fks
+            See :meth:`merge_replace`.
+        """
 
     @abstractmethod
     def merge_insert(
@@ -455,8 +484,13 @@ class DatabaseBackend(ABC):
         session: so.Session,
         *,
         merge_batch_size: int | None = None,
+        validate_deferred_fks: bool = True,
     ) -> None:
-        """Insert all staging rows into the target table."""
+        """Insert all staging rows into the target table.
+
+        validate_deferred_fks
+            See :meth:`merge_replace`.
+        """
 
     @abstractmethod
     def _pagination_column(
@@ -514,6 +548,32 @@ class DatabaseBackend(ABC):
             end = start + merge_batch_size
             yield sa.and_(column > start, column <= end)
             start = end
+
+    def _commit_batch_if_needed(
+        self,
+        table_cls: Type["CSVTableProtocol"],
+        session: so.Session,
+        batch_range: sa.ColumnElement[bool] | None,
+        *,
+        validate_deferred_fks: bool = True,
+    ) -> None:
+        """Validate deferred FKs and commit after one pagination batch, 
+        if this backend commits between batches.
+
+        Called from every merge_*() method after each batch of rows is processed. 
+        Instead of committing directly, a batch that violates a deferred FK is caught
+        before the next batch starts. Without this, an earlier batch's commit cannot
+        be undone once a later batch's load_csv()-level validation fails.
+
+        No-op when there is nothing to validate to not add cost. This is true for every 
+        backend but DuckDB, and for DuckDB whenever table_cls has no deferred/
+        unenforced FK at all.
+        """
+        if batch_range is None or not self._commits_between_pagination_batches:
+            return
+        if validate_deferred_fks:
+            self.validate_deferred_fks(table_cls, session)
+        session.commit()
 
     def merge_context(
         self,

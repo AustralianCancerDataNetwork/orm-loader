@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any, Type
 
 import sqlalchemy as sa
 import sqlalchemy.orm as so
-from oa_configurator import physical_schema_of, qualified
+from oa_configurator import physical_schema_of, qualified, unenforced_foreign_keys
 from sqlalchemy.schema import CreateSequence, DropSequence, DropTable
 from sqlalchemy.sql.compiler import IdentifierPreparer
 
@@ -43,42 +43,60 @@ class DuckDBBackend(DatabaseBackend):
             supports_replace_with_kept_indexes=False,
         )
 
+    def _unenforced_constraints(self, tables: tuple[sa.Table, ...]) -> frozenset[sa.ForeignKeyConstraint]:
+        """Every FK in *tables* DuckDB will not enforce: omitted (cross-database/
+        cross-schema) or created but never added (cyclic/``use_alter=True``).
+
+        Delegates to oa-configurator's :func:`unenforced_foreign_keys`, the
+        same classification DDL creation itself uses.
+
+        Raises
+        ------
+        ValueError
+            ``self.resolved`` was never given to ``resolve_backend()``.
+        """
+        if self.resolved is None:
+            raise ValueError(
+                "DuckDBBackend needs resolved=<ResolvedDatabase> to classify foreign-key "
+                "enforcement. Pass it to load_csv(...) or resolve_backend(...)."
+            )
+        unenforced = unenforced_foreign_keys(
+            tables, resolved=self.resolved, physical_schemas=self.physical_schemas
+        )
+        return frozenset(entry.constraint for entry in unenforced)
+
     def deferred_fk_constraints(
         self,
         table_cls: Type["CSVTableProtocol"],
     ) -> tuple[sa.ForeignKeyConstraint, ...]:
-        """FK constraints on *table_cls* excluded from its CREATE TABLE and never
-        added afterward: DuckDB can't execute the ALTER TABLE ADD CONSTRAINT that
-        would otherwise add them (oa-configurator's _skip_deferred_fk_on_duckdb no-ops it).
-
-        sort_tables_and_constraints needs every table in the schema to tell
-        which FKs are genuinely deferred (cyclic), so this runs against
-        table_cls's whole shared metadata, not table_cls alone.
-
-        Only reads the ``tbl is None`` bucket of sort_tables_and_constraints's
-        output. A standalone self-referential FK (not part of a cross-table
-        cycle) is still deferred by SQLAlchemy either way, but lands in its
-        *own* table's bucket unless the column declares ``use_alter=True``.
-        Without that, this method can't see it, and it will insert without
-        error instead of being caught by validate_deferred_fks(). Model
-        authors: mark a self-referential FK ``use_alter=True`` explicitly if
-        it needs anti-join validation on DuckDB.
+        """FK constraints on *table_cls* this backend's database will not enforce:
+        - omitted (cross-database/cross-schema), or 
+        - created but never added (cyclic/``use_alter=True``). 
+        See :meth:`validate_deferred_fks`.
         """
+        own_fks = tuple(table_cls.__table__.foreign_key_constraints)
+        if not own_fks:
+            return ()
         metadata = table_cls.__table__.metadata
-        entries = sa.schema.sort_tables_and_constraints(metadata.tables.values())
-        deferred = next(fks for tbl, fks in entries if tbl is None)
-        return tuple(fk for fk in deferred if fk.table is table_cls.__table__)
+        unenforced = self._unenforced_constraints(tuple(metadata.tables.values()))
+        return tuple(fk for fk in own_fks if fk in unenforced)
 
-    @staticmethod
-    def _tables_referencing(target: sa.Table) -> set[sa.Table]:
-        """Other tables in target's own metadata that have an FK pointing at target."""
-        return {
-            other
-            for other in target.metadata.tables.values()
-            if other is not target
-            for fk in other.foreign_key_constraints
+    def _tables_referencing(self, target: sa.Table) -> set[sa.Table]:
+        """Other tables with an enforced FK pointing at target.
+
+        Excludes an omitted/deferred FK: DuckDB has no real constraint
+        there, so it must not count toward check_replace_feasible()'s
+        preflight.
+        """
+        tables = tuple(target.metadata.tables.values())
+        incoming = tuple(
+            fk for other in tables if other is not target for fk in other.foreign_key_constraints
             if fk.referred_table is target
-        }
+        )
+        if not incoming:
+            return set()
+        unenforced = self._unenforced_constraints(tables)
+        return {fk.table for fk in incoming if fk not in unenforced}
 
     def _is_referenced_by_existing_rows(self, target: sa.Table, session: so.Session) -> bool:
         """True if some table referencing target has any rows.
@@ -96,13 +114,10 @@ class DuckDBBackend(DatabaseBackend):
 
     def _staging_rownum_sequence_ref(self, tablename: str) -> str:
         """Fully schema-qualified, quoted name of tablename's staging _rownum sequence.
-        
-        Notes
-        -----
-        DuckDB can't ALTER TABLE ADD COLUMN ... GENERATED ALWAYS AS IDENTITY after creation.
-        Pagniation uses a sequence-backed DEFAULT instead to achieve the Postgres-like
-        Identity column: a stable, monotonic pagination key populated automatically on insert, independent of
-        DuckDB's own rowid (not guaranteed stable across a checkpoint).
+
+        DuckDB can't ALTER TABLE ADD a GENERATED ALWAYS AS IDENTITY column
+        after creation, so pagination uses a sequence-backed DEFAULT
+        instead for a stable, monotonic key.
         """
         seq_name = f"{self.staging_name_for_table(tablename)}_rownum_seq"
         return qualified(self.identifier_preparer, seq_name, physical_schema=self.staging_schema)
@@ -202,10 +217,10 @@ class DuckDBBackend(DatabaseBackend):
 
     @property
     def _commits_between_pagination_batches(self) -> bool:
-        """True: bounds how much uncommitted work one load accumulates on a
-        large table. Safe here because merge_replace updates matching rows
-        in place rather than deleting and reinserting them, so a commit
-        between batches never leaves a row removed without its replacement.
+        """True: bounds uncommitted work on a large table. Safe because
+        merge_replace updates rows in place rather than delete-then-reinsert,
+        so a commit between batches never leaves a row removed without its
+        replacement.
         """
         return True
 
@@ -254,21 +269,14 @@ class DuckDBBackend(DatabaseBackend):
         pk_cols: list[str],
         *,
         merge_batch_size: int | None = None,
+        validate_deferred_fks: bool = True,
     ) -> None:
         """Update matching target rows from staging in place, then drop them from staging.
 
-        DuckDB rejects deleting a still-referenced row outright, with no
-        FK-toggle or deferred-constraint escape hatch, so replace is an
-        UPDATE rather than orm-loader's usual delete-then-reinsert. Matched
-        rows are removed from staging so the follow-up merge_insert() call
-        only inserts rows that weren't already handled here.
-
-        Only correct when index_strategy drops indexes before this UPDATE:
-        updating an indexed column with the index still live raises
-        DuckDB's own (opaque) constraint error. capabilities.
-        supports_replace_with_kept_indexes is False for this reason; the
-        caller is expected to check it before resolving index_strategy to
-        "keep" for a "replace" merge.
+        DuckDB can't delete a still-referenced row, so replace is an UPDATE
+        rather than delete-then-reinsert. Requires index_strategy to have
+        dropped indexes first; capabilities.supports_replace_with_kept_indexes
+        is False for this reason.
 
         Raises
         ------
@@ -318,8 +326,9 @@ class DuckDBBackend(DatabaseBackend):
         for batch_range in self._paginate_batches(table_cls, staging, session, merge_batch_size):
             _update(batch_range)
             _drop_matched_from_staging(batch_range)
-            if batch_range is not None and self._commits_between_pagination_batches:
-                session.commit()
+            self._commit_batch_if_needed(
+                table_cls, session, batch_range, validate_deferred_fks=validate_deferred_fks
+            )
 
     def merge_upsert(
         self,
@@ -328,6 +337,7 @@ class DuckDBBackend(DatabaseBackend):
         pk_cols: list[str],
         *,
         merge_batch_size: int | None = None,
+        validate_deferred_fks: bool = True,
     ) -> None:
         import duckdb_sqlalchemy
 
@@ -348,8 +358,9 @@ class DuckDBBackend(DatabaseBackend):
         for batch_range in self._paginate_batches(table_cls, staging, session, merge_batch_size):
             select_ = non_paginated_select if batch_range is None else non_paginated_select.where(batch_range)
             session.execute(_upsert(select_))
-            if batch_range is not None and self._commits_between_pagination_batches:
-                session.commit()
+            self._commit_batch_if_needed(
+                table_cls, session, batch_range, validate_deferred_fks=validate_deferred_fks
+            )
 
     def merge_insert(
         self,
@@ -357,6 +368,7 @@ class DuckDBBackend(DatabaseBackend):
         session: so.Session,
         *,
         merge_batch_size: int | None = None,
+        validate_deferred_fks: bool = True,
     ) -> None:
         self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
@@ -370,5 +382,6 @@ class DuckDBBackend(DatabaseBackend):
         for batch_range in self._paginate_batches(table_cls, staging, session, merge_batch_size):
             select_ = non_paginated_select if batch_range is None else non_paginated_select.where(batch_range)
             session.execute(_insert(select_))
-            if batch_range is not None and self._commits_between_pagination_batches:
-                session.commit()
+            self._commit_batch_if_needed(
+                table_cls, session, batch_range, validate_deferred_fks=validate_deferred_fks
+            )

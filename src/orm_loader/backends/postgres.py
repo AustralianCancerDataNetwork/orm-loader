@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
@@ -26,6 +27,7 @@ from ..mappers.materialised_view_errors import (
 from .base import BackendCapabilities, DatabaseBackend, requires_capability
 
 if TYPE_CHECKING:
+    from oa_configurator import ResolvedDatabase
     from sqlalchemy.engine import Connection, Engine
 
     from ..loaders.data_classes import LoaderContext
@@ -36,8 +38,20 @@ _VALID_PG_REPLICATION_ROLES = frozenset({"origin", "local", "replica"})
 
 
 class PostgresBackend(DatabaseBackend):
-    def __init__(self, *, staging_schema_tag: str | None = None, staging_schema: str | None = None) -> None:
-        super().__init__(staging_schema_tag=staging_schema_tag, staging_schema=staging_schema)
+    def __init__(
+        self,
+        *,
+        staging_schema_tag: str | None = None,
+        staging_schema: str | None = None,
+        resolved: ResolvedDatabase | None = None,
+        physical_schemas: Mapping[str, str | None] | None = None,
+    ) -> None:
+        super().__init__(
+            staging_schema_tag=staging_schema_tag,
+            staging_schema=staging_schema,
+            resolved=resolved,
+            physical_schemas=physical_schemas,
+        )
 
     @staticmethod
     def staging_name_for_table(tablename: str) -> str:
@@ -221,6 +235,7 @@ class PostgresBackend(DatabaseBackend):
         pk_cols: list[str],
         *,
         merge_batch_size: int | None = None,
+        validate_deferred_fks: bool = True,
     ) -> None:
         """Delete every target row whose primary key appears in staging."""
         self._validate_merge_batch_size(merge_batch_size)
@@ -231,8 +246,9 @@ class PostgresBackend(DatabaseBackend):
         for batch_range in self._paginate_batches(table_cls, staging, session, merge_batch_size):
             where = pk_join if batch_range is None else sa.and_(pk_join, batch_range)
             session.execute(sa.delete(target).where(where))
-            if batch_range is not None and self._commits_between_pagination_batches:
-                session.commit()
+            self._commit_batch_if_needed(
+                table_cls, session, batch_range, validate_deferred_fks=validate_deferred_fks
+            )
 
     def merge_upsert(
         self,
@@ -241,6 +257,7 @@ class PostgresBackend(DatabaseBackend):
         pk_cols: list[str],
         *,
         merge_batch_size: int | None = None,
+        validate_deferred_fks: bool = True,
     ) -> None:
         self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
@@ -260,8 +277,9 @@ class PostgresBackend(DatabaseBackend):
         for batch_range in self._paginate_batches(table_cls, staging, session, merge_batch_size):
             select_ = non_paginated_select if batch_range is None else non_paginated_select.where(batch_range)
             session.execute(_upsert(select_))
-            if batch_range is not None and self._commits_between_pagination_batches:
-                session.commit()
+            self._commit_batch_if_needed(
+                table_cls, session, batch_range, validate_deferred_fks=validate_deferred_fks
+            )
 
     def merge_insert(
         self,
@@ -269,6 +287,7 @@ class PostgresBackend(DatabaseBackend):
         session: so.Session,
         *,
         merge_batch_size: int | None = None,
+        validate_deferred_fks: bool = True,
     ) -> None:
         """Insert all staging rows into the target table.
 
@@ -287,8 +306,9 @@ class PostgresBackend(DatabaseBackend):
         for batch_range in self._paginate_batches(table_cls, staging, session, merge_batch_size):
             select_ = non_paginated_select if batch_range is None else non_paginated_select.where(batch_range)
             session.execute(_insert(select_))
-            if batch_range is not None and self._commits_between_pagination_batches:
-                session.commit()
+            self._commit_batch_if_needed(
+                table_cls, session, batch_range, validate_deferred_fks=validate_deferred_fks
+            )
 
     @requires_capability("supports_materialized_views", "materialized views")
     def create_materialized_view(

@@ -1,20 +1,27 @@
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
 from typing import TYPE_CHECKING, Type, cast
 
 import pytest
 import sqlalchemy as sa
 import sqlalchemy.orm as so
+from oa_configurator import CDMDatabaseConfig, ConnectionConfig, Resolver, StackConfig
 
-from orm_loader.backends import Dialect, DuckDBBackend
+from orm_loader.backends import Dialect, DuckDBBackend, staging_schema_claim
 from orm_loader.backends.base import DeferredForeignKeyViolationError
+from orm_loader.helpers.bootstrap import create_tables
 from tests.models import (
+    Base,
     ComputedColumnTable,
     CycleATable,
     CycleBTable,
     ReferencedParentTable,
     ReferencingChildTable,
     UnreferencedGrandparentTable,
+    VocabReferencingTable,
+    VocabSchemaTable,
 )
 
 if TYPE_CHECKING:
@@ -24,8 +31,63 @@ _ComputedTableCls = cast("Type[CSVTableProtocol]", ComputedColumnTable)
 _CycleATableCls = cast("Type[CSVTableProtocol]", CycleATable)
 _CycleBTableCls = cast("Type[CSVTableProtocol]", CycleBTable)
 _ReferencedParentTableCls = cast("Type[CSVTableProtocol]", ReferencedParentTable)
+_VocabReferencingTableCls = cast("Type[CSVTableProtocol]", VocabReferencingTable)
+_VocabSchemaTableCls = cast("Type[CSVTableProtocol]", VocabSchemaTable)
 _TARGET_TABLE = ComputedColumnTable.__tablename__
 _STAGING_TABLE = f"_staging_{_TARGET_TABLE}"
+
+
+@pytest.fixture
+def duckdb_backend(duckdb_db):
+    """DuckDBBackend carrying duckdb_db's own resolved topology, needed by
+    any FK-classification call now that resolved is required unconditionally.
+    """
+    return DuckDBBackend(resolved=duckdb_db.resolved)
+
+
+@pytest.fixture
+def duckdb_session_with_committed_schema(duckdb_db):
+    """Same database duckdb_session provides, with the schema DDL actually
+    committed, so a test can roll back its own later work mid-test without
+    also discarding the schema.
+    """
+    conn = duckdb_db.connection
+    Base.metadata.create_all(conn)
+    conn.commit()
+    return duckdb_db.session
+
+
+@pytest.fixture
+def duckdb_split_schema_session():
+    """A real DuckDB file with PRIMARY in ``clinical`` and VOCAB in
+    ``vocabulary``, so VocabReferencingTable's foreign key genuinely crosses
+    a physical schema and gets omitted from its DDL.
+    """
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        stack = StackConfig.for_session(
+            connections={
+                "db": ConnectionConfig(
+                    dialect="duckdb", database_name=str(Path(tmp_dir) / "split.duckdb"), test_only=True
+                )
+            },
+            databases={
+                "cdm": CDMDatabaseConfig(
+                    connection="db", cdm_schema="clinical", vocab_schema="vocabulary", results_schema="results"
+                )
+            },
+        )
+        resolved = Resolver(stack).resolve_database("cdm")
+        primary_engine, _ = resolved.create_engines(schema_claims=[staging_schema_claim()])
+        try:
+            with primary_engine.connect() as conn:
+                create_tables(
+                    conn, [VocabReferencingTable.__table__, VocabSchemaTable.__table__], resolved=resolved
+                )
+                conn.commit()
+                with so.Session(bind=conn) as session:
+                    yield resolved, session
+        finally:
+            primary_engine.dispose()
 
 
 def test_duckdb_backend_identity_and_capabilities():
@@ -85,12 +147,8 @@ def test_duckdb_backend_drop_staging_table(duckdb_session):
 @pytest.mark.duckdb
 @pytest.mark.db_dialect
 def test_duckdb_backend_drop_staging_table_also_drops_rownum_sequence(duckdb_session):
-    """The staging table's _rownum column is backed by a real sequence, so dropping 
-    the staging table must drop that sequence too.
-    
-    Notes
-    -----
-    DuckDB can't ALTER TABLE ADD a GENERATED ALWAYS AS IDENTITY column after creation
+    """The staging table's _rownum column is backed by a real sequence, so
+    dropping the staging table must drop that sequence too.
     """
     backend = DuckDBBackend()
     backend.create_staging_table(_ComputedTableCls, duckdb_session)
@@ -162,11 +220,9 @@ def test_duckdb_backend_materialized_view_methods_raise(duckdb_session):
 
 @pytest.mark.duckdb
 @pytest.mark.db_dialect
-def test_duckdb_backend_deferred_fk_constraints_finds_the_cycle(duckdb_session):
-    backend = DuckDBBackend()
-
-    a_fks = backend.deferred_fk_constraints(_CycleATableCls)
-    b_fks = backend.deferred_fk_constraints(_CycleBTableCls)
+def test_duckdb_backend_deferred_fk_constraints_finds_the_cycle(duckdb_session, duckdb_backend):
+    a_fks = duckdb_backend.deferred_fk_constraints(_CycleATableCls)
+    b_fks = duckdb_backend.deferred_fk_constraints(_CycleBTableCls)
 
     assert [c.name for c in a_fks[0].columns] == ["b_id"]
     assert [c.name for c in b_fks[0].columns] == ["a_id"]
@@ -174,36 +230,31 @@ def test_duckdb_backend_deferred_fk_constraints_finds_the_cycle(duckdb_session):
 
 @pytest.mark.duckdb
 @pytest.mark.db_dialect
-def test_duckdb_backend_validate_deferred_fks_passes_for_consistent_data(duckdb_session):
-    backend = DuckDBBackend()
+def test_duckdb_backend_validate_deferred_fks_passes_for_consistent_data(duckdb_session, duckdb_backend):
     duckdb_session.execute(sa.insert(CycleBTable), [{"id": 1, "a_id": None}])
     duckdb_session.execute(sa.insert(CycleATable), [{"id": 1, "b_id": 1}])
 
-    backend.validate_deferred_fks(_CycleATableCls, duckdb_session)
-    backend.validate_deferred_fks(_CycleBTableCls, duckdb_session)
+    duckdb_backend.validate_deferred_fks(_CycleATableCls, duckdb_session)
+    duckdb_backend.validate_deferred_fks(_CycleBTableCls, duckdb_session)
 
 
 @pytest.mark.duckdb
 @pytest.mark.db_dialect
-def test_duckdb_backend_validate_deferred_fks_catches_an_orphan(duckdb_session):
-    """DuckDB's engine never created this FK as a real constraint (it's part
-    of a cycle, so oa-configurator's shim no-opped the ALTER TABLE ADD
-    CONSTRAINT), so an orphaned reference inserts without error; the
-    anti-join check is the only thing that can catch it."""
-    backend = DuckDBBackend()
+def test_duckdb_backend_validate_deferred_fks_catches_an_orphan(duckdb_session, duckdb_backend):
+    """The cyclic FK was never created as a real constraint, so an orphaned
+    reference inserts without error; only the anti-join check catches it.
+    """
     duckdb_session.execute(sa.insert(CycleATable), [{"id": 1, "b_id": 999}])
 
     with pytest.raises(DeferredForeignKeyViolationError, match="cycle_a_table"):
-        backend.validate_deferred_fks(_CycleATableCls, duckdb_session)
+        duckdb_backend.validate_deferred_fks(_CycleATableCls, duckdb_session)
 
 
 @pytest.mark.duckdb
 @pytest.mark.db_dialect
 def test_duckdb_backend_merge_replace_updates_in_place(duckdb_session):
-    """merge_replace cannot delete a still-referenced row (no FK-toggle escape
-    hatch), so it updates matching rows in place and leaves non-matching staging
-    rows for the follow-up merge_insert() call, matching merge_from_staging()'s
-    real two-step orchestration rather than merge_replace alone.
+    """merge_replace updates matching rows in place and leaves non-matching
+    staging rows for the follow-up merge_insert() call.
     """
     backend = DuckDBBackend()
     backend.create_staging_table(_ComputedTableCls, duckdb_session)
@@ -245,15 +296,13 @@ def test_duckdb_backend_merge_replace_paginated_updates_in_place(duckdb_session)
 
 @pytest.mark.duckdb
 @pytest.mark.db_dialect
-def test_duckdb_backend_merge_replace_rejects_referenced_table_with_own_fk(duckdb_session):
-    """DuckDB rejects a SET on any FK-constrained column of a row that's
-    still referenced elsewhere, regardless of index_strategy. merge_replace
-    must fail up front, before touching any data, rather than partway
-    through a batch."""
-    backend = DuckDBBackend()
-    backend.create_staging_table(_ReferencedParentTableCls, duckdb_session)
+def test_duckdb_backend_merge_replace_rejects_referenced_table_with_own_fk(duckdb_session, duckdb_backend):
+    """merge_replace must reject a still-referenced row up front, before
+    touching any data, rather than partway through a batch.
+    """
+    duckdb_backend.create_staging_table(_ReferencedParentTableCls, duckdb_session)
     staging = _ReferencedParentTableCls.get_staging_table(
-        duckdb_session, staging_schema_tag=backend.staging_schema_tag
+        duckdb_session, staging_schema_tag=duckdb_backend.staging_schema_tag
     )
 
     duckdb_session.execute(sa.insert(UnreferencedGrandparentTable), [{"id": 1, "name": "g1"}])
@@ -264,4 +313,110 @@ def test_duckdb_backend_merge_replace_rejects_referenced_table_with_own_fk(duckd
     duckdb_session.execute(sa.insert(staging), [{"id": 1, "grandparent_id": 1, "name": "p1-updated"}])
 
     with pytest.raises(ValueError, match="referenced_parent_table"):
-        backend.merge_replace(_ReferencedParentTableCls, duckdb_session, ["id"])
+        duckdb_backend.merge_replace(_ReferencedParentTableCls, duckdb_session, ["id"])
+
+
+@pytest.mark.duckdb
+@pytest.mark.db_dialect
+def test_duckdb_backend_merge_insert_batch_validation_prevents_partial_commit(
+    duckdb_session_with_committed_schema, duckdb_backend,
+):
+    """merge_batch_size=1 commits each row separately. Row 3's own batch
+    (the orphan) must be caught and never committed, while rows 1 and 2,
+    already validated and committed in their own batches, survive.
+    """
+    session = duckdb_session_with_committed_schema
+    duckdb_backend.create_staging_table(_CycleATableCls, session)
+    staging = _CycleATableCls.get_staging_table(session, staging_schema_tag=duckdb_backend.staging_schema_tag)
+    session.execute(sa.insert(staging), [{"id": 1, "b_id": None}, {"id": 2, "b_id": None}, {"id": 3, "b_id": 999}])
+
+    with pytest.raises(DeferredForeignKeyViolationError, match="cycle_a_table"):
+        duckdb_backend.merge_insert(_CycleATableCls, session, merge_batch_size=1)
+
+    session.rollback()
+    remaining = session.execute(sa.select(CycleATable.id).order_by(CycleATable.id)).scalars().all()
+    assert remaining == [1, 2]
+
+
+@pytest.mark.duckdb
+@pytest.mark.db_dialect
+def test_duckdb_backend_merge_insert_batch_validation_is_a_no_op_without_deferred_fks(duckdb_session):
+    """A table with no deferred/unenforced FK must not pay for a validation
+    query on every batch commit.
+    """
+    backend = DuckDBBackend()
+    backend.create_staging_table(_ComputedTableCls, duckdb_session)
+    staging = _ComputedTableCls.get_staging_table(duckdb_session, staging_schema_tag=backend.staging_schema_tag)
+    duckdb_session.execute(sa.insert(staging), [{"id": i, "name": f"n{i}"} for i in range(5)])
+
+    backend.merge_insert(_ComputedTableCls, duckdb_session, merge_batch_size=1)
+
+    rows = duckdb_session.execute(sa.select(ComputedColumnTable.id)).scalars().all()
+    assert sorted(rows) == list(range(5))
+
+
+def test_duckdb_backend_deferred_fk_constraints_without_resolved_raises_on_cross_schema_fk():
+    """`resolved` is required unconditionally, not just when a cross-schema
+    FK is actually present: a cheaper "cyclic-only" fallback could still
+    misclassify an unrelated cross-schema FK elsewhere in the metadata.
+    """
+    backend = DuckDBBackend()
+
+    with pytest.raises(ValueError, match="resolved"):
+        backend.deferred_fk_constraints(_VocabReferencingTableCls)
+
+
+def test_duckdb_backend_deferred_fk_constraints_without_resolved_raises_even_for_a_cyclic_fk():
+    """Same requirement for a purely cyclic FK that never crosses a schema
+    tag, since the method has no cheap way to tell that in advance.
+    """
+    backend = DuckDBBackend()
+
+    with pytest.raises(ValueError, match="resolved"):
+        backend.deferred_fk_constraints(_CycleATableCls)
+
+
+@pytest.mark.duckdb
+@pytest.mark.db_dialect
+def test_duckdb_backend_deferred_fk_constraints_classifies_cross_schema_fk_with_resolved(
+    duckdb_split_schema_session,
+):
+    """With `resolved`, the omitted cross-schema key is classified the same
+    as a cyclic one: unenforced.
+    """
+    resolved, _session = duckdb_split_schema_session
+    backend = DuckDBBackend(resolved=resolved)
+
+    fks = backend.deferred_fk_constraints(_VocabReferencingTableCls)
+
+    assert [c.name for c in fks[0].columns] == ["vocab_id"]
+
+
+@pytest.mark.duckdb
+@pytest.mark.db_dialect
+def test_duckdb_backend_validate_deferred_fks_catches_a_cross_schema_orphan(duckdb_split_schema_session):
+    """The cross-schema key was never created, so an orphaned reference
+    inserts without error; only the anti-join check catches it.
+    """
+    resolved, session = duckdb_split_schema_session
+    backend = DuckDBBackend(resolved=resolved)
+    session.execute(sa.insert(VocabReferencingTable), [{"id": 1, "vocab_id": 999}])
+
+    with pytest.raises(DeferredForeignKeyViolationError, match="vocab_referencing_table"):
+        backend.validate_deferred_fks(_VocabReferencingTableCls, session)
+
+
+@pytest.mark.duckdb
+@pytest.mark.db_dialect
+def test_duckdb_backend_tables_referencing_excludes_an_omitted_cross_schema_fk(duckdb_split_schema_session):
+    """VocabReferencingTable's foreign key into VocabSchemaTable was never
+    created, so check_replace_feasible() must not treat it as a real
+    referencing table.
+    """
+    resolved, session = duckdb_split_schema_session
+    backend = DuckDBBackend(resolved=resolved)
+    session.execute(sa.insert(VocabSchemaTable), [{"id": 1, "name": "v1"}])
+    session.execute(sa.insert(VocabReferencingTable), [{"id": 1, "vocab_id": 1}])
+
+    assert backend._tables_referencing(VocabSchemaTable.__table__) == set()
+    assert backend._is_referenced_by_existing_rows(VocabSchemaTable.__table__, session) is False
