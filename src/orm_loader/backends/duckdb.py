@@ -15,6 +15,7 @@ from oa_configurator import (
 from sqlalchemy.schema import CreateSequence, DropSequence, DropTable
 from sqlalchemy.sql.compiler import IdentifierPreparer
 
+from ..helpers.engines import dispose_engines
 from .base import BackendCapabilities, DatabaseBackend, DeferredForeignKeyViolationError, Dialect
 
 if TYPE_CHECKING:
@@ -153,9 +154,7 @@ class DuckDBBackend(DatabaseBackend):
                     condition = sa.tuple_(*remote_cols).in_(tuple(value) for value in local_values)
                 existing = {tuple(row) for row in remote_conn.execute(sa.select(*remote_cols).where(condition))}
         finally:
-            primary_engine.dispose()
-            if vocab_engine is not primary_engine:
-                vocab_engine.dispose()
+            dispose_engines(primary_engine, vocab_engine)
 
         missing = [tuple(value) for value in local_values if tuple(value) not in existing]
         if missing:

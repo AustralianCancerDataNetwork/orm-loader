@@ -17,6 +17,7 @@ from oa_configurator import (
     without_cross_engine_foreign_keys,
 )
 
+from .engines import dispose_engines
 from .metadata import Base
 
 logger = logging.getLogger(__name__)
@@ -209,9 +210,7 @@ def create_db(resolved: ResolvedDatabase, *, bindable: Bindable | None = None) -
         if owned:
             # _resolve_binds() only returns Engine instances on this path
             # (bindable is None): create_engines()/create_engine().
-            cast(sa.engine.Engine, primary_bind).dispose()
-            if vocab_bind is not primary_bind:
-                cast(sa.engine.Engine, vocab_bind).dispose()
+            dispose_engines(cast(sa.engine.Engine, primary_bind), cast(sa.engine.Engine, vocab_bind))
 
 
 def bootstrap(
