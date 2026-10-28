@@ -107,6 +107,15 @@ class FakeBackend(DatabaseBackend):
     ) -> None:
         return None
 
+    def _pagination_column(
+        self, _table_cls: Type[CSVTableProtocol], _staging: sa.Table
+    ) -> sa.ColumnElement[int]:
+        return sa.literal_column("rowid")
+
+    @property
+    def _commits_between_pagination_batches(self) -> bool:
+        return True
+
     @staticmethod
     def _normalize_fk_check_state(previous_state: str | int) -> str | int:
         return previous_state
@@ -223,28 +232,28 @@ def test_insertable_column_names_exclude_computed_columns():
     assert backend._insertable_column_names(_ComputedTableCls) == ["id", "name"]
 
 
-def test_bulk_load_context_toggles_fk_and_restores(session):
+def test_bulk_load_context_toggles_fk_and_restores(sqlite_session):
     backend = FakeBackend()
 
-    with backend.bulk_load_context(session):
+    with backend.bulk_load_context(sqlite_session):
         pass
 
     assert backend.calls == [
-        ("disable_fk_check", session),
+        ("disable_fk_check", sqlite_session),
         ("restore_fk_check", "enabled"),
     ]
 
 
-def test_bulk_load_context_without_fk_toggle(session):
+def test_bulk_load_context_without_fk_toggle(sqlite_session):
     backend = FakeBackend()
 
-    with backend.bulk_load_context(session, disable_fk=False):
+    with backend.bulk_load_context(sqlite_session, disable_fk=False):
         pass
 
     assert backend.calls == []
 
 
-def test_bulk_load_context_raises_when_capability_missing(session):
+def test_bulk_load_context_raises_when_capability_missing(sqlite_session):
     class NoFKBackend(FakeBackend):
         @property
         def capabilities(self) -> BackendCapabilities:
@@ -253,19 +262,19 @@ def test_bulk_load_context_raises_when_capability_missing(session):
     backend = NoFKBackend()
 
     with pytest.raises(NotImplementedError, match="does not support foreign key toggling"):
-        with backend.bulk_load_context(session):
+        with backend.bulk_load_context(sqlite_session):
             pass
 
 
-def test_bulk_load_context_rolls_back_and_restores(session):
+def test_bulk_load_context_rolls_back_and_restores(sqlite_session):
     backend = FakeBackend()
 
     with pytest.raises(RuntimeError, match="boom"):
-        with backend.bulk_load_context(session):
+        with backend.bulk_load_context(sqlite_session):
             raise RuntimeError("boom")
 
     assert backend.calls == [
-        ("disable_fk_check", session),
+        ("disable_fk_check", sqlite_session),
         ("restore_fk_check", "enabled"),
     ]
 
@@ -280,17 +289,17 @@ def test_backends_package_exports():
 
 
 def test_resolve_backend_for_sqlite_engine_and_session():
-    engine = sa.create_engine("sqlite:///:memory:", future=True)
-    session = so.Session(engine)
+    sqlite_engine = sa.create_engine("sqlite:///:memory:", future=True)
+    sqlite_session = so.Session(sqlite_engine)
 
     try:
-        engine_backend = resolve_backend(engine)
-        session_backend = resolve_backend(session)
+        engine_backend = resolve_backend(sqlite_engine)
+        session_backend = resolve_backend(sqlite_session)
 
         assert engine_backend.name == "sqlite"
         assert session_backend.name == "sqlite"
     finally:
-        session.close()
+        sqlite_session.close()
 
 
 def test_resolve_backend_raises_for_unknown_dialect():

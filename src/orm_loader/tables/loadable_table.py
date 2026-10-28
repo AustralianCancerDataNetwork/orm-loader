@@ -1,5 +1,6 @@
 # pyright: reportPrivateUsage=false
 import logging
+from collections.abc import Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from time import perf_counter
@@ -7,7 +8,7 @@ from typing import Any, Generator, Type
 
 import sqlalchemy as sa
 import sqlalchemy.orm as so
-from oa_configurator import Dialect, physical_schema_of
+from oa_configurator import Dialect, ResolvedDatabase, physical_schema_of
 from sqlalchemy.exc import InvalidRequestError, UnboundExecutionError
 
 from ..backends.resolve import resolve_backend
@@ -373,6 +374,9 @@ class CSVLoadableTableInterface(ORMTableBase):
         index_strategy: str = "auto",
         merge_batch_size: int | None = None,
         staging_schema_tag: str | None = None,
+        validate_deferred_fks: bool = True,
+        resolved: ResolvedDatabase | None = None,
+        physical_schemas: Mapping[str, str | None] | None = None,
     ) -> int:
 
         """
@@ -413,6 +417,23 @@ class CSVLoadableTableInterface(ORMTableBase):
             means no schema qualification (backend-default behavior).
             Threaded through every internal step of the load lifecycle so
             they all resolve the same backend/schema.
+        validate_deferred_fks
+            After merging, run an anti-join check for any FK this backend's
+            DB can't enforce itself (see DatabaseBackend.validate_deferred_fks()).
+            Also run before every intermediate commit a batched merge makes,
+            so a violation is caught before that batch commits rather than
+            only after the whole load, when an earlier batch's commit can
+            no longer be rolled back.
+        resolved
+            Topology this table's engine(s) were resolved from. Required on
+            DuckDB whenever table_cls has any foreign key at all, to
+            classify each as enforced or omitted via oa-configurator's
+            ``unenforced_foreign_keys()``; omitting it raises rather than
+            guessing. Ignored by every other backend, and by a DuckDB
+            table with no foreign keys.
+        physical_schemas
+            A schema tag's physical name beyond resolved's own configured
+            ones. Forwarded alongside resolved.
 
         Returns
         -------
@@ -444,6 +465,14 @@ class CSVLoadableTableInterface(ORMTableBase):
                     f"'insert_if_empty'"
                 )
 
+        if merge_strategy == "replace":
+            backend = resolve_backend(session, staging_schema_tag=staging_schema_tag, mapper=cls)
+            if backend.resolve_index_strategy(index_strategy) == "keep":
+                backend._require_capability(
+                    "supports_replace_with_kept_indexes",
+                    "merge_strategy='replace' with index_strategy='keep'",
+                )
+
         loader_context = LoaderContext(
             tableclass=cls,
             session=session,
@@ -465,15 +494,29 @@ class CSVLoadableTableInterface(ORMTableBase):
 
         # Merge staging to target (Wrapped in our index dropper!)
         logger.info(f"Table `{cls.__tablename__}`: Merging staging data into target table")
-        with cls.manage_indices(session, index_strategy=index_strategy, staging_schema_tag=staging_schema_tag):
-            cls.merge_from_staging(
-                session,
-                merge_strategy=merge_strategy,
-                merge_batch_size=merge_batch_size,
-                staging_schema_tag=staging_schema_tag,
-            )
-
-        cls.drop_staging_table(session, staging_schema_tag=staging_schema_tag)
+        try:
+            with cls.manage_indices(session, index_strategy=index_strategy, staging_schema_tag=staging_schema_tag):
+                cls.merge_from_staging(
+                    session,
+                    merge_strategy=merge_strategy,
+                    merge_batch_size=merge_batch_size,
+                    staging_schema_tag=staging_schema_tag,
+                    validate_deferred_fks=validate_deferred_fks,
+                    resolved=resolved,
+                    physical_schemas=physical_schemas,
+                )
+                if validate_deferred_fks:
+                    logger.info(f"Table `{cls.__tablename__}`: Validating deferred foreign keys.")
+                    backend = resolve_backend(
+                        session,
+                        staging_schema_tag=staging_schema_tag,
+                        mapper=cls,
+                        resolved=resolved,
+                        physical_schemas=physical_schemas,
+                    )
+                    backend.validate_deferred_fks(cls, session)
+        finally:
+            cls.drop_staging_table(session, staging_schema_tag=staging_schema_tag)
 
         logger.info(f"Table `{cls.__tablename__}`: Successfully finished ingestion. Total rows: {total}")
         return total
@@ -502,6 +545,9 @@ class CSVLoadableTableInterface(ORMTableBase):
         *,
         merge_batch_size: int | None = None,
         staging_schema_tag: str | None = None,
+        validate_deferred_fks: bool = True,
+        resolved: ResolvedDatabase | None = None,
+        physical_schemas: Mapping[str, str | None] | None = None,
     ):
         """
         Merge data from the staging table into the target table.
@@ -516,12 +562,24 @@ class CSVLoadableTableInterface(ORMTableBase):
         staging_schema_tag
             schema_translate_map tag the staging table lives in. ``None``
             means no schema qualification (backend-default behavior).
+        validate_deferred_fks
+            Forwarded to the backend's merge methods, which validate
+            deferred FKs before every intermediate commit a batched merge
+            makes. See ``load_csv()``.
+        resolved, physical_schemas
+            Forwarded to ``resolve_backend()``. See ``load_csv()``.
         """
         target = cls.__tablename__
         pk_cols = cls.pk_names()
 
         _require_bind(session, cls)
-        backend = resolve_backend(session, staging_schema_tag=staging_schema_tag, mapper=cls)
+        backend = resolve_backend(
+            session,
+            staging_schema_tag=staging_schema_tag,
+            mapper=cls,
+            resolved=resolved,
+            physical_schemas=physical_schemas,
+        )
         target_empty_confirmed = False
         if merge_strategy in {"replace", "upsert"}:
             logger.info(
@@ -544,14 +602,18 @@ class CSVLoadableTableInterface(ORMTableBase):
         if merge_strategy == "replace":
             logger.info(f"Table `{target}`: Merge replace delete phase starting.")
             delete_started = perf_counter()
-            backend.merge_replace(cls, session, pk_cols, merge_batch_size=merge_batch_size)
+            backend.merge_replace(
+                cls, session, pk_cols, merge_batch_size=merge_batch_size, validate_deferred_fks=validate_deferred_fks
+            )
             logger.info(
                 f"Table `{target}`: Merge replace delete phase completed in "
                 f"{_format_elapsed(perf_counter() - delete_started)}."
             )
             logger.info(f"Table `{target}`: Merge insert phase starting.")
             insert_started = perf_counter()
-            backend.merge_insert(cls, session, merge_batch_size=merge_batch_size)
+            backend.merge_insert(
+                cls, session, merge_batch_size=merge_batch_size, validate_deferred_fks=validate_deferred_fks
+            )
             logger.info(
                 f"Table `{target}`: Merge insert phase completed in "
                 f"{_format_elapsed(perf_counter() - insert_started)}."
@@ -559,7 +621,9 @@ class CSVLoadableTableInterface(ORMTableBase):
         elif merge_strategy == "upsert":
             logger.info(f"Table `{target}`: Merge upsert phase starting.")
             upsert_started = perf_counter()
-            backend.merge_upsert(cls, session, pk_cols, merge_batch_size=merge_batch_size)
+            backend.merge_upsert(
+                cls, session, pk_cols, merge_batch_size=merge_batch_size, validate_deferred_fks=validate_deferred_fks
+            )
             logger.info(
                 f"Table `{target}`: Merge upsert phase completed in "
                 f"{_format_elapsed(perf_counter() - upsert_started)}."
@@ -582,7 +646,9 @@ class CSVLoadableTableInterface(ORMTableBase):
 
             logger.info(f"Table `{target}`: Merge insert-if-empty phase starting.")
             insert_started = perf_counter()
-            backend.merge_insert(cls, session, merge_batch_size=merge_batch_size)
+            backend.merge_insert(
+                cls, session, merge_batch_size=merge_batch_size, validate_deferred_fks=validate_deferred_fks
+            )
             logger.info(
                 f"Table `{target}`: Merge insert-if-empty phase completed in "
                 f"{_format_elapsed(perf_counter() - insert_started)}."

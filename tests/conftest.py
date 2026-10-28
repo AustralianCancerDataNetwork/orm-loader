@@ -17,18 +17,18 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 
 
 @pytest.fixture
-def engine():
+def sqlite_engine():
     with isolated_test_database(
         OrmLoaderConfig, "test_orm_db_sqlite", dialect="sqlite",
     ) as db:
-        engine = db.connection.engine
-        Base.metadata.create_all(engine)
-        yield engine
+        sqlite_engine = db.connection.engine
+        Base.metadata.create_all(sqlite_engine)
+        yield sqlite_engine
 
 
 @pytest.fixture
-def session(engine):
-    with so.Session(engine) as s:
+def sqlite_session(sqlite_engine):
+    with so.Session(sqlite_engine) as s:
         yield s
 
 
@@ -58,6 +58,31 @@ def pg_session(pg_db):
     return pg_db.session
 
 
+# ---------------------------------------------------------------------------
+# DuckDB fixtures
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def duckdb_db(request):
+    """Isolated DuckDB test database, a fresh disposable tempfile per test.
+    Schema-claimed the same way as pg_db: DuckDB genuinely supports schemas,
+    unlike SQLite."""
+    with isolated_test_database(
+        OrmLoaderConfig, "test_orm_db_duckdb", dialect="duckdb", request=request,
+        schema_claims=[staging_schema_claim()],
+    ) as db:
+        yield db
+
+
+@pytest.fixture
+def duckdb_session(duckdb_db):
+    """The standard fixture for tests needing real tables ready to query:
+    creates the staging schema and Base.metadata, then returns duckdb_db.session."""
+    conn = duckdb_db.connection
+    Base.metadata.create_all(conn)
+    return duckdb_db.session
+
+
 @contextmanager
 def schema_scoped_session(
     pg_db, table: sa.Table, *, prefix: str, split_roles: Iterable[Role] = ()
@@ -69,5 +94,5 @@ def schema_scoped_session(
     ) as scoped:
         with scoped.engine.begin() as conn:
             table.create(conn, checkfirst=True)
-        with so.Session(scoped.engine) as session:
-            yield scoped, session
+        with so.Session(scoped.engine) as sqlite_session:
+            yield scoped, sqlite_session

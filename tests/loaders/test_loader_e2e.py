@@ -10,6 +10,7 @@ import sqlalchemy.orm as so
 from oa_configurator import Role as SchemaRole
 
 from orm_loader.backends import resolve_backend
+from orm_loader.backends.base import DeferredForeignKeyViolationError
 from orm_loader.helpers import IngestError
 from orm_loader.loaders.data.converters import _COLUMN_CAST_RULES, register_column_cast_rule
 from orm_loader.loaders.data_classes import _clean_nulls
@@ -19,6 +20,7 @@ from orm_loader.tables.typing import CSVTableProtocol
 from tests.models import (
     Base,
     CompositeTable,
+    CycleATable,
     EnumTable,
     Flag,
     ImpliedEnumTable,
@@ -36,6 +38,7 @@ _CompositeTable = cast(Type[CSVTableProtocol], CompositeTable)
 _EnumTable = cast(Type[CSVTableProtocol], EnumTable)
 _ImpliedEnumTable = cast(Type[CSVTableProtocol], ImpliedEnumTable)
 _VocabSchemaTable = cast(Type[CSVTableProtocol], VocabSchemaTable)
+_CycleATable = cast(Type[CSVTableProtocol], CycleATable)
 
 
 @pytest.fixture(autouse=True)
@@ -45,7 +48,7 @@ def _clear_column_cast_rules():
     _COLUMN_CAST_RULES.clear()
 
 
-def test_initial_csv_load(session, tmp_path):
+def test_initial_csv_load(sqlite_session, tmp_path):
     csv_path = tmp_path / "test_table.csv"
 
     pd.DataFrame(
@@ -59,16 +62,16 @@ def test_initial_csv_load(session, tmp_path):
     loader = PandasLoader()
 
     inserted = _SimpleTable.load_csv(
-        session,
+        sqlite_session,
         csv_path,
         dedupe=False,
         loader=loader,
     )
-    session.commit()
+    sqlite_session.commit()
 
     assert inserted == 3
 
-    rows = session.execute(sa.select(SimpleTable).order_by(SimpleTable.id)).scalars().all()
+    rows = sqlite_session.execute(sa.select(SimpleTable).order_by(SimpleTable.id)).scalars().all()
 
     assert [(r.id, r.name) for r in rows] == [
         (1, "alpha"),
@@ -77,7 +80,7 @@ def test_initial_csv_load(session, tmp_path):
     ]
 
 
-def test_initial_csv_load_for_a_non_primary_schema_table(session, tmp_path):
+def test_initial_csv_load_for_a_non_primary_schema_table(sqlite_session, tmp_path):
     """SQLite has no real schema concept, so every Role folds to None
     on this connection (see oa_configurator's SQLiteTestStrategy).
     A VOCAB-tagged table's load path must not error out just because
@@ -91,20 +94,20 @@ def test_initial_csv_load_for_a_non_primary_schema_table(session, tmp_path):
     ).to_csv(csv_path, index=False, sep="\t")
 
     inserted = _VocabSchemaTable.load_csv(
-        session, csv_path, dedupe=False, loader=PandasLoader()
+        sqlite_session, csv_path, dedupe=False, loader=PandasLoader()
     )
-    session.commit()
+    sqlite_session.commit()
 
     assert inserted == 2
 
-    rows = session.execute(
+    rows = sqlite_session.execute(
         sa.select(VocabSchemaTable).order_by(VocabSchemaTable.id)
     ).scalars().all()
 
     assert [(r.id, r.name) for r in rows] == [(1, "alpha"), (2, "beta")]
 
 
-def test_replace_merge_strategy(session, tmp_path):
+def test_replace_merge_strategy(sqlite_session, tmp_path):
     csv_path = tmp_path / "test_table.csv"
 
     # Initial load
@@ -119,12 +122,12 @@ def test_replace_merge_strategy(session, tmp_path):
     loader = PandasLoader()
 
     _SimpleTable.load_csv(
-        session,
+        sqlite_session,
         csv_path,
         dedupe=False,
         loader=loader,
     )
-    session.commit()
+    sqlite_session.commit()
 
     # Replace rows 2 and 3
     pd.DataFrame(
@@ -135,17 +138,17 @@ def test_replace_merge_strategy(session, tmp_path):
     ).to_csv(csv_path, index=False, sep="\t")
 
     replaced = _SimpleTable.load_csv(
-        session,
+        sqlite_session,
         csv_path,
         dedupe=False,
         loader=loader,
         merge_strategy="replace",
     )
-    session.commit()
+    sqlite_session.commit()
 
     assert replaced == 2
 
-    rows = session.execute(sa.select(SimpleTable).order_by(SimpleTable.id)).scalars().all()
+    rows = sqlite_session.execute(sa.select(SimpleTable).order_by(SimpleTable.id)).scalars().all()
 
     assert [(r.id, r.name) for r in rows] == [
         (1, "alpha"),
@@ -154,27 +157,27 @@ def test_replace_merge_strategy(session, tmp_path):
     ]
 
 
-def test_empty_csv_is_noop(session, tmp_path):
+def test_empty_csv_is_noop(sqlite_session, tmp_path):
     csv_path = tmp_path / "test_table.csv"
     csv_path.touch()
 
     loader = PandasLoader()
 
     inserted = _SimpleTable.load_csv(
-        session,
+        sqlite_session,
         csv_path,
         dedupe=False,
         loader=loader,
     )
-    session.commit()
+    sqlite_session.commit()
 
     assert inserted == 0
 
-    rows = session.execute(sa.select(SimpleTable)).scalars().all()
+    rows = sqlite_session.execute(sa.select(SimpleTable)).scalars().all()
     assert rows == []
 
 
-def test_required_column_violation_drops_rows(session, tmp_path):
+def test_required_column_violation_drops_rows(sqlite_session, tmp_path):
     csv = tmp_path / "required_table.csv"
     pd.DataFrame(
         [
@@ -184,17 +187,17 @@ def test_required_column_violation_drops_rows(session, tmp_path):
     ).to_csv(csv, index=False)
 
     inserted = _RequiredTable.load_csv(
-        session,
+        sqlite_session,
         csv,
         loader=PandasLoader(),
         dedupe=False,
     )
-    session.commit()
+    sqlite_session.commit()
 
     assert inserted == 1
 
 
-def test_required_column_entirely_missing_raises(session, tmp_path):
+def test_required_column_entirely_missing_raises(sqlite_session, tmp_path):
     # Distinct from test_required_column_violation_drops_rows above: here
     # the required column isn't present with a bad value, it's absent from
     # the source file entirely. No merge strategy supports a partial-column
@@ -205,14 +208,14 @@ def test_required_column_entirely_missing_raises(session, tmp_path):
 
     with pytest.raises(IngestError, match="required_table.*name"):
         _RequiredTable.load_csv(
-            session,
+            sqlite_session,
             csv,
             loader=PandasLoader(),
             dedupe=False,
         )
 
 
-def test_enum_column_cast_rule_resolves_known_and_drops_unknown(session, tmp_path):
+def test_enum_column_cast_rule_resolves_known_and_drops_unknown(sqlite_session, tmp_path):
     # sa.Enum is itself a subclass of sa.String, so without a registered
     # column-specific rule this would just pass every raw value through
     # untouched via the existing String rule -- no membership check at all.
@@ -227,15 +230,15 @@ def test_enum_column_cast_rule_resolves_known_and_drops_unknown(session, tmp_pat
         ]
     ).to_csv(csv, index=False)
 
-    total = _EnumTable.load_csv(session, csv, loader=PandasLoader(), dedupe=False)
-    session.commit()
+    total = _EnumTable.load_csv(sqlite_session, csv, loader=PandasLoader(), dedupe=False)
+    sqlite_session.commit()
 
     assert total == 3
-    rows = dict(session.execute(sa.select(EnumTable.id, EnumTable.role)).all())
+    rows = dict(sqlite_session.execute(sa.select(EnumTable.id, EnumTable.role)).all())
     assert rows == {1: Role.FIRST_AUTHOR, 2: None, 3: Role.LAST_AUTHOR}
 
 
-def test_implied_enum_on_plain_string_column(session, tmp_path):
+def test_implied_enum_on_plain_string_column(sqlite_session, tmp_path):
     # The OMOP CDM concept.standard_concept/invalid_reason shape: a plain
     # String(1) column with no type-level enum signal at all -- sa.Enum-keyed
     # dispatch could never reach this, only a per-column rule can. This column
@@ -261,15 +264,15 @@ def test_implied_enum_on_plain_string_column(session, tmp_path):
         ]
     ).to_csv(csv, index=False)
 
-    total = _ImpliedEnumTable.load_csv(session, csv, loader=PandasLoader(), dedupe=False)
-    session.commit()
+    total = _ImpliedEnumTable.load_csv(sqlite_session, csv, loader=PandasLoader(), dedupe=False)
+    sqlite_session.commit()
 
     assert total == 3
-    rows = dict(session.execute(sa.select(ImpliedEnumTable.id, ImpliedEnumTable.flag)).all())
+    rows = dict(sqlite_session.execute(sa.select(ImpliedEnumTable.id, ImpliedEnumTable.flag)).all())
     assert rows == {1: "S", 2: None, 3: "C"}
 
 
-def test_composite_pk_dedup(session, tmp_path):
+def test_composite_pk_dedup(sqlite_session, tmp_path):
     csv = tmp_path / "composite_table.csv"
     pd.DataFrame(
         [
@@ -280,12 +283,12 @@ def test_composite_pk_dedup(session, tmp_path):
     ).to_csv(csv, index=False)
 
     inserted = _CompositeTable.load_csv(
-        session,
+        sqlite_session,
         csv,
         loader=PandasLoader(),
         dedupe=True,
     )
-    session.commit()
+    sqlite_session.commit()
 
     assert inserted == 2
 
@@ -313,7 +316,7 @@ def test_composite_pk_dedup(session, tmp_path):
         ),
     ],
 )
-def test_merge_strategies(session, tmp_path, merge_strategy, expected_rows, expected_inserted):
+def test_merge_strategies(sqlite_session, tmp_path, merge_strategy, expected_rows, expected_inserted):
     csv_path = tmp_path / "test_table.csv"
 
     pd.DataFrame(
@@ -325,8 +328,8 @@ def test_merge_strategies(session, tmp_path, merge_strategy, expected_rows, expe
     ).to_csv(csv_path, index=False, sep="\t")
 
     loader = PandasLoader()
-    SimpleTable.load_csv(session, csv_path, dedupe=False, loader=loader)
-    session.commit()
+    SimpleTable.load_csv(sqlite_session, csv_path, dedupe=False, loader=loader)
+    sqlite_session.commit()
 
     pd.DataFrame(
         [
@@ -336,18 +339,18 @@ def test_merge_strategies(session, tmp_path, merge_strategy, expected_rows, expe
     ).to_csv(csv_path, index=False, sep="\t")
 
     inserted = SimpleTable.load_csv(
-        session,
+        sqlite_session,
         csv_path,
         dedupe=False,
         loader=loader,
         merge_strategy=merge_strategy,
     )
-    session.commit()
+    sqlite_session.commit()
 
     assert inserted == expected_inserted
 
     rows = (
-        session.execute(sa.select(SimpleTable).order_by(SimpleTable.id, SimpleTable.name))
+        sqlite_session.execute(sa.select(SimpleTable).order_by(SimpleTable.id, SimpleTable.name))
         .scalars()
         .all()
     )
@@ -355,7 +358,7 @@ def test_merge_strategies(session, tmp_path, merge_strategy, expected_rows, expe
     assert [(r.id, r.name) for r in rows] == expected_rows
 
 
-def test_insert_if_empty_merge_strategy(session, tmp_path):
+def test_insert_if_empty_merge_strategy(sqlite_session, tmp_path):
     csv_path = tmp_path / "test_table.csv"
 
     pd.DataFrame(
@@ -367,17 +370,17 @@ def test_insert_if_empty_merge_strategy(session, tmp_path):
 
     loader = PandasLoader()
     inserted = _SimpleTable.load_csv(
-        session,
+        sqlite_session,
         csv_path,
         dedupe=False,
         loader=loader,
         merge_strategy="insert_if_empty",
     )
-    session.commit()
+    sqlite_session.commit()
 
     assert inserted == 2
 
-    rows = session.execute(sa.select(SimpleTable).order_by(SimpleTable.id)).scalars().all()
+    rows = sqlite_session.execute(sa.select(SimpleTable).order_by(SimpleTable.id)).scalars().all()
 
     assert [(r.id, r.name) for r in rows] == [
         (1, "alpha"),
@@ -385,33 +388,33 @@ def test_insert_if_empty_merge_strategy(session, tmp_path):
     ]
 
 
-def test_insert_if_empty_raises_on_non_empty_target(session, engine, tmp_path):
+def test_insert_if_empty_raises_on_non_empty_target(sqlite_session, sqlite_engine, tmp_path):
     csv_path = tmp_path / "test_table.csv"
 
     pd.DataFrame([{"id": 1, "name": "alpha"}]).to_csv(csv_path, index=False, sep="\t")
 
     loader = PandasLoader()
-    _SimpleTable.load_csv(session, csv_path, dedupe=False, loader=loader)
-    session.commit()
+    _SimpleTable.load_csv(sqlite_session, csv_path, dedupe=False, loader=loader)
+    sqlite_session.commit()
 
     pd.DataFrame([{"id": 2, "name": "beta"}]).to_csv(csv_path, index=False, sep="\t")
 
     with pytest.raises(ValueError, match="is not empty; cannot use merge strategy 'insert_if_empty'"):
         _SimpleTable.load_csv(
-            session,
+            sqlite_session,
             csv_path,
             dedupe=False,
             loader=loader,
             merge_strategy="insert_if_empty",
         )
 
-    inspector = sa.inspect(engine)
-    staging_name = resolve_backend(engine).staging_name_for_table(SimpleTable.__tablename__)
+    inspector = sa.inspect(sqlite_engine)
+    staging_name = resolve_backend(sqlite_engine).staging_name_for_table(SimpleTable.__tablename__)
     assert not inspector.has_table(staging_name)
 
 
 @pytest.mark.parametrize("merge_strategy", ["replace", "upsert"])
-def test_empty_target_routes_merge_to_insert_if_empty(session, tmp_path, caplog, merge_strategy):
+def test_empty_target_routes_merge_to_insert_if_empty(sqlite_session, tmp_path, caplog, merge_strategy):
     csv_path = tmp_path / "test_table.csv"
 
     pd.DataFrame(
@@ -424,17 +427,17 @@ def test_empty_target_routes_merge_to_insert_if_empty(session, tmp_path, caplog,
     caplog.set_level(logging.INFO, logger="orm_loader.tables.loadable_table")
 
     inserted = _SimpleTable.load_csv(
-        session,
+        sqlite_session,
         csv_path,
         dedupe=False,
         loader=PandasLoader(),
         merge_strategy=merge_strategy,
     )
-    session.commit()
+    sqlite_session.commit()
 
     assert inserted == 2
 
-    rows = session.execute(sa.select(SimpleTable).order_by(SimpleTable.id)).scalars().all()
+    rows = sqlite_session.execute(sa.select(SimpleTable).order_by(SimpleTable.id)).scalars().all()
     assert [(r.id, r.name) for r in rows] == [
         (1, "alpha"),
         (2, "beta"),
@@ -454,25 +457,25 @@ def test_empty_target_routes_merge_to_insert_if_empty(session, tmp_path, caplog,
     assert not any("Merge upsert phase starting." in message for message in messages)
 
 
-def test_staging_table_is_created_and_dropped(session, engine, tmp_path):
+def test_staging_table_is_created_and_dropped(sqlite_session, sqlite_engine, tmp_path):
     csv_path = tmp_path / "test_table.csv"
 
     pd.DataFrame([{"id": 1, "name": "alpha"}]).to_csv(csv_path, index=False)
 
     _SimpleTable.load_csv(
-        session,
+        sqlite_session,
         csv_path,
         loader=PandasLoader(),
         dedupe=False,
     )
-    session.commit()
+    sqlite_session.commit()
 
-    inspector = sa.inspect(engine)
-    staging_name = resolve_backend(engine).staging_name_for_table(SimpleTable.__tablename__)
+    inspector = sa.inspect(sqlite_engine)
+    staging_name = resolve_backend(sqlite_engine).staging_name_for_table(SimpleTable.__tablename__)
     assert not inspector.has_table(staging_name)
 
 
-def test_composite_pk_replace_merge(session, tmp_path):
+def test_composite_pk_replace_merge(sqlite_session, tmp_path):
     csv = tmp_path / "composite_table.csv"
 
     pd.DataFrame(
@@ -482,8 +485,8 @@ def test_composite_pk_replace_merge(session, tmp_path):
         ]
     ).to_csv(csv, index=False)
 
-    CompositeTable.load_csv(session, csv, loader=PandasLoader())
-    session.commit()
+    CompositeTable.load_csv(sqlite_session, csv, loader=PandasLoader())
+    sqlite_session.commit()
 
     pd.DataFrame(
         [
@@ -492,15 +495,15 @@ def test_composite_pk_replace_merge(session, tmp_path):
     ).to_csv(csv, index=False)
 
     CompositeTable.load_csv(
-        session,
+        sqlite_session,
         csv,
         loader=PandasLoader(),
         merge_strategy="replace",
     )
-    session.commit()
+    sqlite_session.commit()
 
     rows = (
-        session.execute(sa.select(CompositeTable).order_by(CompositeTable.a, CompositeTable.b))
+        sqlite_session.execute(sa.select(CompositeTable).order_by(CompositeTable.a, CompositeTable.b))
         .scalars()
         .all()
     )
@@ -511,13 +514,13 @@ def test_composite_pk_replace_merge(session, tmp_path):
     ]
 
 
-def test_filename_must_match_tablename(session, tmp_path):
+def test_filename_must_match_tablename(sqlite_session, tmp_path):
     csv = tmp_path / "wrong_name.csv"
     pd.DataFrame([{"id": 1, "name": "x"}]).to_csv(csv, index=False)
 
     with pytest.raises(ValueError, match="does not match table"):
         SimpleTable.load_csv(
-            session,
+            sqlite_session,
             csv,
             loader=PandasLoader(),
         )
@@ -537,7 +540,7 @@ def test_clean_nulls_passthrough():
     assert _clean_nulls("S") == "S"
 
 
-def test_nullable_column_with_nan_does_not_crash(session, engine, tmp_path):
+def test_nullable_column_with_nan_does_not_crash(sqlite_session, sqlite_engine, tmp_path):
     class NullableTable(Base, CSVLoadableTableInterface):
         __tablename__ = "nullable_table"
         __table_args__ = {"schema": SchemaRole.PRIMARY.value}
@@ -545,7 +548,7 @@ def test_nullable_column_with_nan_does_not_crash(session, engine, tmp_path):
         id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
         flag: so.Mapped[str | None] = so.mapped_column(sa.String, nullable=True)
 
-    Base.metadata.create_all(engine)
+    Base.metadata.create_all(sqlite_engine)
     _NullableTable = cast(Type[CSVTableProtocol], NullableTable)
 
     csv = tmp_path / "nullable_table.csv"
@@ -557,16 +560,16 @@ def test_nullable_column_with_nan_does_not_crash(session, engine, tmp_path):
     ).to_csv(csv, index=False)
 
     inserted = _NullableTable.load_csv(
-        session,
+        sqlite_session,
         csv,
         loader=PandasLoader(),
         dedupe=False,
     )
-    session.commit()
+    sqlite_session.commit()
 
     assert inserted == 2
 
-    rows = session.execute(sa.select(NullableTable).order_by(NullableTable.id)).scalars().all()
+    rows = sqlite_session.execute(sa.select(NullableTable).order_by(NullableTable.id)).scalars().all()
 
     assert [(r.id, r.flag) for r in rows] == [
         (1, "S"),
@@ -574,7 +577,7 @@ def test_nullable_column_with_nan_does_not_crash(session, engine, tmp_path):
     ]
 
 
-def test_embedded_newline_in_field_is_preserved(session, engine, tmp_path):
+def test_embedded_newline_in_field_is_preserved(sqlite_session, sqlite_engine, tmp_path):
     class TextTable(Base, CSVLoadableTableInterface):
         __tablename__ = "text_table"
         __table_args__ = {"schema": SchemaRole.PRIMARY.value}
@@ -582,7 +585,7 @@ def test_embedded_newline_in_field_is_preserved(session, engine, tmp_path):
         id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
         name: so.Mapped[str] = so.mapped_column(sa.String)
 
-    Base.metadata.create_all(engine)
+    Base.metadata.create_all(sqlite_engine)
     _TextTable = cast(Type[CSVTableProtocol], TextTable)
 
     csv = tmp_path / "text_table.csv"
@@ -591,18 +594,18 @@ def test_embedded_newline_in_field_is_preserved(session, engine, tmp_path):
     csv.write_text('id\tname\n1\t"hello\nworld"\n')
 
     _TextTable.load_csv(
-        session,
+        sqlite_session,
         csv,
         loader=PandasLoader(),
         dedupe=False,
     )
-    session.commit()
+    sqlite_session.commit()
 
-    rows = session.execute(sa.select(TextTable)).scalars().all()
+    rows = sqlite_session.execute(sa.select(TextTable)).scalars().all()
     assert rows[0].name == "hello\nworld"
 
 
-def test_embedded_tab_in_field(session, engine, tmp_path):
+def test_embedded_tab_in_field(sqlite_session, sqlite_engine, tmp_path):
     class TextTable2(Base, CSVLoadableTableInterface):
         __tablename__ = "tab_table"
         __table_args__ = {"schema": SchemaRole.PRIMARY.value}
@@ -610,28 +613,28 @@ def test_embedded_tab_in_field(session, engine, tmp_path):
         id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
         name: so.Mapped[str] = so.mapped_column(sa.String)
 
-    Base.metadata.create_all(engine)
+    Base.metadata.create_all(sqlite_engine)
     _TextTable2 = cast(Type[CSVTableProtocol], TextTable2)
 
     csv = tmp_path / "tab_table.csv"
     csv.write_text('id\tname\n1\t"foo\tbar"\n')
 
     _TextTable2.load_csv(
-        session,
+        sqlite_session,
         csv,
         loader=PandasLoader(),
         dedupe=False,
     )
-    session.commit()
+    sqlite_session.commit()
 
-    rows = session.execute(sa.select(TextTable2)).scalars().all()
+    rows = sqlite_session.execute(sa.select(TextTable2)).scalars().all()
     assert rows[0].name == "foo\tbar"
 
 
 # --- index_strategy tests ---
 
 
-def _make_ddl_tracker(engine):
+def _make_ddl_tracker(sqlite_engine):
     """Return a list that is populated with DROP/CREATE INDEX statements as they execute."""
     ddl_log: list[str] = []
 
@@ -641,62 +644,62 @@ def _make_ddl_tracker(engine):
         if upper.startswith("DROP INDEX") or upper.startswith("CREATE INDEX"):
             ddl_log.append(statement.strip())
 
-    sae.listen(engine, "before_cursor_execute", _capture)
+    sae.listen(sqlite_engine, "before_cursor_execute", _capture)
     return ddl_log
 
 
-def test_auto_strategy_keeps_indices_on_sqlite(session, engine, tmp_path):
+def test_auto_strategy_keeps_indices_on_sqlite(sqlite_session, sqlite_engine, tmp_path):
     """On SQLite, 'auto' resolves to 'keep' — no index DDL should be emitted."""
-    ddl_log = _make_ddl_tracker(engine)
+    ddl_log = _make_ddl_tracker(sqlite_engine)
     csv_path = tmp_path / "test_table.csv"
     pd.DataFrame([{"id": 1, "name": "alpha"}, {"id": 2, "name": "beta"}]).to_csv(
         csv_path, index=False, sep="\t"
     )
 
-    _SimpleTable.load_csv(session, csv_path, loader=PandasLoader(), index_strategy="auto")
-    session.commit()
+    _SimpleTable.load_csv(sqlite_session, csv_path, loader=PandasLoader(), index_strategy="auto")
+    sqlite_session.commit()
 
     assert not any("DROP INDEX" in s.upper() for s in ddl_log)
     assert not any("CREATE INDEX" in s.upper() for s in ddl_log)
-    inspector = sa.inspect(engine)
+    inspector = sa.inspect(sqlite_engine)
     inspector.clear_cache()
     assert "ix_test_table_name" in {idx["name"] for idx in inspector.get_indexes("test_table")}
 
 
-def test_explicit_keep_preserves_indices(session, engine, tmp_path):
+def test_explicit_keep_preserves_indices(sqlite_session, sqlite_engine, tmp_path):
     """Explicit 'keep' emits no index DDL regardless of dialect."""
-    ddl_log = _make_ddl_tracker(engine)
+    ddl_log = _make_ddl_tracker(sqlite_engine)
     csv_path = tmp_path / "test_table.csv"
     pd.DataFrame([{"id": 1, "name": "alpha"}]).to_csv(csv_path, index=False, sep="\t")
 
-    _SimpleTable.load_csv(session, csv_path, loader=PandasLoader(), index_strategy="keep")
-    session.commit()
+    _SimpleTable.load_csv(sqlite_session, csv_path, loader=PandasLoader(), index_strategy="keep")
+    sqlite_session.commit()
 
     assert not any("DROP INDEX" in s.upper() for s in ddl_log)
-    inspector = sa.inspect(engine)
+    inspector = sa.inspect(sqlite_engine)
     inspector.clear_cache()
     assert "ix_test_table_name" in {idx["name"] for idx in inspector.get_indexes("test_table")}
 
 
-def test_explicit_drop_rebuild_on_sqlite_restores_index(session, engine, tmp_path):
+def test_explicit_drop_rebuild_on_sqlite_restores_index(sqlite_session, sqlite_engine, tmp_path):
     """Explicit 'drop_rebuild' drops then restores the index even on SQLite."""
-    ddl_log = _make_ddl_tracker(engine)
+    ddl_log = _make_ddl_tracker(sqlite_engine)
     csv_path = tmp_path / "test_table.csv"
     pd.DataFrame([{"id": 1, "name": "alpha"}, {"id": 2, "name": "beta"}]).to_csv(
         csv_path, index=False, sep="\t"
     )
 
-    _SimpleTable.load_csv(session, csv_path, loader=PandasLoader(), index_strategy="drop_rebuild")
-    session.commit()
+    _SimpleTable.load_csv(sqlite_session, csv_path, loader=PandasLoader(), index_strategy="drop_rebuild")
+    sqlite_session.commit()
 
     assert any("DROP INDEX" in s.upper() for s in ddl_log)
     assert any("CREATE INDEX" in s.upper() for s in ddl_log)
-    inspector = sa.inspect(engine)
+    inspector = sa.inspect(sqlite_engine)
     inspector.clear_cache()
     assert "ix_test_table_name" in {idx["name"] for idx in inspector.get_indexes("test_table")}
 
 
-def test_drop_rebuild_logging_shows_merge_phases(session, tmp_path, caplog):
+def test_drop_rebuild_logging_shows_merge_phases(sqlite_session, tmp_path, caplog):
     csv_path = tmp_path / "test_table.csv"
 
     pd.DataFrame(
@@ -707,8 +710,8 @@ def test_drop_rebuild_logging_shows_merge_phases(session, tmp_path, caplog):
     ).to_csv(csv_path, index=False, sep="\t")
 
     loader = PandasLoader()
-    _SimpleTable.load_csv(session, csv_path, dedupe=False, loader=loader)
-    session.commit()
+    _SimpleTable.load_csv(sqlite_session, csv_path, dedupe=False, loader=loader)
+    sqlite_session.commit()
 
     pd.DataFrame(
         [
@@ -720,14 +723,14 @@ def test_drop_rebuild_logging_shows_merge_phases(session, tmp_path, caplog):
     caplog.set_level(logging.INFO, logger="orm_loader.tables.loadable_table")
 
     _SimpleTable.load_csv(
-        session,
+        sqlite_session,
         csv_path,
         dedupe=False,
         loader=loader,
         merge_strategy="replace",
         index_strategy="drop_rebuild",
     )
-    session.commit()
+    sqlite_session.commit()
 
     messages = [record.getMessage() for record in caplog.records]
 
@@ -758,13 +761,13 @@ def test_drop_rebuild_logging_shows_merge_phases(session, tmp_path, caplog):
     assert any("Index verification/rebuild completed in " in message for message in messages)
 
 
-def test_invalid_index_strategy_raises(session, tmp_path):
+def test_invalid_index_strategy_raises(sqlite_session, tmp_path):
     """An unrecognised strategy value raises ValueError before any DB work."""
     csv_path = tmp_path / "test_table.csv"
     pd.DataFrame([{"id": 1, "name": "alpha"}]).to_csv(csv_path, index=False, sep="\t")
 
     with pytest.raises(ValueError, match="Unknown index_strategy"):
-        _SimpleTable.load_csv(session, csv_path, loader=PandasLoader(), index_strategy="not-valid")
+        _SimpleTable.load_csv(sqlite_session, csv_path, loader=PandasLoader(), index_strategy="not-valid")
 
 
 # from hypothesis import given, strategies as st
@@ -791,17 +794,17 @@ def test_invalid_index_strategy_raises(session, tmp_path):
 #         id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
 #         txt: so.Mapped[str] = so.mapped_column(sa.String)
 
-#     engine = sa.create_engine("sqlite:///:memory:", future=True)
-#     BaseLocal.metadata.create_all(engine)
+#     sqlite_engine = sa.create_engine("sqlite:///:memory:", future=True)
+#     BaseLocal.metadata.create_all(sqlite_engine)
 
-#     with Session(engine) as session:
+#     with Session(sqlite_engine) as sqlite_session:
 #         csv = tmp_path / "fuzz_table.csv"
 #         pd.DataFrame([{"id": 1, "txt": s}]).to_csv(csv, index=False, sep="\t")
 
-#         FuzzTable.load_csv(session, csv, loader=PandasLoader(), dedupe=False)
-#         session.commit()
+#         FuzzTable.load_csv(sqlite_session, csv, loader=PandasLoader(), dedupe=False)
+#         sqlite_session.commit()
 
-#         rows = session.execute(sa.select(FuzzTable)).scalars().all()
+#         rows = sqlite_session.execute(sa.select(FuzzTable)).scalars().all()
 
 #         # What the loader *should* produce according to your spec
 #         expected = perform_cast(s, sa.String(), on_error=None)
@@ -813,9 +816,9 @@ def test_invalid_index_strategy_raises(session, tmp_path):
 #             assert rows[0].txt.encode("utf-8", errors="replace") == s.encode("utf-8", errors="replace")
 
 
-def test_sqlite_failed_batched_replace_keeps_original_target_rows(session, tmp_path):
-    session.add_all([SimpleTable(id=1, name="original-1"), SimpleTable(id=2, name="original-2")])
-    session.commit()
+def test_sqlite_failed_batched_replace_keeps_original_target_rows(sqlite_session, tmp_path):
+    sqlite_session.add_all([SimpleTable(id=1, name="original-1"), SimpleTable(id=2, name="original-2")])
+    sqlite_session.commit()
     csv_path = tmp_path / "test_table.csv"
     pd.DataFrame(
         [
@@ -827,14 +830,69 @@ def test_sqlite_failed_batched_replace_keeps_original_target_rows(session, tmp_p
 
     with pytest.raises(sa.exc.IntegrityError):
         SimpleTable.load_csv(
-            session,
+            sqlite_session,
             csv_path,
             dedupe=False,
             loader=PandasLoader(),
             merge_strategy="replace",
             merge_batch_size=2,
         )
-    session.rollback()
+    sqlite_session.rollback()
 
-    rows = session.execute(sa.select(SimpleTable).order_by(SimpleTable.id)).scalars().all()
+    rows = sqlite_session.execute(sa.select(SimpleTable).order_by(SimpleTable.id)).scalars().all()
     assert [(row.id, row.name) for row in rows] == [(1, "original-1"), (2, "original-2")]
+
+
+@pytest.mark.duckdb
+@pytest.mark.db_dialect
+def test_validate_deferred_fks_catches_an_orphan_introduced_by_load_csv(duckdb_session, duckdb_db, tmp_path):
+    """cycle_a_table.b_id is part of a genuine FK cycle with cycle_b_table, so
+    DuckDB never got a real constraint for it (oa-configurator's
+    _skip_deferred_fk_on_duckdb no-oped the ALTER TABLE ADD CONSTRAINT): a
+    load introducing an orphaned reference succeeds silently unless
+    validate_deferred_fks=True catches it.
+
+    Notes
+    -----
+    Rollback on duckdb_session wipes out data that has already been committed.
+    Rollback-after-commit on this fixture's session is therefore unreliable for 
+    asserting target-row survival.
+    """
+    csv_path = tmp_path / "cycle_a_table.csv"
+    pd.DataFrame([{"id": 1, "b_id": 999}]).to_csv(csv_path, index=False, sep="\t")
+
+    with pytest.raises(DeferredForeignKeyViolationError, match="cycle_a_table"):
+        _CycleATable.load_csv(
+            duckdb_session,
+            csv_path,
+            dedupe=False,
+            loader=PandasLoader(),
+            validate_deferred_fks=True,
+            resolved=duckdb_db.resolved,
+        )
+
+    staging_name = resolve_backend(duckdb_session, mapper=_CycleATable).staging_name_for_table(
+        _CycleATable.__tablename__
+    )
+    assert sa.inspect(duckdb_session.get_bind()).has_table(staging_name) is False
+
+
+@pytest.mark.duckdb
+@pytest.mark.db_dialect
+def test_load_csv_rejects_replace_with_keep_index_strategy_on_duckdb_upfront(duckdb_session, tmp_path):
+    """merge_strategy='replace' does an UPDATE in place on DuckDB, which
+    breaks with a live index on an updated column. This combination must be
+    rejected before the staging load even starts, not surface as DuckDB's
+    own opaque constraint error partway through the merge."""
+    csv_path = tmp_path / f"{SimpleTable.__tablename__}.csv"
+    pd.DataFrame([{"id": 1, "name": "a"}]).to_csv(csv_path, index=False, sep="\t")
+
+    with pytest.raises(NotImplementedError, match="merge_strategy='replace' with index_strategy='keep'"):
+        SimpleTable.load_csv(
+            duckdb_session,
+            csv_path,
+            dedupe=False,
+            loader=PandasLoader(),
+            merge_strategy="replace",
+            index_strategy="keep",
+        )

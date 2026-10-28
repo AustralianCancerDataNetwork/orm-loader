@@ -2,9 +2,10 @@
 from enum import Enum
 
 import sqlalchemy as sa
+import sqlalchemy.orm as so
 from oa_configurator import Role as SchemaRole
 from sqlalchemy.orm import declarative_base
-import sqlalchemy.orm as so
+
 from orm_loader.tables import CSVLoadableTableInterface
 
 Base = declarative_base()
@@ -54,6 +55,29 @@ class CompositeTable(Base, CSVLoadableTableInterface):
     value: so.Mapped[str] = so.mapped_column(sa.String)
 
 
+class CycleATable(Base, CSVLoadableTableInterface):
+    """Mutually-referencing pair with CycleBTable, for deferred-FK tests:
+    DuckDB can't execute the ALTER TABLE ADD CONSTRAINT this cycle forces."""
+
+    __tablename__ = "cycle_a_table"
+    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+
+    id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
+    b_id: so.Mapped[int | None] = so.mapped_column(
+        sa.Integer, sa.ForeignKey(f"{SchemaRole.PRIMARY.value}.cycle_b_table.id")
+    )
+
+
+class CycleBTable(Base, CSVLoadableTableInterface):
+    __tablename__ = "cycle_b_table"
+    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+
+    id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
+    a_id: so.Mapped[int | None] = so.mapped_column(
+        sa.Integer, sa.ForeignKey(f"{SchemaRole.PRIMARY.value}.cycle_a_table.id")
+    )
+
+
 class EnumTable(Base, CSVLoadableTableInterface):
     """A genuine sa.Enum column, unmodified -- register_column_cast_rule's
     enum_type matches a raw value (e.g. "first author") by .value but stores
@@ -80,7 +104,8 @@ class ComputedColumnTable(Base, CSVLoadableTableInterface):
 
     id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     name: so.Mapped[str] = so.mapped_column(sa.String)
-    slug: so.Mapped[str] = so.mapped_column(sa.String, sa.Computed("lower(name)"))
+    # nullable: DuckDB doesn't support any constraint (including NOT NULL) on a generated column.
+    slug: so.Mapped[str | None] = so.mapped_column(sa.String, sa.Computed("lower(name)"))
 
 
 class ImpliedEnumTable(Base, CSVLoadableTableInterface):
@@ -96,6 +121,40 @@ class ImpliedEnumTable(Base, CSVLoadableTableInterface):
     flag: so.Mapped[str | None] = so.mapped_column(sa.String(1), nullable=True)
 
 
+class ReferencedParentTable(Base, CSVLoadableTableInterface):
+    """Referenced by ReferencingChildTable *and* owns its own FK, for
+    merge_replace's up-front DuckDB guard: a table in this shape can't be
+    SET on its own FK column while still referenced, even with indexes
+    dropped."""
+
+    __tablename__ = "referenced_parent_table"
+    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+
+    id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
+    grandparent_id: so.Mapped[int] = so.mapped_column(
+        sa.Integer, sa.ForeignKey(f"{SchemaRole.PRIMARY.value}.unreferenced_grandparent_table.id")
+    )
+    name: so.Mapped[str] = so.mapped_column(sa.String)
+
+
+class UnreferencedGrandparentTable(Base, CSVLoadableTableInterface):
+    __tablename__ = "unreferenced_grandparent_table"
+    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+
+    id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
+    name: so.Mapped[str] = so.mapped_column(sa.String)
+
+
+class ReferencingChildTable(Base, CSVLoadableTableInterface):
+    __tablename__ = "referencing_child_table"
+    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+
+    id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
+    parent_id: so.Mapped[int] = so.mapped_column(
+        sa.Integer, sa.ForeignKey(f"{SchemaRole.PRIMARY.value}.referenced_parent_table.id")
+    )
+
+
 class VocabSchemaTable(Base, CSVLoadableTableInterface):
     """A VOCAB-tagged table, so tests can prove the staging/index schema
     derivation actually resolves a non-primary schema tag correctly."""
@@ -108,3 +167,37 @@ class VocabSchemaTable(Base, CSVLoadableTableInterface):
 
     id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     name: so.Mapped[str] = so.mapped_column(sa.String, nullable=False)
+
+
+class VocabReferencingTable(Base, CSVLoadableTableInterface):
+    """PRIMARY-tagged table with a foreign key into VocabSchemaTable (VOCAB),
+    for cross-schema foreign-key classification tests: DuckDB cannot
+    enforce a key between two physical schemas, so oa-configurator omits
+    it from DDL, same practical outcome as a cyclic/deferred key but
+    reached a different way."""
+
+    __tablename__ = "vocab_referencing_table"
+    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+
+    id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
+    vocab_id: so.Mapped[int | None] = so.mapped_column(
+        sa.Integer, sa.ForeignKey(f"{SchemaRole.VOCAB.value}.test_vocab_role_table.id")
+    )
+
+
+class SelfReferentialTable(Base, CSVLoadableTableInterface):
+    """A table referencing its own rows, for dependency-ordered batching
+    tests: a child row's parent may legitimately land in a later
+    pagination batch of the same load. use_alter=True since DuckDB can't
+    ALTER TABLE ADD this constraint, making it deferred/unenforced like a
+    cross-table cycle, rather than a plain inline (and thus DuckDB-enforced)
+    self-reference."""
+
+    __tablename__ = "self_referential_table"
+    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+
+    id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
+    parent_id: so.Mapped[int | None] = so.mapped_column(
+        sa.Integer,
+        sa.ForeignKey(f"{SchemaRole.PRIMARY.value}.self_referential_table.id", use_alter=True),
+    )

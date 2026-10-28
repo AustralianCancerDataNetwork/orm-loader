@@ -1,18 +1,17 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Generator, Iterator, Mapping
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
-from collections.abc import Generator
 from functools import wraps
 from typing import TYPE_CHECKING, Any, Callable, ParamSpec, Type, TypeVar, cast
 
 import sqlalchemy as sa
 import sqlalchemy.orm as so
+from oa_configurator import Dialect, ResolvedDatabase, SchemaClaim, open_connection, qualified
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.sql.compiler import IdentifierPreparer
-
-from oa_configurator import Dialect, SchemaClaim, open_connection, qualified
 
 if TYPE_CHECKING:
     from ..loaders.data_classes import LoaderContext
@@ -33,6 +32,23 @@ class BackendCapabilities:
     supports_unlogged_staging: bool = False
     supports_fk_toggle: bool = False
     supports_materialized_views: bool = False
+    supports_replace_with_kept_indexes: bool = False
+
+
+class DeferredForeignKeyViolationError(RuntimeError):
+    """A foreign key this backend can't enforce at the DB level is violated.
+    """
+
+    def __init__(self, constraint: sa.ForeignKeyConstraint, orphan_keys: list[tuple[Any, ...]]) -> None:
+        self.constraint = constraint
+        self.orphan_keys = orphan_keys
+        local_cols = ", ".join(c.name for c in constraint.columns)
+        referred_table = next(iter(constraint.elements)).column.table.name
+        super().__init__(
+            f"{constraint.table.name}.({local_cols}) references {referred_table!r} via a "
+            f"constraint this backend can't enforce at the DB level; {len(orphan_keys)} "
+            f"row(s) violate it (showing up to 5): {orphan_keys}"
+        )
 
 
 STAGING_SCHEMA: str = "staging"
@@ -99,7 +115,14 @@ class DatabaseBackend(ABC):
     without changing existing loader orchestration yet.
     """
 
-    def __init__(self, *, staging_schema_tag: str | None = None, staging_schema: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        staging_schema_tag: str | None = None,
+        staging_schema: str | None = None,
+        resolved: ResolvedDatabase | None = None,
+        physical_schemas: Mapping[str, str | None] | None = None,
+    ) -> None:
         """
         Parameters
         ----------
@@ -115,9 +138,19 @@ class DatabaseBackend(ABC):
             qualification — staging tables land in whatever schema the
             connection's search_path resolves to. SQLite has no schema
             concept and always resolves to ``None``.
+        resolved
+            Used by DuckDBBackend to classify a foreign key crossing a
+            schema or database boundary, via oa-configurator's
+            ``unenforced_foreign_keys()``. Ignored by every other backend.
+        physical_schemas
+            A schema tag's physical name beyond ``resolved``'s own
+            configured ones (e.g. one claimed via ``schema_claims``).
+            Forwarded alongside ``resolved``.
         """
         self.staging_schema_tag = staging_schema_tag
         self.staging_schema = staging_schema
+        self.resolved = resolved
+        self.physical_schemas = physical_schemas
 
     @staticmethod
     def _validate_merge_batch_size(merge_batch_size: int | None) -> None:
@@ -269,6 +302,76 @@ class DatabaseBackend(ABC):
         """
         return [c.name for c in table_cls.__table__.columns if c.computed is None]
 
+    def deferred_fk_constraints(
+        self,
+        table_cls: Type["CSVTableProtocol"],
+    ) -> tuple[sa.ForeignKeyConstraint, ...]:
+        """FK constraints on *table_cls* that this backend never enforces at the DB level.
+
+        Default: none. Only a backend whose dialect can't execute a deferred
+        ``ALTER TABLE ADD CONSTRAINT`` (DuckDB, for a cyclic FK graph) overrides this.
+        """
+        return ()
+
+    def validate_deferred_fks(
+        self,
+        table_cls: Type["CSVTableProtocol"],
+        session: so.Session,
+    ) -> None:
+        """Raise if any row in *table_cls* violates one of its deferred_fk_constraints().
+
+        An anti-join check recovering referential-integrity validation this
+        backend's DB can't give for those constraints. No-op when there are
+        none (every backend but DuckDB, today).
+
+        Raises
+        ------
+        DeferredForeignKeyViolationError
+            If any row's FK column is non-null with no matching row in the
+            referenced table.
+        """
+        for fk in self.deferred_fk_constraints(table_cls):
+            self._validate_one_deferred_fk(fk, session)
+
+    @staticmethod
+    def _validate_one_deferred_fk(fk: sa.ForeignKeyConstraint, session: so.Session) -> None:
+        """Raise if any row of fk's local table has a non-null value with no match in the referred table.
+
+        Parameters
+        ----------
+        fk : sa.ForeignKeyConstraint
+            The deferred FK constraint to check.
+        session : so.Session
+            Session to run the anti-join query against.
+
+        Raises
+        ------
+        DeferredForeignKeyViolationError
+            If any row's FK column is non-null with no matching row in the
+            referenced table.
+
+        Notes
+        -----
+        The referred table is always aliased, even for an ordinary
+        cross-table FK where it changes nothing. A self-referential FK's
+        referred table is the same Table object as the row being checked,
+        so an unaliased subquery would compare each row to itself instead
+        of correlating to the outer row.
+        """
+        local_cols = list(fk.columns)
+        remote_cols = [element.column for element in fk.elements]
+        referred_alias = remote_cols[0].table.alias()
+        aliased_remote_cols = [referred_alias.c[col.name] for col in remote_cols]
+        matches = sa.and_(*(local_cols[i] == aliased_remote_cols[i] for i in range(len(local_cols))))
+        not_null = sa.and_(*(col.isnot(None) for col in local_cols))
+        orphan_exists = sa.exists(sa.select(sa.literal(1)).select_from(referred_alias).where(matches))
+
+        orphans = session.execute(
+            sa.select(*local_cols).where(not_null, ~orphan_exists).limit(5)
+        ).all()
+        if orphans:
+            raise DeferredForeignKeyViolationError(fk, [tuple(row) for row in orphans])
+
     @abstractmethod
     def create_staging_table(
         self,
@@ -324,6 +427,21 @@ class DatabaseBackend(ABC):
     ) -> None:
         """Restore FK checks to a previously returned backend-specific state."""
 
+    def check_replace_feasible(
+        self,
+        table_cls: Type["CSVTableProtocol"],
+        pk_cols: list[str],
+        session: so.Session,
+    ) -> None:
+        """Raise if merge_strategy='replace' can't load table_cls on this backend.
+
+        Default: always feasible. Only a backend that rejects certain
+        in-place updates on a currently-referenced row (DuckDB) overrides
+        this, so callers can preflight every table a replace load will
+        touch before loading any of them. session is only used as read-only
+        to check whether target or a referencing table already has rows
+        """
+
     @abstractmethod
     def merge_replace(
         self,
@@ -332,8 +450,15 @@ class DatabaseBackend(ABC):
         pk_cols: list[str],
         *,
         merge_batch_size: int | None = None,
+        validate_deferred_fks: bool = True,
     ) -> None:
-        """Merge staging rows by replacing matching target rows first."""
+        """Merge staging rows by replacing matching target rows first.
+
+        validate_deferred_fks
+            Forwarded to :meth:`_commit_batch_if_needed` for each
+            intermediate commit, so a batch that violates a deferred FK is
+            caught before it commits instead of only after the whole merge.
+        """
 
     @abstractmethod
     def merge_upsert(
@@ -343,8 +468,13 @@ class DatabaseBackend(ABC):
         pk_cols: list[str],
         *,
         merge_batch_size: int | None = None,
+        validate_deferred_fks: bool = True,
     ) -> None:
-        """Merge staging rows using backend-specific upsert semantics."""
+        """Merge staging rows using backend-specific upsert semantics.
+
+        validate_deferred_fks
+            See :meth:`merge_replace`.
+        """
 
     @abstractmethod
     def merge_insert(
@@ -353,17 +483,135 @@ class DatabaseBackend(ABC):
         session: so.Session,
         *,
         merge_batch_size: int | None = None,
+        validate_deferred_fks: bool = True,
     ) -> None:
-        """Insert all staging rows into the target table."""
+        """Insert all staging rows into the target table.
+
+        validate_deferred_fks
+            See :meth:`merge_replace`.
+        """
+
+    def _pagination_column(
+        self,
+        table_cls: Type["CSVTableProtocol"],
+        staging: sa.Table,
+    ) -> sa.ColumnElement[int]:
+        """Column this backend orders a staging-table scan by, for pagination.
+
+        Defaults to the explicit _rownum column every staging table carries.
+        Override for a backend with a cheaper, already-indexed alternative
+        (e.g. SQLite's implicit rowid).
+        """
+        return staging.c._rownum
+
+    def _ensure_pagination_index(
+        self,
+        table_cls: Type["CSVTableProtocol"],
+        staging: sa.Table,
+        session: so.Session,
+    ) -> None:
+        """Index _pagination_column() so paginated batches can seek it efficiently.
+
+        Overridden as a no-op by a backend whose _pagination_column() is
+        already indexed (e.g. SQLite's rowid).
+        """
+        staging_name = self.staging_name_for_table(table_cls.__tablename__)
+        idx = sa.Index(f"{staging_name}_rownum_idx", staging.c._rownum)
+        idx.create(bind=session.connection(bind_arguments={"mapper": table_cls}), checkfirst=True)
+        session.commit()
+
+    @property
+    @abstractmethod
+    def _commits_between_pagination_batches(self) -> bool:
+        """Whether _paginate_batches()'s caller should commit after each batch."""
+
+    def _paginate_batches(
+        self,
+        table_cls: Type["CSVTableProtocol"],
+        staging: sa.Table,
+        session: so.Session,
+        merge_batch_size: int | None,
+    ) -> Iterator[sa.ColumnElement[bool] | None]:
+        """Yield one window predicate per batch for a full scan of staging.
+
+        Yields
+        ------
+        sa.ColumnElement[bool] or None
+            A predicate to filter the staging table to a single batch of rows.
+            None if merge_batch_size is None or the staging table is smaller than 
+            merge_batch_size.
+        """
+        if merge_batch_size is not None:
+            total = session.execute(sa.select(sa.func.count()).select_from(staging)).scalar_one()
+        if merge_batch_size is None or total <= merge_batch_size:
+            yield None
+            return
+
+        column = self._pagination_column(table_cls, staging)
+        self._ensure_pagination_index(table_cls, staging, session)
+        bound = session.execute(
+            sa.select(sa.func.coalesce(sa.func.max(column), 0)).select_from(staging)
+        ).scalar_one()
+        start = 0
+        while start < bound:
+            end = start + merge_batch_size
+            yield sa.and_(column > start, column <= end)
+            start = end
+
+    def _commit_batch_if_needed(
+        self,
+        table_cls: Type["CSVTableProtocol"],
+        session: so.Session,
+        batch_range: sa.ColumnElement[bool] | None,
+        *,
+        validate_deferred_fks: bool = True,
+    ) -> None:
+        """Validate deferred FKs and commit after one pagination batch, 
+        if this backend commits between batches.
+
+        Called from every merge_*() method after each batch of rows is processed. 
+        Instead of committing directly, a batch that violates a deferred FK is caught
+        before the next batch starts. Without this, an earlier batch's commit cannot
+        be undone once a later batch's load_csv()-level validation fails.
+
+        No-op when there is nothing to validate to not add cost. This is true for every 
+        backend but DuckDB, and for DuckDB whenever table_cls has no deferred/
+        unenforced FK at all.
+        """
+        if batch_range is None or not self._commits_between_pagination_batches:
+            return
+        if validate_deferred_fks:
+            self.validate_deferred_fks(table_cls, session)
+        session.commit()
+
+    def _self_referential_deferred_fks(
+        self, table_cls: Type["CSVTableProtocol"]
+    ) -> tuple[sa.ForeignKeyConstraint, ...]:
+        """Deferred FKs on table_cls that point back at table_cls itself.
+
+        A row's match for one of these can arrive in a later pagination
+        batch of the same load, since batching orders by insertion
+        position rather than by dependency. A backend with any of these
+        must override :meth:`_paginate_batches` to yield batches in
+        dependency order instead.
+        """
+        target = table_cls.__table__
+        return tuple(fk for fk in self.deferred_fk_constraints(table_cls) if fk.referred_table is target)
 
     def merge_context(
         self,
         table_cls: Type["CSVTableProtocol"],
         session: so.Session,
     ) -> AbstractContextManager[None]:
-        """Disable backend FK checks for a table's merge and restore them afterward."""
+        """Disable backend FK checks for a table's merge and restore them afterward.
+
+        A backend without supports_fk_toggle has no state to disable in the
+        first place, so this skips the attempt entirely rather than raising;
+        such a backend's own merge methods must avoid operations (like
+        deleting a referenced row) that would need the toggle to be safe.
+        """
         return self.bulk_load_context(
-            session, mapper=table_cls, disable_fk=True, no_autoflush=False
+            session, mapper=table_cls, disable_fk=self.capabilities.supports_fk_toggle, no_autoflush=False
         )
 
     @contextmanager

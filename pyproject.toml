@@ -10,7 +10,7 @@ license = { text = "Apache-2.0" }
 requires-python = ">=3.12"
 dependencies = [
     "chardet>=5.2.0",
-    "oa-configurator>=2.0.0,<3",
+    "oa-configurator>=2.1.0,<3",
     "pandas>=2.3.3",
     "pyarrow>=23.0.1",
     "sqlalchemy>=2.0.45",
@@ -49,8 +49,11 @@ packages = ["src/orm_loader"]
 postgres = [
   "psycopg[binary]>=3.2",
 ]
+duckdb = [
+  "duckdb-sqlalchemy>=1.5",
+]
 dev = [
-    "oa-configurator[postgres]>=2.0.0,<3",
+    "oa-configurator[postgres,duckdb]>=2.0.0,<3",
     "pytest>=9.0.3",
     "ty>=0.0.59",
     "ruff>=0.14.11",

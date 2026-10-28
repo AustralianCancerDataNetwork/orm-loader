@@ -1,5 +1,6 @@
 from .errors import IngestError, ValidationError
 from .bootstrap import bootstrap, create_db, create_tables
+from .engines import dispose_engines
 from .sqlite import (
     attach_sqlite_bulk_load_pragmas,
     explain_sqlite_fk_error,
@@ -16,6 +17,7 @@ __all__ = [
     "bootstrap",
     "create_db",
     "create_tables",
+    "dispose_engines",
     "attach_sqlite_bulk_load_pragmas",
     "explain_sqlite_fk_error",
     "restore_sqlite_journal_mode",

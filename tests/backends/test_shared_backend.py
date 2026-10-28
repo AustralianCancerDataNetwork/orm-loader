@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Type, cast
 import pytest
 import sqlalchemy as sa
 
+from oa_configurator import Dialect
 from oa_configurator.testing import DIALECT_PARAMS
 from orm_loader.backends import STAGING_SCHEMA, DatabaseBackend
 from orm_loader.backends.resolve import resolve_backend
@@ -18,26 +19,37 @@ if TYPE_CHECKING:
 _ComputedTableCls = cast("Type[CSVTableProtocol]", ComputedColumnTable)
 _CompositeTableCls = cast("Type[CSVTableProtocol]", CompositeTable)
 
+_SESSION_FIXTURE_BY_DIALECT = {
+    Dialect.POSTGRESQL: "pg_session",
+    Dialect.SQLITE: "sqlite_session",
+    Dialect.DUCKDB: "duckdb_session",
+}
+assert set(_SESSION_FIXTURE_BY_DIALECT) == {param.values[0] for param in DIALECT_PARAMS}, (
+    "_SESSION_FIXTURE_BY_DIALECT is missing an entry for a dialect DIALECT_PARAMS now covers."
+)
+
+# merge_replace deletes on sqlite/postgres but updates in place on DuckDB
+# (see DuckDBBackend.merge_replace); these tests check the delete-only behavior.
+_REPLACE_DELETE_SEMANTICS_PARAMS = tuple(p for p in DIALECT_PARAMS if p.values[0] != Dialect.DUCKDB)
+
 
 @pytest.fixture(params=DIALECT_PARAMS)
 def merge_backend(request: pytest.FixtureRequest) -> tuple[DatabaseBackend, "so.Session"]:
-    """Same merge-method contract exercised against both real backends.
-    Only the postgresql param ever requests pg_session, so the sqlite
-    param never needs a database.
+    """Same merge-method contract exercised against every real backend.
 
     DIALECT_PARAMS carries each dialect's own mark plus `forked` directly
     on the param value, so this still works correctly even though
-    request.getfixturevalue("pg_session") is a dynamic, runtime lookup
-    invisible to pytest's collection-time fixturenames computation (the
-    usual pg_db-in-fixturenames auto-detection can't see it).
+    request.getfixturevalue(...) is a dynamic, runtime lookup invisible to
+    pytest's collection-time fixturenames computation (the usual
+    pg_db-in-fixturenames auto-detection can't see it).
     """
-    if request.param == "postgresql":
-        session = request.getfixturevalue("pg_session")
-        return resolve_backend(session, staging_schema_tag=STAGING_SCHEMA), session
-    session = request.getfixturevalue("session")
-    return resolve_backend(session), session
+    session_fixture = _SESSION_FIXTURE_BY_DIALECT[request.param]
+    session = request.getfixturevalue(session_fixture)
+    staging_schema_tag = STAGING_SCHEMA if request.param != Dialect.SQLITE else None
+    return resolve_backend(session, staging_schema_tag=staging_schema_tag), session
 
 
+@pytest.mark.parametrize("merge_backend", _REPLACE_DELETE_SEMANTICS_PARAMS, indirect=True)
 def test_merge_replace_single_pk(merge_backend: tuple[DatabaseBackend, "so.Session"]) -> None:
     backend, session = merge_backend
     backend.create_staging_table(_ComputedTableCls, session)
@@ -55,6 +67,7 @@ def test_merge_replace_single_pk(merge_backend: tuple[DatabaseBackend, "so.Sessi
     assert remaining == [2]
 
 
+@pytest.mark.parametrize("merge_backend", _REPLACE_DELETE_SEMANTICS_PARAMS, indirect=True)
 def test_merge_replace_composite_pk(merge_backend: tuple[DatabaseBackend, "so.Session"]) -> None:
     backend, session = merge_backend
     backend.create_staging_table(_CompositeTableCls, session)
@@ -133,6 +146,7 @@ def test_postgres_merge_insert_paginates_rownums_with_initial_gap(pg_session) ->
     assert ids == list(range(10))
 
 
+@pytest.mark.parametrize("merge_backend", _REPLACE_DELETE_SEMANTICS_PARAMS, indirect=True)
 def test_merge_replace_paginated_path(merge_backend: tuple[DatabaseBackend, "so.Session"]) -> None:
     backend, session = merge_backend
     backend.create_staging_table(_ComputedTableCls, session)
