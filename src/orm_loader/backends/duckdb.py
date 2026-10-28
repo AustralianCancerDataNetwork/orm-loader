@@ -9,6 +9,7 @@ from oa_configurator import (
     ResolvedCDMDatabase,
     Role,
     UnenforcedForeignKey,
+    is_ephemeral_url,
     physical_schema_of,
     qualified,
     unenforced_foreign_keys,
@@ -128,6 +129,10 @@ class DuckDBBackend(DatabaseBackend):
             self.resolved is not a ResolvedCDMDatabase: a cross-database FK
             can only arise when PRIMARY/VOCAB are split across connections,
             which only a CDM-aware resolved can describe.
+        ValueError
+            The remote role's connection is ephemeral (DuckDB ``:memory:``):
+            a freshly built engine would get its own, empty database rather
+            than the one already holding the remote data.
         DeferredForeignKeyViolationError
             A local value has no match on the referred connection.
         """
@@ -145,6 +150,15 @@ class DuckDBBackend(DatabaseBackend):
             return
 
         remote_tag = remote_cols[0].table.schema
+        remote_role = Role.VOCAB if remote_tag == Role.VOCAB.value else Role.PRIMARY
+        remote_connection = self.resolved.connection_for_role(remote_role)
+        if is_ephemeral_url(remote_connection.safe_url):
+            raise ValueError(
+                f"{fk.name} crosses to {remote_connection.name!r}, an ephemeral connection "
+                "(DuckDB ':memory:'): a freshly built engine would see an empty, disconnected "
+                "database instead of the data already loaded there. Cross-database FK "
+                "validation needs a real, file-backed or server-backed remote connection."
+            )
         primary_engine, vocab_engine = self.resolved.create_engines(register_claims=False)
         try:
             remote_engine = vocab_engine if remote_tag == Role.VOCAB.value else primary_engine

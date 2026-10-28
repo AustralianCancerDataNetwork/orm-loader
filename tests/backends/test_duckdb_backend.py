@@ -126,6 +126,34 @@ def duckdb_split_database_session():
             vocab_engine.dispose()
 
 
+@pytest.fixture
+def duckdb_split_database_session_with_ephemeral_vocab():
+    """Same split topology as duckdb_split_database_session, but VOCAB is
+    an in-memory DuckDB database instead of a file, to exercise the
+    ephemeral-connection guard in _validate_cross_database_fk.
+    """
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        stack = StackConfig.for_session(
+            connections={
+                "primary": ConnectionConfig(
+                    dialect="duckdb", database_name=str(Path(tmp_dir) / "primary.duckdb"), test_only=True
+                ),
+                "vocab": ConnectionConfig(dialect="duckdb", database_name=":memory:", test_only=True),
+            },
+            databases={"cdm": CDMDatabaseConfig(connection="primary", vocab_connection="vocab")},
+        )
+        resolved = Resolver(stack).resolve_database("cdm")
+        primary_engine, _ = resolved.create_engines(schema_claims=[staging_schema_claim()])
+        try:
+            with primary_engine.connect() as conn:
+                create_tables(conn, [VocabReferencingTable.__table__], resolved=resolved)
+                conn.commit()
+                with so.Session(bind=conn) as session:
+                    yield resolved, session
+        finally:
+            primary_engine.dispose()
+
+
 def test_duckdb_backend_identity_and_capabilities():
     backend = DuckDBBackend()
 
@@ -645,6 +673,23 @@ def test_duckdb_backend_validate_deferred_fks_passes_a_real_cross_database_refer
     session.execute(sa.insert(VocabReferencingTable), [{"id": 1, "vocab_id": 1}])
 
     backend.validate_deferred_fks(_VocabReferencingTableCls, session)
+
+
+@pytest.mark.duckdb
+@pytest.mark.db_dialect
+def test_duckdb_backend_validate_deferred_fks_refuses_an_ephemeral_remote_connection(
+    duckdb_split_database_session_with_ephemeral_vocab,
+):
+    """A cross-database FK into an in-memory VOCAB must raise clearly
+    instead of rebuilding a disconnected, empty engine and reporting
+    every reference as missing.
+    """
+    resolved, session = duckdb_split_database_session_with_ephemeral_vocab
+    backend = DuckDBBackend(resolved=resolved)
+    session.execute(sa.insert(VocabReferencingTable), [{"id": 1, "vocab_id": 1}])
+
+    with pytest.raises(ValueError, match="ephemeral"):
+        backend.validate_deferred_fks(_VocabReferencingTableCls, session)
 
 
 @pytest.mark.duckdb
