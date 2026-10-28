@@ -296,19 +296,6 @@ class DuckDBBackend(DatabaseBackend):
             "DuckDB has no foreign-key-toggle mechanism (no PRAGMA/SET equivalent exists)."
         )
 
-    def _pagination_column(
-        self, table_cls: type["CSVTableProtocol"], staging: sa.Table
-    ) -> sa.ColumnElement[int]:
-        return staging.c._rownum
-
-    def _ensure_pagination_index(
-        self, table_cls: type["CSVTableProtocol"], staging: sa.Table, session: so.Session
-    ) -> None:
-        staging_name = self.staging_name_for_table(table_cls.__tablename__)
-        idx = sa.Index(f"{staging_name}_rownum_idx", staging.c._rownum)
-        idx.create(bind=session.connection(bind_arguments={"mapper": table_cls}), checkfirst=True)
-        session.commit()
-
     def _paginate_batches(
         self,
         table_cls: type["CSVTableProtocol"],

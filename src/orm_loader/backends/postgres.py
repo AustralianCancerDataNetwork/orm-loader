@@ -202,19 +202,6 @@ class PostgresBackend(DatabaseBackend):
             sa.text(f"SET session_replication_role = '{safe_state}'"), **execute_options
         )
 
-    def _pagination_column(
-        self, table_cls: type["CSVTableProtocol"], staging: sa.Table
-    ) -> sa.ColumnElement[int]:
-        return staging.c._rownum
-
-    def _ensure_pagination_index(
-        self, table_cls: type["CSVTableProtocol"], staging: sa.Table, session: so.Session
-    ) -> None:
-        staging_name = self.staging_name_for_table(table_cls.__tablename__)
-        idx = sa.Index(f"{staging_name}_rownum_idx", staging.c._rownum)
-        idx.create(bind=session.connection(bind_arguments={"mapper": table_cls}), checkfirst=True)
-        session.commit()
-
     @property
     def _commits_between_pagination_batches(self) -> bool:
         """True: bounds the WAL growth, lock duration, and dead-tuple

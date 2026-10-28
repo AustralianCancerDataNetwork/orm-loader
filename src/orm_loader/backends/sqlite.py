@@ -182,6 +182,12 @@ class SQLiteBackend(DatabaseBackend):
         """SQLite's implicit rowid is already gapless and indexed."""
         return sa.literal_column("rowid")
 
+    def _ensure_pagination_index(
+        self, table_cls: type["CSVTableProtocol"], staging: sa.Table, session: so.Session
+    ) -> None:
+        """No-op: rowid needs no index, and the staging table has no _rownum column."""
+        return
+
     @property
     def _commits_between_pagination_batches(self) -> bool:
         """False: keeps the whole merge in the caller's transaction, so a

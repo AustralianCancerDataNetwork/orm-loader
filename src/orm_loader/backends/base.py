@@ -491,13 +491,18 @@ class DatabaseBackend(ABC):
             See :meth:`merge_replace`.
         """
 
-    @abstractmethod
     def _pagination_column(
         self,
         table_cls: Type["CSVTableProtocol"],
         staging: sa.Table,
     ) -> sa.ColumnElement[int]:
-        """Column this backend orders a staging-table scan by, for pagination."""
+        """Column this backend orders a staging-table scan by, for pagination.
+
+        Defaults to the explicit _rownum column every staging table carries.
+        Override for a backend with a cheaper, already-indexed alternative
+        (e.g. SQLite's implicit rowid).
+        """
+        return staging.c._rownum
 
     def _ensure_pagination_index(
         self,
@@ -505,10 +510,15 @@ class DatabaseBackend(ABC):
         staging: sa.Table,
         session: so.Session,
     ) -> None:
-        """Make sure _pagination_column() is indexed, if it needs to be.
-        No-op by default. Overwrite in a backend that needs an index to paginate efficiently (e.g. DuckDB).
+        """Index _pagination_column() so paginated batches can seek it efficiently.
+
+        Overridden as a no-op by a backend whose _pagination_column() is
+        already indexed (e.g. SQLite's rowid).
         """
-        return
+        staging_name = self.staging_name_for_table(table_cls.__tablename__)
+        idx = sa.Index(f"{staging_name}_rownum_idx", staging.c._rownum)
+        idx.create(bind=session.connection(bind_arguments={"mapper": table_cls}), checkfirst=True)
+        session.commit()
 
     @property
     @abstractmethod
