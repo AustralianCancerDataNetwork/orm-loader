@@ -1,4 +1,5 @@
 
+from datetime import date
 from enum import Enum
 
 import sqlalchemy as sa
@@ -201,3 +202,26 @@ class SelfReferentialTable(Base, CSVLoadableTableInterface):
         sa.Integer,
         sa.ForeignKey(f"{SchemaRole.PRIMARY.value}.self_referential_table.id", use_alter=True),
     )
+
+
+class DemoRecord(Base, CSVLoadableTableInterface):
+    """Optional text label plus one column of each typed kind, for null-handling tests."""
+
+    __tablename__ = "demo_record"
+    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+
+    demo_id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
+    demo_label: so.Mapped[str | None] = so.mapped_column(sa.String, nullable=True)
+    demo_number: so.Mapped[int | None] = so.mapped_column(sa.Integer, nullable=True)
+    demo_flag: so.Mapped[bool | None] = so.mapped_column(sa.Boolean, nullable=True)
+    demo_date: so.Mapped[date | None] = so.mapped_column(sa.Date, nullable=True)
+
+
+class DemoRequiredRecord(Base, CSVLoadableTableInterface):
+    """Same shape as DemoRecord with a required text label."""
+
+    __tablename__ = "demo_required_record"
+    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+
+    demo_id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
+    demo_label: so.Mapped[str] = so.mapped_column(sa.String, nullable=False)
