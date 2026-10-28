@@ -381,7 +381,7 @@ def test_duckdb_backend_merge_insert_loads_self_referential_rows_in_dependency_o
 ):
     """Staging rows arrive in reverse dependency order (each pointing at a
     row not yet committed); merge_insert must still load every row, in
-    however many waves that takes, regardless of insertion order.
+    however many batches that takes, regardless of insertion order.
     """
     duckdb_backend.create_staging_table(_SelfReferentialTableCls, duckdb_session)
     staging = _SelfReferentialTableCls.get_staging_table(
@@ -448,12 +448,13 @@ def test_duckdb_backend_merge_replace_updates_and_inserts_self_referential_rows_
 
 @pytest.mark.duckdb
 @pytest.mark.db_dialect
-def test_duckdb_backend_merge_replace_dependency_waves_catch_a_genuine_orphan(
+def test_duckdb_backend_merge_replace_catches_a_genuine_orphan(
     duckdb_session_with_committed_schema, duckdb_backend,
 ):
     """A replace batch re-pointing an existing row at a genuine orphan (not
     merely a not-yet-inserted new row) must still be caught, not mistaken
-    for a forward reference that will resolve later.
+    for a forward reference that will resolve later. Rolling back must
+    restore the original row.
     """
     session = duckdb_session_with_committed_schema
     session.execute(sa.insert(SelfReferentialTable), [{"id": 1, "parent_id": None}])
@@ -466,18 +467,19 @@ def test_duckdb_backend_merge_replace_dependency_waves_catch_a_genuine_orphan(
     with pytest.raises(DeferredForeignKeyViolationError, match="self_referential_table"):
         duckdb_backend.merge_replace(_SelfReferentialTableCls, session, ["id"], merge_batch_size=1)
 
+    session.rollback()
     assert session.execute(sa.select(SelfReferentialTable.parent_id)).scalars().all() == [None]
     assert session.execute(sa.select(staging.c.id)).scalars().all() == [1]
 
 
 @pytest.mark.duckdb
 @pytest.mark.db_dialect
-def test_duckdb_backend_merge_insert_dependency_waves_catch_a_genuine_orphan(
+def test_duckdb_backend_merge_insert_catches_a_genuine_orphan_in_its_own_batch(
     duckdb_session_with_committed_schema, duckdb_backend,
 ):
-    """A row whose parent never arrives in any wave is a genuine violation.
-    A row that did become ready must still be committed. Only the stuck
-    row is left behind in staging and reported.
+    """A row whose parent never arrives is a genuine violation, caught in
+    its own batch's commit. A row that became ready in an earlier batch
+    already committed and survives rolling back the failed one.
     """
     session = duckdb_session_with_committed_schema
     duckdb_backend.create_staging_table(_SelfReferentialTableCls, session)
@@ -489,8 +491,119 @@ def test_duckdb_backend_merge_insert_dependency_waves_catch_a_genuine_orphan(
     with pytest.raises(DeferredForeignKeyViolationError, match="self_referential_table"):
         duckdb_backend.merge_insert(_SelfReferentialTableCls, session, merge_batch_size=1)
 
+    session.rollback()
     assert session.execute(sa.select(SelfReferentialTable.id)).scalars().all() == [1]
     assert session.execute(sa.select(staging.c.id)).scalars().all() == [2]
+
+
+@pytest.mark.duckdb
+@pytest.mark.db_dialect
+def test_duckdb_backend_merge_insert_unbatched_has_no_intermediate_commit(
+    duckdb_session_with_committed_schema, duckdb_backend,
+):
+    """Without merge_batch_size, nothing may commit until the caller's own
+    validation runs, even when a later row is a genuine orphan. Rolling
+    back after that validation must leave nothing behind. Comparable to
+    test_duckdb_backend_merge_insert_batch_validation_prevents_partial_commit,
+    but with no batching requested at all.
+    """
+    session = duckdb_session_with_committed_schema
+    duckdb_backend.create_staging_table(_SelfReferentialTableCls, session)
+    staging = _SelfReferentialTableCls.get_staging_table(
+        session, staging_schema_tag=duckdb_backend.staging_schema_tag
+    )
+    session.execute(sa.insert(staging), [{"id": 1, "parent_id": None}, {"id": 2, "parent_id": 999}])
+
+    duckdb_backend.merge_insert(_SelfReferentialTableCls, session, merge_batch_size=None)
+    with pytest.raises(DeferredForeignKeyViolationError, match="self_referential_table"):
+        duckdb_backend.validate_deferred_fks(_SelfReferentialTableCls, session)
+
+    session.rollback()
+    assert session.execute(sa.select(SelfReferentialTable.id)).scalars().all() == []
+
+
+@pytest.mark.duckdb
+@pytest.mark.db_dialect
+def test_duckdb_backend_merge_insert_accepts_a_self_link(duckdb_session, duckdb_backend):
+    """A row whose parent is itself is valid once it exists, not an orphan
+    merely because the target was empty when it was considered.
+    """
+    duckdb_backend.create_staging_table(_SelfReferentialTableCls, duckdb_session)
+    staging = _SelfReferentialTableCls.get_staging_table(
+        duckdb_session, staging_schema_tag=duckdb_backend.staging_schema_tag
+    )
+    duckdb_session.execute(sa.insert(staging), [{"id": 1, "parent_id": 1}])
+
+    duckdb_backend.merge_insert(_SelfReferentialTableCls, duckdb_session, merge_batch_size=1)
+    duckdb_backend.validate_deferred_fks(_SelfReferentialTableCls, duckdb_session)
+
+    rows = {r.id: r.parent_id for r in duckdb_session.execute(sa.select(SelfReferentialTable)).scalars().all()}
+    assert rows == {1: 1}
+
+
+@pytest.mark.duckdb
+@pytest.mark.db_dialect
+def test_duckdb_backend_merge_insert_accepts_a_two_row_cycle(duckdb_session, duckdb_backend):
+    """Two rows referencing each other are valid once both exist. Neither
+    can ever become ready on its own, which is not a reason to reject them.
+    """
+    duckdb_backend.create_staging_table(_SelfReferentialTableCls, duckdb_session)
+    staging = _SelfReferentialTableCls.get_staging_table(
+        duckdb_session, staging_schema_tag=duckdb_backend.staging_schema_tag
+    )
+    duckdb_session.execute(sa.insert(staging), [{"id": 1, "parent_id": 2}, {"id": 2, "parent_id": 1}])
+
+    duckdb_backend.merge_insert(_SelfReferentialTableCls, duckdb_session, merge_batch_size=1)
+    duckdb_backend.validate_deferred_fks(_SelfReferentialTableCls, duckdb_session)
+
+    rows = {r.id: r.parent_id for r in duckdb_session.execute(sa.select(SelfReferentialTable)).scalars().all()}
+    assert rows == {1: 2, 2: 1}
+
+
+@pytest.mark.duckdb
+@pytest.mark.db_dialect
+def test_duckdb_backend_merge_upsert_ignores_a_duplicate_with_a_bad_reference(
+    duckdb_session_with_committed_schema, duckdb_backend,
+):
+    """A staging row ON CONFLICT DO NOTHING will discard must not be
+    judged as if it were going to be stored.
+    """
+    session = duckdb_session_with_committed_schema
+    session.execute(sa.insert(SelfReferentialTable), [{"id": 1, "parent_id": None}])
+    duckdb_backend.create_staging_table(_SelfReferentialTableCls, session)
+    staging = _SelfReferentialTableCls.get_staging_table(
+        session, staging_schema_tag=duckdb_backend.staging_schema_tag
+    )
+    session.execute(sa.insert(staging), [{"id": 1, "parent_id": 999}])
+
+    duckdb_backend.merge_upsert(_SelfReferentialTableCls, session, ["id"], merge_batch_size=1)
+    duckdb_backend.validate_deferred_fks(_SelfReferentialTableCls, session)
+
+    rows = {r.id: r.parent_id for r in session.execute(sa.select(SelfReferentialTable)).scalars().all()}
+    assert rows == {1: None}
+
+
+@pytest.mark.duckdb
+@pytest.mark.db_dialect
+def test_duckdb_backend_merge_insert_respects_validate_deferred_fks_false(
+    duckdb_session_with_committed_schema, duckdb_backend,
+):
+    """Opting out of application validation must not be overridden by the
+    self-referential batching path.
+    """
+    session = duckdb_session_with_committed_schema
+    duckdb_backend.create_staging_table(_SelfReferentialTableCls, session)
+    staging = _SelfReferentialTableCls.get_staging_table(
+        session, staging_schema_tag=duckdb_backend.staging_schema_tag
+    )
+    session.execute(sa.insert(staging), [{"id": 1, "parent_id": 999}])
+
+    duckdb_backend.merge_insert(
+        _SelfReferentialTableCls, session, merge_batch_size=1, validate_deferred_fks=False
+    )
+
+    rows = {r.id: r.parent_id for r in session.execute(sa.select(SelfReferentialTable)).scalars().all()}
+    assert rows == {1: 999}
 
 
 @pytest.mark.duckdb

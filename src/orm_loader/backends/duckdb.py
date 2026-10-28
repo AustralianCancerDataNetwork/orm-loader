@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Type
+from collections.abc import Iterator
+from typing import TYPE_CHECKING, Any, Type, cast
 
 import sqlalchemy as sa
 import sqlalchemy.orm as so
@@ -294,6 +295,84 @@ class DuckDBBackend(DatabaseBackend):
         idx.create(bind=session.connection(bind_arguments={"mapper": table_cls}), checkfirst=True)
         session.commit()
 
+    def _paginate_batches(
+        self,
+        table_cls: type["CSVTableProtocol"],
+        staging: sa.Table,
+        session: so.Session,
+        merge_batch_size: int | None,
+    ) -> Iterator[sa.ColumnElement[bool] | None]:
+        """Yield batches in dependency order when a self-referential deferred FK exists.
+
+        Falls back to the base class's ordinary position-based pagination
+        for every other table. See :meth:`_self_referential_batches`.
+        """
+        self_referential_fks = self._self_referential_deferred_fks(table_cls)
+        if not self_referential_fks:
+            yield from super()._paginate_batches(table_cls, staging, session, merge_batch_size)
+            return
+        yield from self._self_referential_batches(
+            table_cls, staging, session, merge_batch_size, self_referential_fks
+        )
+
+    def _self_referential_batches(
+        self,
+        table_cls: type["CSVTableProtocol"],
+        staging: sa.Table,
+        session: so.Session,
+        merge_batch_size: int | None,
+        self_referential_fks: tuple[sa.ForeignKeyConstraint, ...],
+    ) -> Iterator[sa.ColumnElement[bool] | None]:
+        """Yield staging batches in the order a self-referential deferred FK needs.
+
+        Each batch is the staging rows whose self-referential FK
+        value(s) are already satisfied (NULL, or matching a row already
+        committed to target). The caller commits and cleans up staging
+        for each batch before the next is requested; this generator
+        never deletes staging itself, so that cleanup stays in the same
+        transaction as the batch's own insert.
+
+        Once no further batch can make progress, everything left in
+        staging is yielded as one final, unconditional batch, deferring
+        to the caller's insert/upsert statement and its own
+        validate_deferred_fks() check rather than raising here.
+
+        When merge_batch_size is None, yields the entire staging set as
+        a single unfiltered batch with no readiness computation.
+        """
+        if merge_batch_size is None:
+            yield None
+            return
+
+        target = table_cls.__table__
+        order_column = self._pagination_column(table_cls, staging)
+        self._ensure_pagination_index(table_cls, staging, session)
+
+        per_fk = []
+        for fk in self_referential_fks:
+            local_cols: list[sa.ColumnElement[Any]] = [staging.c[col.name] for col in fk.columns]
+            remote_cols = [cast(sa.ColumnElement[Any], element.column) for element in fk.elements]
+            not_null = sa.and_(*(col.isnot(None) for col in local_cols))
+            has_match = sa.exists(
+                sa.select(sa.literal(1)).select_from(target).where(
+                    sa.and_(*(local_cols[i] == remote_cols[i] for i in range(len(remote_cols))))
+                )
+            )
+            per_fk.append((not_null, has_match))
+        ready = sa.and_(*(sa.or_(sa.not_(not_null), has_match) for not_null, has_match in per_fk))
+
+        while True:
+            query = sa.select(order_column).where(ready).order_by(order_column).limit(merge_batch_size)
+            keys = session.execute(query).scalars().all()
+            if keys:
+                chunk: sa.ColumnElement[bool] = order_column.in_(keys)
+            else:
+                remaining = session.execute(sa.select(sa.func.count()).select_from(staging)).scalar_one()
+                if not remaining:
+                    return
+                chunk = sa.true()
+            yield chunk
+
     @property
     def _commits_between_pagination_batches(self) -> bool:
         """True: bounds uncommitted work on a large table. Safe because
@@ -360,9 +439,9 @@ class DuckDBBackend(DatabaseBackend):
         A self-referential FK can point an existing row at one this load
         hasn't inserted yet. Doing replace then insert as separate phases
         would validate that before the target exists, so both happen
-        together here, wave by wave (see _merge_in_dependency_waves()),
-        draining staging. The merge_insert() call that follows has
-        nothing left to do.
+        together here, batch by batch (see _paginate_batches()), draining
+        staging. The merge_insert() call that follows has nothing left to
+        do.
 
         Raises
         ------
@@ -417,22 +496,27 @@ class DuckDBBackend(DatabaseBackend):
             def _insert(select_: Any) -> sa.Insert:
                 return sa.insert(target).from_select(insertable_cols, select_)
 
-            def _process_chunk(chunk: sa.ColumnElement[bool]) -> None:
-                # chunk's rows already in target are updated; what's left in
-                # staging afterward is new and gets inserted here.
-                _update(chunk)
-                _drop_matched_from_staging(chunk)
-                session.execute(_insert(non_paginated_select.where(chunk)))
+            def _process_batch(batch_range: sa.ColumnElement[bool] | None) -> None:
+                # batch_range's rows already in target are updated; what's
+                # left in staging afterward is new and gets inserted here.
+                _update(batch_range)
+                _drop_matched_from_staging(batch_range)
+                select_ = non_paginated_select if batch_range is None else non_paginated_select.where(batch_range)
+                session.execute(_insert(select_))
+                # Runs even when batch_range is None: merge_insert() runs
+                # next and needs staging fully drained.
+                delete_stmt = sa.delete(staging)
+                if batch_range is not None:
+                    delete_stmt = delete_stmt.where(batch_range)
+                session.execute(delete_stmt)
+        else:
 
-            self._merge_in_dependency_waves(
-                table_cls, session, staging, target, self_referential_fks,
-                merge_batch_size, validate_deferred_fks, insert_chunk=_process_chunk,
-            )
-            return
+            def _process_batch(batch_range: sa.ColumnElement[bool] | None) -> None:
+                _update(batch_range)
+                _drop_matched_from_staging(batch_range)
 
         for batch_range in self._paginate_batches(table_cls, staging, session, merge_batch_size):
-            _update(batch_range)
-            _drop_matched_from_staging(batch_range)
+            _process_batch(batch_range)
             self._commit_batch_if_needed(
                 table_cls, session, batch_range, validate_deferred_fks=validate_deferred_fks
             )
@@ -461,19 +545,15 @@ class DuckDBBackend(DatabaseBackend):
             )
 
         non_paginated_select = sa.select(*(staging.c[c] for c in insertable_cols))
-
-        self_referential_fks = self._self_referential_deferred_fks(table_cls)
-        if self_referential_fks:
-            self._merge_in_dependency_waves(
-                table_cls, session, staging, target, self_referential_fks,
-                merge_batch_size, validate_deferred_fks,
-                insert_chunk=lambda chunk: session.execute(_upsert(non_paginated_select.where(chunk))),
-            )
-            return
+        self_referential = bool(self._self_referential_deferred_fks(table_cls))
 
         for batch_range in self._paginate_batches(table_cls, staging, session, merge_batch_size):
             select_ = non_paginated_select if batch_range is None else non_paginated_select.where(batch_range)
             session.execute(_upsert(select_))
+            if self_referential and batch_range is not None:
+                # Must be removed from staging in this same transaction,
+                # or the next readiness query would select it again.
+                session.execute(sa.delete(staging).where(batch_range))
             self._commit_batch_if_needed(
                 table_cls, session, batch_range, validate_deferred_fks=validate_deferred_fks
             )
@@ -495,18 +575,15 @@ class DuckDBBackend(DatabaseBackend):
         def _insert(select_: Any) -> sa.Insert:
             return sa.insert(target).from_select(insertable_cols, select_)
 
-        self_referential_fks = self._self_referential_deferred_fks(table_cls)
-        if self_referential_fks:
-            self._merge_in_dependency_waves(
-                table_cls, session, staging, target, self_referential_fks,
-                merge_batch_size, validate_deferred_fks,
-                insert_chunk=lambda chunk: session.execute(_insert(non_paginated_select.where(chunk))),
-            )
-            return
+        self_referential = bool(self._self_referential_deferred_fks(table_cls))
 
         for batch_range in self._paginate_batches(table_cls, staging, session, merge_batch_size):
             select_ = non_paginated_select if batch_range is None else non_paginated_select.where(batch_range)
             session.execute(_insert(select_))
+            if self_referential and batch_range is not None:
+                # Must be removed from staging in this same transaction,
+                # or the next readiness query would select it again.
+                session.execute(sa.delete(staging).where(batch_range))
             self._commit_batch_if_needed(
                 table_cls, session, batch_range, validate_deferred_fks=validate_deferred_fks
             )

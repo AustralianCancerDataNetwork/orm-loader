@@ -581,89 +581,12 @@ class DatabaseBackend(ABC):
 
         A row's match for one of these can arrive in a later pagination
         batch of the same load, since batching orders by insertion
-        position rather than by dependency. merge_insert()/merge_upsert()
-        must load table_cls in dependency order instead when any exist;
-        see :meth:`_merge_in_dependency_waves`.
+        position rather than by dependency. A backend with any of these
+        must override :meth:`_paginate_batches` to yield batches in
+        dependency order instead.
         """
         target = table_cls.__table__
         return tuple(fk for fk in self.deferred_fk_constraints(table_cls) if fk.referred_table is target)
-
-    def _merge_in_dependency_waves(
-        self,
-        table_cls: Type["CSVTableProtocol"],
-        session: so.Session,
-        staging: sa.Table,
-        target: sa.Table,
-        self_referential_fks: tuple[sa.ForeignKeyConstraint, ...],
-        merge_batch_size: int | None,
-        validate_deferred_fks: bool,
-        insert_chunk: Callable[[sa.ColumnElement[bool]], Any],
-    ) -> None:
-        """Insert staging rows wave by wave for a self-referential deferred FK.
-
-        Each wave is exactly the staging rows whose self-referential FK
-        value(s) are already satisfied, by being NULL or by matching a row
-        already committed to target (from an earlier wave, or already
-        there before this load). insert_chunk() inserts one wave (or a
-        merge_batch_size-sized slice of it); the matching staging rows are
-        then removed and the wave committed and validated, before the next
-        wave is computed against the now-larger target.
-
-        Every wave is safe to validate and commit immediately. Nothing in it
-        can be a false positive, since its parent row is  already committed.
-        A row that never becomes ready, once a pass makes no further progress,
-        is a genuine violation (an orphan, or a real cycle) and is raised directly
-        instead of being silently left in staging.
-
-        Notes
-        -----
-        One query round-trip per wave, so cost tracks how many generations
-        deep the self-reference goes, not how many rows there are. Fine for
-        a hierarchy that's a few levels deep with many rows per level (e.g.
-        a category tree). Slow for a long chain where each row's parent is
-        the previous row (i.e. one wave per row).
-
-        Raises
-        ------
-        DeferredForeignKeyViolationError
-            A row's self-referential FK value never matches any committed
-            row once no further wave makes progress.
-        """
-        per_fk = []
-        for fk in self_referential_fks:
-            local_cols: list[sa.ColumnElement[Any]] = [staging.c[col.name] for col in fk.columns]
-            remote_cols = [cast(sa.ColumnElement[Any], element.column) for element in fk.elements]
-            not_null = sa.and_(*(col.isnot(None) for col in local_cols))
-            has_match = sa.exists(
-                sa.select(sa.literal(1)).select_from(target).where(
-                    sa.and_(*(local_cols[i] == remote_cols[i] for i in range(len(remote_cols))))
-                )
-            )
-            per_fk.append((fk, local_cols, not_null, has_match))
-        ready = sa.and_(*(sa.or_(sa.not_(not_null), has_match) for _, _, not_null, has_match in per_fk))
-
-        order_column = self._pagination_column(table_cls, staging)
-        self._ensure_pagination_index(table_cls, staging, session)
-
-        while True:
-            query = sa.select(order_column).where(ready).order_by(order_column)
-            if merge_batch_size is not None:
-                query = query.limit(merge_batch_size)
-            keys = session.execute(query).scalars().all()
-            if not keys:
-                break
-            chunk = order_column.in_(keys)
-            insert_chunk(chunk)
-            session.execute(sa.delete(staging).where(chunk))
-            self._commit_batch_if_needed(table_cls, session, chunk, validate_deferred_fks=validate_deferred_fks)
-
-        if session.execute(sa.select(sa.func.count()).select_from(staging)).scalar_one():
-            for fk, local_cols, not_null, has_match in per_fk:
-                stuck = session.execute(
-                    sa.select(*local_cols).where(not_null, sa.not_(has_match)).limit(5)
-                ).all()
-                if stuck:
-                    raise DeferredForeignKeyViolationError(fk, [tuple(row) for row in stuck])
 
     def merge_context(
         self,
