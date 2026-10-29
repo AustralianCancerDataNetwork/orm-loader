@@ -143,7 +143,7 @@ class ORMTableBase:
 
         A column is considered required if it is:
         - non-nullable
-        - has no default that SQL can apply (see ``sql_defaults``)
+        - has no default that can be supplied (see ``column_defaults``)
         - not an autoincrementing column (the database assigns its value;
           it's never expected in inbound data at all)
 
@@ -155,39 +155,48 @@ class ORMTableBase:
         set[str]
             A set of required column names.
         """
-        mapper = cls.mapper_for()
-        defaults = cls.sql_defaults()
+        defaults = cls.column_defaults()
         return {
             c.key
-            for c in mapper.columns
+            for c in cls.mapper_for().columns
             if not c.nullable and c.key not in defaults and not _resolves_to_autoincrement(c)
         }
 
     @classmethod
-    def sql_defaults(cls) -> dict[str, sa.ColumnElement[Any]]:
+    def autoincrement_columns(cls) -> set[str]:
         """
-        Return the default of each column that has one SQL can apply.
-
-        A server default given as text is written inline, as in the DDL, so
-        the database reads it as the column's type. One given as a SQL
-        expression is used as written, and a scalar Python default is a typed
-        literal. A callable or context-sensitive default has no SQL form, so
-        its column is not listed.
+        Return the names of the columns whose value the database assigns.
 
         Returns
         -------
-        dict[str, sqlalchemy.ColumnElement]
-            A mapping of column name to the expression that supplies its default.
+        set[str]
+            A set of column names.
         """
-        defaults: dict[str, sa.ColumnElement[Any]] = {}
+        return {c.key for c in cls.mapper_for().columns if _resolves_to_autoincrement(c)}
+
+    @classmethod
+    def column_defaults(cls) -> dict[str, Any]:
+        """
+        Return the default of each column that has one that can be supplied.
+
+        A server default given as text and a scalar Python default are
+        returned as the value itself. A server default given as a SQL
+        expression is returned as that expression, for the database to
+        evaluate. A callable or context-sensitive default cannot be supplied
+        for a whole file, so its column is not listed.
+
+        Returns
+        -------
+        dict[str, Any]
+            A mapping of column name to the value, or SQL expression, of its default.
+        """
+        defaults: dict[str, Any] = {}
         for c in cls.mapper_for().columns:
             server_default = getattr(c.server_default, "arg", None)
-            if isinstance(server_default, str):
-                defaults[c.name] = sa.literal(server_default, sa.String()).render_literal_execute()
-            elif server_default is not None:
+            if server_default is not None:
                 defaults[c.name] = server_default
             elif c.default is not None and c.default.is_scalar:
-                defaults[c.name] = sa.literal(c.default.arg, c.type)  # ty: ignore[unresolved-attribute]
+                defaults[c.name] = c.default.arg  # ty: ignore[unresolved-attribute]
         return defaults
 
     @classmethod

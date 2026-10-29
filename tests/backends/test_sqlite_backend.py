@@ -82,18 +82,9 @@ def test_sqlite_backend_create_staging_table(sqlite_session, sqlite_engine):
     inspector = sa.inspect(sqlite_engine)
     assert inspector.has_table(_STAGING_TABLE) is True
     cols = inspector.get_columns(_STAGING_TABLE)
-    assert [c["name"] for c in cols] == ["id", "name", "slug"]
-    assert all(c["nullable"] is True for c in cols)
-
-
-def test_sqlite_backend_drop_staging_table():
-    backend = SQLiteBackend()
-    sqlite_session = _FakeSession()
-
-    backend.drop_staging_table(_ComputedTableCls, _sess(sqlite_session))
-
-    assert sqlite_session.statements == [f"DROP TABLE IF EXISTS {_STAGING_TABLE}"]
-
+    assert [c["name"] for c in cols] == ["id", "name"]
+    target = {c.name: c.nullable for c in ComputedColumnTable.__table__.columns}
+    assert {c["name"]: c["nullable"] for c in cols} == {name: target[name] for name in ("id", "name")}
 
 
 def test_sqlite_backend_disable_fk_reads_then_sets():

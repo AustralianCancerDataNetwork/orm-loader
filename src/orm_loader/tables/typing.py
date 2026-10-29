@@ -1,7 +1,7 @@
 from typing import Protocol, ClassVar, runtime_checkable, TYPE_CHECKING, Optional, Type, Dict, Any, Unpack, TypedDict
 import sqlalchemy.orm as so
 import sqlalchemy as sa
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from pathlib import Path
 from contextlib import AbstractContextManager
 if TYPE_CHECKING:
@@ -52,7 +52,10 @@ class ORMTableProtocol(Protocol):
     def required_columns(cls) -> set[str]: ...
 
     @classmethod
-    def sql_defaults(cls) -> dict[str, sa.ColumnElement[Any]]: ...
+    def autoincrement_columns(cls) -> set[str]: ...
+
+    @classmethod
+    def column_defaults(cls) -> dict[str, Any]: ...
 
 @runtime_checkable
 class FileTableProtocol(ORMTableProtocol, Protocol):
@@ -74,7 +77,9 @@ class FileTableProtocol(ORMTableProtocol, Protocol):
     def _select_reader(cls, ctx: "LoaderContext") -> "FileReader": ...
 
     @classmethod
-    def create_staging_table(cls, session: so.Session, *, staging_schema_tag: str | None = None) -> None: ...
+    def create_staging_table(
+        cls, session: so.Session, *, staging_schema_tag: str | None = None, without: Collection[str] = ()
+    ) -> None: ...
 
     @classmethod
     def load_staging(cls: Type["FileTableProtocol"], loader_context: "LoaderContext", reader: "FileReader") -> int: ...

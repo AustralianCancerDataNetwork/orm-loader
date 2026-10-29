@@ -33,9 +33,9 @@ def _rows(session) -> list[tuple]:
     return [tuple(r) for r in session.execute(sa.select(*columns).order_by(model.demo_id))]
 
 
-def test_only_a_default_that_sql_can_apply_makes_a_column_optional():
+def test_only_a_default_that_can_be_supplied_makes_a_column_optional():
     assert _Table.required_columns() == {"demo_stamp"}
-    assert set(_Table.sql_defaults()) == {"demo_status", "demo_priority", "demo_note"}
+    assert set(_Table.column_defaults()) == {"demo_status", "demo_priority", "demo_note"}
 
 
 def test_an_empty_value_takes_the_default(dialect_session, tmp_path):
@@ -84,3 +84,60 @@ def test_every_kind_of_default_is_applied_and_read_back_on_every_dialect(dialect
         assert (row.kind_date, row.kind_stamp) == (date(2000, 1, 2), datetime(2000, 1, 2, 10, 30))
         assert (row.kind_expression, row.kind_py_int, row.kind_py_date) == ("expr", 5, date(2001, 2, 3))
         assert isinstance(row.kind_now, datetime)
+
+
+def _keyed(session, tmp_path: Path, text: str, **kwargs) -> list[tuple]:
+    from tests.models import DemoKeyedRecord
+
+    path = tmp_path / "demo_keyed_record.csv"
+    path.write_text(text)
+    tag = None if session.get_bind().dialect.name == "sqlite" else STAGING_SCHEMA
+    cast(Type[FileTableProtocol], DemoKeyedRecord).load_file(session, path, staging_schema_tag=tag, **kwargs)
+    session.commit()
+    columns = (DemoKeyedRecord.keyed_id, DemoKeyedRecord.keyed_name)
+    return [tuple(r) for r in session.execute(sa.select(*columns).order_by(DemoKeyedRecord.keyed_id))]
+
+
+def test_a_key_the_file_lacks_is_assigned_by_the_database(dialect_session, tmp_path):
+    assert _keyed(dialect_session, tmp_path, "keyed_name\na\nb\n") == [(1, "a"), (2, "b")]
+
+
+def test_a_key_in_the_file_is_loaded_and_may_not_be_blank(dialect_session, tmp_path):
+    assert _keyed(dialect_session, tmp_path, "keyed_id,keyed_name\n10,a\n20,b\n") == [(10, "a"), (20, "b")]
+    with pytest.raises(RequiredValueError, match="keyed_id"):
+        _keyed(dialect_session, tmp_path, "keyed_id,keyed_name\n,a\n")
+
+
+def test_an_expression_default_is_evaluated_for_each_batch_that_needs_it(dialect_session, tmp_path, monkeypatch):
+    from orm_loader.backends import resolve_backend
+    from orm_loader.loaders import DelimitedTextReader
+
+    calls: list[object] = []
+    backend_class = type(resolve_backend(dialect_session, mapper=DemoDefaultKinds))
+    original = backend_class.evaluate_default
+
+    def counting(self, session, table_cls, expression, column_type):
+        calls.append(expression)
+        return original(self, session, table_cls, expression, column_type)
+
+    monkeypatch.setattr(backend_class, "evaluate_default", counting)
+    path = tmp_path / "demo_default_kinds.csv"
+    path.write_text("kind_id,kind_now\n" + "".join(f"{i},\n" for i in range(1, 30_001)))
+    tag = None if dialect_session.get_bind().dialect.name == "sqlite" else STAGING_SCHEMA
+    table = cast(Type[FileTableProtocol], DemoDefaultKinds)
+    reader = DelimitedTextReader(path, DemoDefaultKinds.model_columns(), block_size=64 << 10)
+    table.load_file(dialect_session, path, staging_schema_tag=tag, reader=reader)
+    batches = len(list(DelimitedTextReader(path, DemoDefaultKinds.model_columns(), block_size=64 << 10).batches()))
+    now_calls = [c for c in calls if isinstance(c, sa.sql.functions.FunctionElement)]
+    assert batches > 1 and len(now_calls) == batches
+
+
+def test_a_default_the_handler_cannot_read_is_an_error_naming_the_column(dialect_session, tmp_path):
+    from orm_loader.helpers import ConversionError
+    from tests.models import DemoBadDefaultRecord
+
+    path = tmp_path / "demo_bad_default_record.csv"
+    path.write_text("bad_id\n1\n")
+    tag = None if dialect_session.get_bind().dialect.name == "sqlite" else STAGING_SCHEMA
+    with pytest.raises(ConversionError, match="bad_count"):
+        cast(Type[FileTableProtocol], DemoBadDefaultRecord).load_file(dialect_session, path, staging_schema_tag=tag)

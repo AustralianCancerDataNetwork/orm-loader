@@ -39,10 +39,10 @@ class FakeBackend(DatabaseBackend):
     def __init__(self) -> None:
         self.calls: list[tuple[str, object]] = []
 
-    def insert_batches(self, ctx, batches, columns) -> int:
+    def insert_batches(self, ctx, staging, batches, columns) -> int:
         total = 0
         for table in batches:
-            ctx.session.execute(ctx.staging_table.insert(), table.to_pylist())
+            ctx.session.execute(staging.insert(), table.to_pylist())
             total += table.num_rows
         return total
 

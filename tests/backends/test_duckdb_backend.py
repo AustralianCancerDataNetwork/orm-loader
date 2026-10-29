@@ -191,8 +191,9 @@ def test_duckdb_backend_create_staging_table(duckdb_session):
     inspector = sa.inspect(duckdb_session.get_bind())
     assert inspector.has_table(_STAGING_TABLE) is True
     cols = inspector.get_columns(_STAGING_TABLE)
-    assert [c["name"] for c in cols] == ["id", "name", "slug", "_rownum"]
-    assert all(c["nullable"] is True for c in cols if c["name"] != "_rownum")
+    assert [c["name"] for c in cols] == ["id", "name", "_rownum"]
+    target = {c.name: c.nullable for c in ComputedColumnTable.__table__.columns}
+    assert {c["name"]: c["nullable"] for c in cols if c["name"] != "_rownum"} == {name: target[name] for name in ("id", "name")}
 
 
 @pytest.mark.duckdb
@@ -227,6 +228,19 @@ def test_duckdb_backend_drop_staging_table_also_drops_rownum_sequence(duckdb_ses
         sa.text("SELECT sequence_name FROM duckdb_sequences()")
     ).scalars().all()
     assert not any(f"{_STAGING_TABLE}_rownum_seq" in name for name in sequences_after_drop)
+
+
+@pytest.mark.duckdb
+@pytest.mark.db_dialect
+def test_duckdb_backend_creates_staging_again_when_only_its_sequence_was_left_behind(duckdb_session):
+    backend = DuckDBBackend()
+    backend.create_staging_table(_ComputedTableCls, duckdb_session)
+    duckdb_session.execute(sa.text(f"DROP TABLE {_STAGING_TABLE}"))
+    duckdb_session.commit()
+
+    backend.create_staging_table(_ComputedTableCls, duckdb_session)
+
+    assert sa.inspect(duckdb_session.get_bind()).has_table(_STAGING_TABLE)
 
 
 @pytest.mark.duckdb

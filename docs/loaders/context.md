@@ -21,7 +21,6 @@ on globals or implicit configuration.
 | `tableclass` | Target ORM table class |
 | `session` | Active SQLAlchemy session |
 | `path` | Path to the input file |
-| `staging_table` | SQLAlchemy Table used for staging |
 | `chunksize` | Rows per batch for the default reader of formats that batch by rows |
 | `normalise` | Whether to interpret values under the policy; when false, values are written as read |
 | `dedupe` | Whether the staging table keeps only the first row for each primary key |

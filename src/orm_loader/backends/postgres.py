@@ -13,12 +13,10 @@ import sqlalchemy.orm as so
 from oa_configurator import (
     Dialect,
     autocommit_connection,
-    physical_schema_of,
     qualified,
 )
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import OperationalError
-from sqlalchemy.schema import DropTable
 from sqlalchemy.sql.compiler import IdentifierPreparer
 
 from ..mappers.materialised_view_errors import (
@@ -81,76 +79,34 @@ class PostgresBackend(DatabaseBackend):
             supports_replace_with_kept_indexes=True,
         )
 
-    def create_staging_table(
+    def evaluate_default(
         self,
-        table_cls: type["FileTableProtocol"],
         session: so.Session,
-    ) -> None:
-        table = table_cls.__table__
-        preparer = self.identifier_preparer
-        staging_name = self.staging_name_for_table(table_cls.__tablename__)
-        staging_ref = self.qualified_staging_name(table_cls.__tablename__)
+        table_cls: type["FileTableProtocol"],
+        expression: sa.ColumnElement[Any],
+        column_type: Any,
+    ) -> Any:
+        """Evaluate on a separate connection, because the session's is busy with the COPY."""
         bind = session.get_bind(mapper=table_cls)
-        source_ref = qualified(
-            bind, table.name, physical_schema=physical_schema_of(bind, schema_tag=table.schema)
-        )
-        bind_arguments = {"mapper": table_cls}
-        session.execute(
-            DropTable(sa.Table(staging_name, sa.MetaData(), schema=self.staging_schema), if_exists=True),
-            bind_arguments=bind_arguments,
-        )
-        session.execute(
-            sa.text(
-                f'''
-                CREATE UNLOGGED TABLE {staging_ref}
-                (LIKE {source_ref} INCLUDING DEFAULTS INCLUDING CONSTRAINTS);
-                '''
-            ),
-            bind_arguments=bind_arguments,
-        )
+        engine = bind.engine if isinstance(bind, sa.Connection) else bind
+        with engine.connect() as connection:
+            return connection.execute(sa.select(sa.cast(expression, column_type))).scalar_one()
 
-        computed_cols = [c.name for c in table.columns if c.computed is not None]
-        for col in computed_cols:
-            session.execute(
-                sa.text(f'ALTER TABLE {staging_ref} DROP COLUMN {preparer.quote_identifier(col)};'),
-                bind_arguments=bind_arguments,
-            )
-
-        # staging only lands the file, so a null reaches the merge, where the column's default
-        # or the required check deals with it; LIKE would keep the NOT NULL of the target
-        nullable = ", ".join(
-            f"ALTER COLUMN {preparer.quote_identifier(c.name)} DROP NOT NULL"
-            for c in table.columns
-            if c.computed is None and not c.nullable
-        )
-        if nullable:
-            session.execute(sa.text(f"ALTER TABLE {staging_ref} {nullable};"), bind_arguments=bind_arguments)
-
-        # allows pagination in O(N log N) time for large tables in merge_insert without needing to add an index on every staging table
-        session.execute(
-            sa.text(
-                f'ALTER TABLE {staging_ref} ADD COLUMN _rownum BIGINT'
-                f" GENERATED ALWAYS AS IDENTITY (CACHE 1000);"
-            ),
-            bind_arguments=bind_arguments,
-        )
-
-        session.commit()
-
-    def drop_staging_table(
-        self,
-        table_cls: type["FileTableProtocol"],
-        session: so.Session,
-    ) -> None:
-        staging_name = self.staging_name_for_table(table_cls.__tablename__)
-        session.execute(
-            DropTable(sa.Table(staging_name, sa.MetaData(), schema=self.staging_schema), if_exists=True),
-            bind_arguments={"mapper": table_cls},
+    def _staging_table(self, table_cls: type["FileTableProtocol"], columns: Sequence[sa.Column[Any]]) -> sa.Table:
+        """Unlogged, with an identity column, which paginates the merge in O(N log N) without an index."""
+        return sa.Table(
+            self.staging_name_for_table(table_cls.__tablename__),
+            sa.MetaData(),
+            *columns,
+            sa.Column("_rownum", sa.BigInteger, sa.Identity(always=True, cache=1000)),
+            schema=self.staging_schema,
+            prefixes=["UNLOGGED"],
         )
 
     def insert_batches(
         self,
         ctx: "LoaderContext",
+        staging: sa.Table,
         batches: Iterable[pa.Table],
         columns: Sequence[str],
     ) -> None:
@@ -165,7 +121,7 @@ class PostgresBackend(DatabaseBackend):
         if not hasattr(cursor, "copy"):
             cursor.close()
             raise RuntimeError("The PostgreSQL sink needs a psycopg 3 connection, whose cursors provide copy()")
-        table_ref = self._staging_reference(ctx, connection)
+        table_ref = self._staging_reference(staging, connection)
         column_list = ", ".join(self.identifier_preparer.quote(c) for c in columns)
         options = pacsv.WriteOptions(include_header=False, quoting_style="needed")
         try:
@@ -278,8 +234,7 @@ class PostgresBackend(DatabaseBackend):
         self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
         staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
-        staged = self._staged_columns(table_cls, staging)
-        insertable_cols = list(staged)
+        insertable_cols = self._insertable_column_names(table_cls, staging)
 
         def _upsert(select_: Any) -> sa.Insert:
             # sa.insert() has no .on_conflict_do_nothing()
@@ -289,7 +244,7 @@ class PostgresBackend(DatabaseBackend):
                 .on_conflict_do_nothing(index_elements=pk_cols)
             )
 
-        non_paginated_select = sa.select(*staged.values())
+        non_paginated_select = sa.select(*(staging.c[c] for c in insertable_cols))
 
         for batch_range in self._paginate_batches(table_cls, staging, session, merge_batch_size):
             select_ = non_paginated_select if batch_range is None else non_paginated_select.where(batch_range)
@@ -314,9 +269,8 @@ class PostgresBackend(DatabaseBackend):
         self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
         staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
-        staged = self._staged_columns(table_cls, staging)
-        insertable_cols = list(staged)
-        non_paginated_select = sa.select(*staged.values())
+        insertable_cols = self._insertable_column_names(table_cls, staging)
+        non_paginated_select = sa.select(*(staging.c[c] for c in insertable_cols))
 
         def _insert(select_: Any) -> sa.Insert:
             return sa.insert(target).from_select(insertable_cols, select_)

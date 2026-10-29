@@ -13,7 +13,6 @@ import sqlalchemy.orm as so
 from sqlalchemy import event, text
 from sqlalchemy.dialects import sqlite as sqlite_dialect
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.schema import DropTable
 from sqlalchemy.sql.compiler import IdentifierPreparer
 
 from .base import BackendCapabilities, DatabaseBackend, Dialect
@@ -119,6 +118,7 @@ class SQLiteBackend(DatabaseBackend):
     def insert_batches(
         self,
         ctx: "LoaderContext",
+        staging: sa.Table,
         batches: Iterable[pa.Table],
         columns: Sequence[str],
     ) -> None:
@@ -131,7 +131,7 @@ class SQLiteBackend(DatabaseBackend):
         """
         connection = ctx.session.connection(bind_arguments={"mapper": ctx.tableclass})
         preparer = connection.dialect.identifier_preparer
-        table_ref = self._staging_reference(ctx, connection)
+        table_ref = self._staging_reference(staging, connection)
         sql = (
             f"INSERT INTO {table_ref} ({', '.join(preparer.quote(c) for c in columns)}) "
             f"VALUES ({', '.join('?' for _ in columns)})"
@@ -148,40 +148,15 @@ class SQLiteBackend(DatabaseBackend):
             column = pc.cast(column, pa.string())
         return column.to_pylist()
 
-    def create_staging_table(
+    def evaluate_default(
         self,
-        table_cls: type["FileTableProtocol"],
         session: so.Session,
-    ) -> None:
-        staging_name = self.staging_name_for_table(table_cls.__tablename__)
-        session.execute(
-            DropTable(sa.Table(staging_name, sa.MetaData()), if_exists=True),
-            bind_arguments={"mapper": table_cls},
-        )
-
-        metadata = sa.MetaData()
-        staging_columns = [
-            sa.Column(col.name, col.type, nullable=True)
-            for col in table_cls.__table__.columns
-        ]
-        staging_table = sa.Table(
-            staging_name, metadata, *staging_columns, schema=table_cls.__table__.schema
-        )
-        metadata.create_all(
-            bind=session.connection(bind_arguments={"mapper": table_cls}), tables=[staging_table]
-        )
-        session.commit()
-
-    def drop_staging_table(
-        self,
         table_cls: type["FileTableProtocol"],
-        session: so.Session,
-    ) -> None:
-        staging_name = self.staging_name_for_table(table_cls.__tablename__)
-        session.execute(
-            DropTable(sa.Table(staging_name, sa.MetaData()), if_exists=True),
-            bind_arguments={"mapper": table_cls},
-        )
+        expression: sa.ColumnElement[Any],
+        column_type: Any,
+    ) -> Any:
+        """Evaluate without a cast: SQLite casts a date to the integer of its year."""
+        return session.execute(sa.select(expression), bind_arguments={"mapper": table_cls}).scalar_one()
 
     def disable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int:
         execute_options = {"bind_arguments": {"mapper": mapper}} if mapper is not None else {}
@@ -279,8 +254,7 @@ class SQLiteBackend(DatabaseBackend):
         self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
         staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
-        staged = self._staged_columns(table_cls, staging)
-        insertable_cols = list(staged)
+        insertable_cols = self._insertable_column_names(table_cls, staging)
 
         def _upsert(select_: Any) -> sa.Insert:
             return (
@@ -289,7 +263,7 @@ class SQLiteBackend(DatabaseBackend):
                 .on_conflict_do_nothing(index_elements=pk_cols)
             )
 
-        non_paginated_select = sa.select(*staged.values())
+        non_paginated_select = sa.select(*(staging.c[c] for c in insertable_cols))
 
         for batch_range in self._paginate_batches(table_cls, staging, session, merge_batch_size):
 
@@ -307,9 +281,8 @@ class SQLiteBackend(DatabaseBackend):
         self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
         staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
-        staged = self._staged_columns(table_cls, staging)
-        insertable_cols = list(staged)
-        non_paginated_select = sa.select(*staged.values())
+        insertable_cols = self._insertable_column_names(table_cls, staging)
+        non_paginated_select = sa.select(*(staging.c[c] for c in insertable_cols))
 
         def _insert(select_: Any) -> sa.Insert:
             return sa.insert(target).from_select(insertable_cols, select_)

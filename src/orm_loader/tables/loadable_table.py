@@ -7,7 +7,7 @@ target table. Readers choose the file formats; backends choose the merge
 and index handling.
 """
 import logging
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from time import perf_counter
@@ -15,7 +15,7 @@ from typing import Any, Generator, Type
 
 import sqlalchemy as sa
 import sqlalchemy.orm as so
-from oa_configurator import Dialect, ResolvedDatabase, physical_schema_of
+from oa_configurator import ResolvedDatabase, physical_schema_of
 from sqlalchemy.exc import InvalidRequestError, UnboundExecutionError
 
 from ..backends.resolve import resolve_backend
@@ -64,12 +64,14 @@ class FileLoadableTableInterface(ORMTableBase):
         session: so.Session,
         *,
         staging_schema_tag: str | None = None,
+        without: Collection[str] = (),
     ):
         """
         Create a fresh staging table for ingestion.
 
         Any existing staging table with the same name is dropped first.
-        The staging table schema mirrors the target table schema.
+        The staging table has the target's columns with their types and
+        nullability.
 
         Parameters
         ----------
@@ -79,6 +81,9 @@ class FileLoadableTableInterface(ORMTableBase):
             schema_translate_map tag the staging table should be created
             under. ``None`` means no schema qualification (backend-default
             behavior).
+        without
+            Names of target columns the staging table leaves out. The merge
+            then leaves them out of its insert.
 
         Raises
         ------
@@ -89,7 +94,7 @@ class FileLoadableTableInterface(ORMTableBase):
         """
         _require_bind(session, cls)
         backend = resolve_backend(session, staging_schema_tag=staging_schema_tag, mapper=cls)
-        backend.create_staging_table(cls, session)
+        backend.create_staging_table(cls, session, without=without)
 
     @classmethod
     @contextmanager
@@ -214,7 +219,7 @@ class FileLoadableTableInterface(ORMTableBase):
         staging_schema_tag: str | None = None,
     ) -> sa.Table:
         """
-        Return the reflected staging table, creating it if necessary.
+        Return the reflected staging table.
 
         Parameters
         ----------
@@ -229,38 +234,26 @@ class FileLoadableTableInterface(ORMTableBase):
         sqlalchemy.Table
             The reflected staging table.
 
+        Raises
+        ------
+        sqlalchemy.exc.NoSuchTableError
+            The staging table has not been created.
+
         Notes
         -----
-        Inspects and reflects via ``session.connection()``, not the bare
-        engine. Confirmed empirically: on SQLite's SingletonThreadPool, a
-        second connection opened straight from the engine is the same
-        underlying DBAPI connection, and closing that second wrapper resets
-        its perceived transaction state, silently discarding the session's
-        own uncommitted work. Using the session's own already-open
-        connection avoids ever opening a second one. Fetched fresh both
-        before and after the possible ``create_staging_table()`` call below,
-        since that call commits, which can invalidate an earlier reference.
+        Reflects via ``session.connection()``, not the bare engine. On
+        SQLite's SingletonThreadPool a second connection opened straight
+        from the engine is the same underlying DBAPI connection, and closing
+        that second wrapper resets its perceived transaction state, silently
+        discarding the session's own uncommitted work.
         """
         _require_bind(session, cls)
         backend = resolve_backend(session, staging_schema_tag=staging_schema_tag, mapper=cls)
-        connection = session.connection(bind_arguments={"mapper": cls})
-        inspector = sa.inspect(connection)
-        staging_name = backend.staging_name_for_table(cls.__tablename__)
-
-        staging_schema = backend.staging_schema
-        if staging_schema is None and backend.dialect == Dialect.SQLITE:
-            staging_schema = cls.__table__.schema
-        if not inspector.has_table(staging_name, schema=backend.staging_schema):
-            logger.debug(f"Staging table {staging_name} does not exist; recreating",)
-            cls.create_staging_table(session, staging_schema_tag=staging_schema_tag)
-
-        connection = session.connection(bind_arguments={"mapper": cls})
-
         return sa.Table(
-            staging_name,
+            backend.staging_name_for_table(cls.__tablename__),
             sa.MetaData(),  # throwaway — keeps staging table out of Base.metadata
-            autoload_with=connection,
-            schema=staging_schema,
+            autoload_with=session.connection(bind_arguments={"mapper": cls}),
+            schema=backend.staging_schema,
         )
 
     @classmethod
@@ -284,9 +277,12 @@ class FileLoadableTableInterface(ORMTableBase):
         int
             Number of rows loaded into the staging table.
         """
-        _require_bind(loader_context.session, cls)
-        cls.create_staging_table(loader_context.session, staging_schema_tag=loader_context.staging_schema_tag)
-        return stage_file(loader_context, reader)
+        session, tag = loader_context.session, loader_context.staging_schema_tag
+        _require_bind(session, cls)
+        left_out = set() if reader.empty else cls.autoincrement_columns() - set(reader.columns)
+        cls.create_staging_table(session, staging_schema_tag=tag, without=left_out)
+        staging = cls.get_staging_table(session, staging_schema_tag=tag)
+        return stage_file(loader_context, reader, staging)
 
     @classmethod
     def _select_reader(cls: Type[FileTableProtocol], ctx: LoaderContext) -> FileReader:
@@ -453,7 +449,6 @@ class FileLoadableTableInterface(ORMTableBase):
             tableclass=cls,
             session=session,
             path=path,
-            staging_table=cls.get_staging_table(session, staging_schema_tag=staging_schema_tag),
             chunksize=chunksize,
             normalise=normalise,
             dedupe=dedupe,

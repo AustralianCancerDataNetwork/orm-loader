@@ -48,10 +48,8 @@ def _stage(session, table, path: Path, reader=None, **context):
     tag = None if session.get_bind().dialect.name == "sqlite" else STAGING_SCHEMA
     table.create_staging_table(session, staging_schema_tag=tag)
     staging = table.get_staging_table(session, staging_schema_tag=tag)
-    ctx = LoaderContext(
-        tableclass=table, session=session, path=path, staging_table=staging, staging_schema_tag=tag, **context
-    )
-    loaded = stage_file(ctx, reader or table._select_reader(ctx))
+    ctx = LoaderContext(tableclass=table, session=session, path=path, staging_schema_tag=tag, **context)
+    loaded = stage_file(ctx, reader or table._select_reader(ctx), staging)
     return loaded, ctx, staging
 
 
@@ -131,9 +129,7 @@ def test_a_file_in_many_batches_loads_every_row_in_order(dialect_session, tmp_pa
 
 def test_a_failing_reader_is_raised_and_stages_nothing(dialect_session, tmp_path, fmt):
     path = _write(tmp_path, DemoRecord, fmt, [("1", "a", "", "", "")])
-    reader = _Demo._select_reader(
-        LoaderContext(tableclass=_Demo, session=dialect_session, path=path, staging_table=cast(sa.Table, DemoRecord.__table__))
-    )
+    reader = _Demo._select_reader(LoaderContext(tableclass=_Demo, session=dialect_session, path=path))
 
     def broken():
         raise RuntimeError("boom")

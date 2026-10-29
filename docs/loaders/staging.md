@@ -1,6 +1,6 @@
 # Staging and Sinks
 
-`stage_file(ctx, reader)` connects a reader, the batch processor and the sink of the session's backend. It loads into the staging table, respects the `LoaderContext` flags, returns the number of rows left in staging, and leaves the merge to the table layer.
+`stage_file(ctx, reader, staging)` connects a reader, the batch processor and the sink of the session's backend. It loads into the given staging table, respects the `LoaderContext` flags, returns the number of rows left in staging, and leaves the merge to the table layer.
 
 ::: orm_loader.loaders.loader.stage_file
 
@@ -10,9 +10,15 @@
 
 - Values are interpreted by column type, as described in [Conversion](conversion.md).
 - With the default policy an unreadable value or a missing required value raises and nothing is loaded.
-- With `ErrorPolicy(on_error="reject_row")` those rows, and delimited lines with the wrong number of fields, are written to `<rejects_dir>/<file name>.rejects.csv` and the rest load. A malformed line has no row number, and its text is in the reason. `rejects_dir` defaults to a `rejects` directory inside the input file's directory, and the file of an earlier load is removed. `LoadReport` accounts for every row read, checked against the rows counted in the staging table.
-- A column of a table that has a default which SQL can apply (a server default or a scalar Python default) and is not nullable takes it when the value is empty or the column is not in the file. A column with a callable default stays required.
+- With `ErrorPolicy(on_error="reject_row")` those rows, and delimited lines with the wrong number of fields, are written to `<rejects_dir>/<file name>.rejects.csv` and the rest load. A malformed line is listed with its row number in the file, and its text is in the reason. `rejects_dir` defaults to a `rejects` directory inside the input file's directory, and the file of an earlier load is removed. `LoadReport` accounts for every row read, checked against the rows counted in the staging table.
+- A blank value, and a column the file lacks, take the column's default when it has one: a server default written as text, a scalar Python default, or a SQL expression such as `current_date`. The column's handler reads the default like a value from the file, and an expression is evaluated by the database for each batch that needs it. A column with a callable default stays required.
 - With `normalise=False` raw text is passed to the staging table unchanged.
+
+---
+
+## Staging table
+
+Staging mirrors the target: its columns, their types and their nullability, with no key, index, default or constraint, and a `_rownum` column that orders the rows (SQLite uses its rowid). The processor completes every value before it is written, so a NOT NULL column never receives NULL. A key the file provides is a staging column like any other. When the file lacks an autoincrement key, staging leaves it out and the merge leaves it out of its insert, so the database assigns it.
 
 ---
 

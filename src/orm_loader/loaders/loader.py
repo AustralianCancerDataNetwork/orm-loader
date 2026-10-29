@@ -83,8 +83,6 @@ class LoaderContext:
         Active SQLAlchemy session.
     path
         Path to the source data file.
-    staging_table
-        SQLAlchemy Table object representing the staging table.
     chunksize
         Rows per batch for the default reader of formats that batch by rows.
     normalise
@@ -110,7 +108,6 @@ class LoaderContext:
     tableclass: type[FileTableProtocol]
     session: so.Session
     path: Path
-    staging_table: sa.Table
 
     chunksize: int | None = None
     normalise: bool = True
@@ -149,7 +146,7 @@ def _require_columns_present(tableclass: type[FileTableProtocol], present_column
         )
 
 
-def stage_file(ctx: LoaderContext, reader: FileReader) -> int:
+def stage_file(ctx: LoaderContext, reader: FileReader, staging: sa.Table) -> int:
     """Load a file into the staging table.
 
     The reader streams the file in bounded batches, so memory does not grow
@@ -163,6 +160,8 @@ def stage_file(ctx: LoaderContext, reader: FileReader) -> int:
         Loader context.
     reader
         Reader that yields the file as Arrow batches.
+    staging
+        Staging table the rows are written to.
 
     Returns
     -------
@@ -192,6 +191,7 @@ def stage_file(ctx: LoaderContext, reader: FileReader) -> int:
         logger.warning("File %s has columns that %s does not have, which are ignored: %s", ctx.path.name, table_name, ignored)
     if ctx.normalise:
         _require_columns_present(ctx.tableclass, reader.columns)
+    backend = resolve_backend(ctx.session, staging_schema_tag=ctx.staging_schema_tag, mapper=ctx.tableclass)
     rejects_dir = ctx.rejects_dir or ctx.path.parent / "rejects"
     processor = BatchProcessor(
         ctx.tableclass,
@@ -201,13 +201,13 @@ def stage_file(ctx: LoaderContext, reader: FileReader) -> int:
         rejects_dir / f"{ctx.path.stem}.rejects.csv",
         ctx.normalise,
         reader.skipped,
+        lambda expression, column_type: backend.evaluate_default(ctx.session, ctx.tableclass, expression, column_type),
     )
-    backend = resolve_backend(ctx.session, staging_schema_tag=ctx.staging_schema_tag, mapper=ctx.tableclass)
-    backend.insert_batches(ctx, processor.stream(chain([] if first is None else [first], batches)), reader.columns)
-    total = backend.count_staging(ctx)
+    backend.insert_batches(ctx, staging, processor.stream(chain([] if first is None else [first], batches)), processor.out_columns)
+    total = backend.count_staging(ctx, staging)
     keys = [c for c in ctx.tableclass.pk_names() if c in reader.columns]
     if ctx.dedupe and keys:
-        ctx.report.dedupe = backend.deduplicate_staging(ctx, keys)
+        ctx.report.dedupe = backend.deduplicate_staging(ctx, staging, keys)
         total = ctx.report.dedupe.rows_after
     ctx.report.rows_loaded += total
     if not ctx.report.accounted:

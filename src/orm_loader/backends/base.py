@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Generator, Iterable, Iterator, Mapping, Sequence
+from collections.abc import Collection, Generator, Iterable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from functools import wraps
@@ -341,31 +341,21 @@ class DatabaseBackend(ABC):
     def _insertable_column_names(
         self,
         table_cls: Type["FileTableProtocol"],
+        staging: sa.Table | None = None,
     ) -> list[str]:
         """
         Return column names safe to include in generic insert statements.
 
         Computed columns are excluded because backend loaders and merge helpers
-        should not attempt to write to them directly.
+        should not attempt to write to them directly. With a staging table,
+        only the columns it has are returned, so a column the load left out
+        (an autoincrement key) is assigned by the database.
         """
-        return [c.name for c in table_cls.__table__.columns if c.computed is None]
-
-    def _staged_columns(
-        self,
-        table_cls: Type["FileTableProtocol"],
-        staging: sa.Table,
-    ) -> dict[str, sa.ColumnElement[Any]]:
-        """
-        Return the staging value of each insertable column by column name.
-
-        A null in a non-nullable column takes the column's SQL default, so an
-        empty value and an absent column mean the default.
-        """
-        defaults = table_cls.sql_defaults()
-        return {
-            name: sa.func.coalesce(staging.c[name], defaults[name]) if name in defaults else staging.c[name]
-            for name in self._insertable_column_names(table_cls)
-        }
+        return [
+            c.name
+            for c in table_cls.__table__.columns
+            if c.computed is None and (staging is None or c.name in staging.c)
+        ]
 
     def deferred_fk_constraints(
         self,
@@ -546,26 +536,95 @@ class DatabaseBackend(ABC):
         if orphans:
             raise error(fk, [tuple(row) for row in orphans])
 
-    @abstractmethod
     def create_staging_table(
         self,
         table_cls: Type["FileTableProtocol"],
         session: so.Session,
+        *,
+        without: Collection[str] = (),
     ) -> None:
-        """Create a staging table for the supplied ORM table class."""
+        """
+        Create the staging table for a table class, replacing an existing one.
 
-    @abstractmethod
+        The staging table has the target's columns with their types and
+        nullability, and no key, index, default or constraint, plus the row
+        key column of the backend. The processor completes every value before
+        it is written, so the target's NOT NULL holds in staging.
+
+        Parameters
+        ----------
+        table_cls
+            Table the staging table is for.
+        session
+            Session whose connection creates the table.
+        without
+            Names of target columns the staging table leaves out. The merge
+            then leaves them out of its insert.
+        """
+        self.drop_staging_table(table_cls, session)
+        columns = [
+            sa.Column(c.name, c.type, nullable=c.nullable)
+            for c in table_cls.__table__.columns
+            if c.computed is None and c.name not in without
+        ]
+        staging = self._staging_table(table_cls, columns)
+        staging.create(bind=session.connection(bind_arguments={"mapper": table_cls}), checkfirst=True)
+        session.commit()
+
     def drop_staging_table(
         self,
         table_cls: Type["FileTableProtocol"],
         session: so.Session,
     ) -> None:
-        """Drop a staging table if it exists."""
+        """Drop a staging table and what belongs to its row key, if they exist."""
+        staging = self._staging_table(table_cls, [])
+        staging.drop(bind=session.connection(bind_arguments={"mapper": table_cls}), checkfirst=True)
+
+    def _staging_table(self, table_cls: Type["FileTableProtocol"], columns: Sequence[sa.Column[Any]]) -> sa.Table:
+        """
+        Return the definition of the staging table, which create and drop both use.
+
+        Parameters
+        ----------
+        table_cls
+            Table the staging table is for.
+        columns
+            The target's columns the staging table holds, none when dropping.
+
+        Returns
+        -------
+        sqlalchemy.Table
+            The columns plus the backend's row key column. The default has no
+            row key, for a backend whose tables already carry one.
+        """
+        return sa.Table(
+            self.staging_name_for_table(table_cls.__tablename__),
+            sa.MetaData(),
+            *columns,
+            schema=self.staging_schema,
+        )
+
+    def evaluate_default(
+        self,
+        session: so.Session,
+        table_cls: Type["FileTableProtocol"],
+        expression: sa.ColumnElement[Any],
+        column_type: Any,
+    ) -> Any:
+        """
+        Return the value of a SQL expression default, as a column of the given type stores it.
+
+        The database evaluates the expression and casts the result to the
+        column type, as it would for the default of an inserted row.
+        """
+        select = sa.select(sa.cast(expression, column_type))
+        return session.execute(select, bind_arguments={"mapper": table_cls}).scalar_one()
 
     @abstractmethod
     def insert_batches(
         self,
         ctx: "LoaderContext",
+        staging: sa.Table,
         batches: Iterable[pa.Table],
         columns: Sequence[str],
     ) -> None:
@@ -577,7 +636,9 @@ class DatabaseBackend(ABC):
         Parameters
         ----------
         ctx
-            Context of the load; its staging table receives the rows.
+            Context of the load.
+        staging
+            Staging table that receives the rows.
         batches
             Typed tables, one per batch.
         columns
@@ -590,7 +651,7 @@ class DatabaseBackend(ABC):
         """
 
     @staticmethod
-    def _staging_reference(ctx: "LoaderContext", connection: Connection) -> str:
+    def _staging_reference(staging: sa.Table, connection: Connection) -> str:
         """
         Return the quoted, schema-qualified name of the load's staging table.
 
@@ -599,8 +660,8 @@ class DatabaseBackend(ABC):
 
         Parameters
         ----------
-        ctx
-            Context of the load.
+        staging
+            The staging table.
         connection
             Connection the SQL runs on.
 
@@ -609,23 +670,23 @@ class DatabaseBackend(ABC):
         str
             The staging table name as the connection resolves it.
         """
-        staging = ctx.staging_table
         translate = connection.get_execution_options().get("schema_translate_map") or {}
         schema = translate.get(staging.schema, staging.schema)
         return qualified(connection, staging.name, physical_schema=schema)
 
-    def count_staging(self, ctx: "LoaderContext") -> int:
-        """Return the number of rows in the load's staging table."""
-        count = sa.select(sa.func.count()).select_from(ctx.staging_table)
+    def count_staging(self, ctx: "LoaderContext", staging: sa.Table) -> int:
+        """Return the number of rows in the staging table."""
+        count = sa.select(sa.func.count()).select_from(staging)
         return ctx.session.execute(count, bind_arguments={"mapper": ctx.tableclass}).scalar_one()
 
     def deduplicate_staging(
         self,
         ctx: "LoaderContext",
+        staging: sa.Table,
         key_columns: Sequence[str],
     ) -> "DedupeResult":
         """
-        Keep the first row for each primary key in the load's staging table.
+        Keep the first row for each primary key in the staging table.
 
         The first row is the one with the lowest row key, which follows the
         order of the source file.
@@ -633,7 +694,9 @@ class DatabaseBackend(ABC):
         Parameters
         ----------
         ctx
-            Context of the load; its staging table is deduplicated.
+            Context of the load.
+        staging
+            Staging table to deduplicate.
         key_columns
             Primary key columns that identify a duplicate.
 
@@ -642,7 +705,6 @@ class DatabaseBackend(ABC):
         DedupeResult
             How many rows the staging table held and how many were removed.
         """
-        staging = ctx.staging_table
         arguments = {"mapper": ctx.tableclass}
         row_key = self._pagination_column(ctx.tableclass, staging)
         ranked = sa.select(
@@ -652,9 +714,9 @@ class DatabaseBackend(ABC):
             .label("position"),
         ).subquery()
         duplicates = sa.select(ranked.c.row_key).where(ranked.c.position > 1)
-        before = self.count_staging(ctx)
+        before = self.count_staging(ctx, staging)
         ctx.session.execute(sa.delete(staging).where(row_key.in_(duplicates)), bind_arguments=arguments)
-        after = self.count_staging(ctx)
+        after = self.count_staging(ctx, staging)
         return DedupeResult(tuple(key_columns), before, before - after)
 
     @staticmethod

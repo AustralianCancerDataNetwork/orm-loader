@@ -15,7 +15,6 @@ def test_loader_context_fields(sqlite_session):
         tableclass=FileLoaderTable,
         session=sqlite_session,
         path=Path("file.csv"),
-        staging_table=FileLoaderTable.__table__,
         chunksize=100,
         normalise=False,
         dedupe=True,
@@ -42,13 +41,12 @@ def test_stage_file_case_insensitive_headers(tmp_path, sqlite_session):
         tableclass=FileLoaderTable,
         session=sqlite_session,
         path=csv,
-        staging_table=FileLoaderTable.__table__,
         chunksize=100,
         normalise=True,
         dedupe=True,
     )
 
-    n = stage_file(ctx, ctx.tableclass._select_reader(ctx))
+    n = stage_file(ctx, ctx.tableclass._select_reader(ctx), FileLoaderTable.__table__)
 
     rows = sqlite_session.execute(
         sa.text('SELECT id, value FROM test_file_loader ORDER BY id')
@@ -76,14 +74,13 @@ def test_stage_file_literal_mode_preserves_quotes(tmp_path, sqlite_session):
         tableclass=FileLoaderTable,
         session=sqlite_session,
         path=csv,
-        staging_table=FileLoaderTable.__table__,
         chunksize=100,
         normalise=True,
         dedupe=True,
         quote_mode="literal",
     )
 
-    n = stage_file(ctx, ctx.tableclass._select_reader(ctx))
+    n = stage_file(ctx, ctx.tableclass._select_reader(ctx), FileLoaderTable.__table__)
 
     rows = sqlite_session.execute(
         sa.text('SELECT id, value FROM test_file_loader ORDER BY id')
@@ -110,14 +107,13 @@ def test_stage_file_csv_mode_strips_quotes(tmp_path, sqlite_session):
         tableclass=FileLoaderTable,
         session=sqlite_session,
         path=csv,
-        staging_table=FileLoaderTable.__table__,
         chunksize=100,
         normalise=True,
         dedupe=True,
         quote_mode="csv",
     )
 
-    n = stage_file(ctx, ctx.tableclass._select_reader(ctx))
+    n = stage_file(ctx, ctx.tableclass._select_reader(ctx), FileLoaderTable.__table__)
 
     rows = sqlite_session.execute(
         sa.text('SELECT id, value FROM test_file_loader ORDER BY id')
@@ -144,14 +140,13 @@ def test_stage_file_by_delimiter_tab_preserves_quotes(tmp_path, sqlite_session):
         tableclass=FileLoaderTable,
         session=sqlite_session,
         path=tsv,
-        staging_table=FileLoaderTable.__table__,
         chunksize=100,
         normalise=True,
         dedupe=True,
         quote_mode="by_delimiter",
     )
 
-    n = stage_file(ctx, ctx.tableclass._select_reader(ctx))
+    n = stage_file(ctx, ctx.tableclass._select_reader(ctx), FileLoaderTable.__table__)
 
     rows = sqlite_session.execute(
         sa.text('SELECT id, value FROM test_file_loader ORDER BY id')
@@ -169,9 +164,8 @@ def test_file_without_data_rows_loads_nothing_whatever_its_header(tmp_path, sqli
             tableclass=FileLoaderTable,
             session=sqlite_session,
             path=csv,
-            staging_table=FileLoaderTable.__table__,
         )
-        assert stage_file(ctx, ctx.tableclass._select_reader(ctx)) == 0
+        assert stage_file(ctx, ctx.tableclass._select_reader(ctx), FileLoaderTable.__table__) == 0
         assert ctx.report.rows_read == 0
 
 
@@ -183,15 +177,14 @@ def test_accounting_is_checked_against_the_staging_table(tmp_path, sqlite_sessio
         tableclass=FileLoaderTable,
         session=sqlite_session,
         path=csv,
-        staging_table=FileLoaderTable.__table__,
         dedupe=False,
     )
     backend = resolve_backend(sqlite_session, mapper=FileLoaderTable)
     insert = type(backend).insert_batches
 
-    def losing(self, ctx, batches, columns):
-        insert(self, ctx, list(batches)[:-1] or [], columns)
+    def losing(self, ctx, staging, batches, columns):
+        insert(self, ctx, staging, list(batches)[:-1] or [], columns)
 
     monkeypatch.setattr(type(backend), "insert_batches", losing)
     with pytest.raises(IngestError, match="read 3 rows but loaded 0"):
-        stage_file(ctx, ctx.tableclass._select_reader(ctx))
+        stage_file(ctx, ctx.tableclass._select_reader(ctx), FileLoaderTable.__table__)

@@ -9,10 +9,8 @@ import sqlalchemy.orm as so
 from oa_configurator import (
     UnenforcedForeignKey,
     physical_schema_of,
-    qualified,
     unenforced_foreign_keys,
 )
-from sqlalchemy.schema import CreateSequence, DropSequence, DropTable
 from sqlalchemy.sql.compiler import IdentifierPreparer
 
 from .base import BackendCapabilities, DatabaseBackend, DeferredForeignKeyViolationError, Dialect
@@ -156,68 +154,12 @@ class DuckDBBackend(DatabaseBackend):
             for other in self._tables_referencing(target)
         )
 
-    def _staging_rownum_sequence_ref(self, tablename: str) -> str:
-        """Fully schema-qualified, quoted name of tablename's staging _rownum sequence.
-
-        DuckDB can't ALTER TABLE ADD a GENERATED ALWAYS AS IDENTITY column
-        after creation, so pagination uses a sequence-backed DEFAULT
-        instead for a stable, monotonic key.
-        """
-        seq_name = f"{self.staging_name_for_table(tablename)}_rownum_seq"
-        return qualified(self.identifier_preparer, seq_name, physical_schema=self.staging_schema)
-
-    def create_staging_table(
-        self,
-        table_cls: type["FileTableProtocol"],
-        session: so.Session,
-    ) -> None:
-        bind_arguments = {"mapper": table_cls}
-        staging_name = self.staging_name_for_table(table_cls.__tablename__)
-        staging_ref = self.qualified_staging_name(table_cls.__tablename__)
-        seq_ref = self._staging_rownum_sequence_ref(table_cls.__tablename__)
-        sequence = sa.Sequence(f"{staging_name}_rownum_seq", schema=self.staging_schema)
-
-        session.execute(
-            DropTable(sa.Table(staging_name, sa.MetaData(), schema=self.staging_schema), if_exists=True),
-            bind_arguments=bind_arguments,
-        )
-        session.execute(DropSequence(sequence, if_exists=True), bind_arguments=bind_arguments)
-
-        metadata = sa.MetaData()
-        staging_columns = [
-            sa.Column(col.name, col.type, nullable=True)
-            for col in table_cls.__table__.columns
-        ]
-        staging_table = sa.Table(staging_name, metadata, *staging_columns, schema=self.staging_schema)
-        metadata.create_all(
-            bind=session.connection(bind_arguments=bind_arguments), tables=[staging_table]
-        )
-
-        session.execute(CreateSequence(sequence), bind_arguments=bind_arguments)
-        # ALTER TABLE ADD COLUMN has no Core DDL construct, so this stays raw.
-        session.execute(
-            sa.text(f"ALTER TABLE {staging_ref} ADD COLUMN _rownum BIGINT DEFAULT nextval('{seq_ref}');"),
-            bind_arguments=bind_arguments,
-        )
-        session.commit()
-
-    def drop_staging_table(
-        self,
-        table_cls: type["FileTableProtocol"],
-        session: so.Session,
-    ) -> None:
-        bind_arguments = {"mapper": table_cls}
-        staging_name = self.staging_name_for_table(table_cls.__tablename__)
-        session.execute(
-            DropTable(sa.Table(staging_name, sa.MetaData(), schema=self.staging_schema), if_exists=True),
-            bind_arguments=bind_arguments,
-        )
-        session.execute(
-            DropSequence(
-                sa.Sequence(f"{staging_name}_rownum_seq", schema=self.staging_schema), if_exists=True
-            ),
-            bind_arguments=bind_arguments,
-        )
+    def _staging_table(self, table_cls: type["FileTableProtocol"], columns: Sequence[sa.Column[Any]]) -> sa.Table:
+        """Number the rows with a sequence, which DuckDB creates and drops with the table."""
+        name = self.staging_name_for_table(table_cls.__tablename__)
+        sequence = sa.Sequence(f"{name}_rownum_seq", schema=self.staging_schema)
+        row_key = sa.Column("_rownum", sa.BigInteger, sequence, server_default=sequence.next_value())
+        return sa.Table(name, sa.MetaData(), *columns, row_key, schema=self.staging_schema)
 
     @staticmethod
     def _normalize_fk_check_state(previous_state: str | int) -> str | int:
@@ -336,6 +278,7 @@ class DuckDBBackend(DatabaseBackend):
     def insert_batches(
         self,
         ctx: "LoaderContext",
+        staging: sa.Table,
         batches: Iterable[pa.Table],
         columns: Sequence[str],
     ) -> None:
@@ -351,7 +294,7 @@ class DuckDBBackend(DatabaseBackend):
         transaction.
         """
         batch = sa.table("_orm_loader_batch", *(sa.column(c) for c in columns))
-        insert = ctx.staging_table.insert().from_select(list(columns), sa.select(*batch.c))
+        insert = staging.insert().from_select(list(columns), sa.select(*batch.c))
         bind_arguments = {"mapper": ctx.tableclass}
         for index, table in enumerate(batches, start=1):
             native = ctx.session.connection(bind_arguments=bind_arguments).connection
@@ -433,8 +376,7 @@ class DuckDBBackend(DatabaseBackend):
         self.check_replace_feasible(table_cls, pk_cols, session)
         target = table_cls.__table__
         staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
-        staged = self._staged_columns(table_cls, staging)
-        update_cols = [c for c in staged if c not in pk_cols]
+        update_cols = [c for c in self._insertable_column_names(table_cls, staging) if c not in pk_cols]
         pk_join = sa.and_(*(target.c[c] == staging.c[c] for c in pk_cols))
 
         def _batch_keys(extra: sa.ColumnElement[bool] | None = None) -> sa.Select[Any]:
@@ -449,7 +391,7 @@ class DuckDBBackend(DatabaseBackend):
             return sa.tuple_(*(target.c[c] for c in pk_cols)).in_(keys)
 
         def _update(extra: sa.ColumnElement[bool] | None = None) -> None:
-            stmt = sa.update(target).values({c: staged[c] for c in update_cols}).where(pk_join)
+            stmt = sa.update(target).values({c: staging.c[c] for c in update_cols}).where(pk_join)
             if extra is not None:
                 stmt = stmt.where(_pk_in(_batch_keys(extra)))
             session.execute(stmt)
@@ -472,8 +414,8 @@ class DuckDBBackend(DatabaseBackend):
 
         self_referential_fks = self._self_referential_deferred_fks(table_cls)
         if self_referential_fks:
-            insertable_cols = list(staged)
-            non_paginated_select = sa.select(*staged.values())
+            insertable_cols = self._insertable_column_names(table_cls, staging)
+            non_paginated_select = sa.select(*(staging.c[c] for c in insertable_cols))
 
             def _insert(select_: Any) -> sa.Insert:
                 return sa.insert(target).from_select(insertable_cols, select_)
@@ -517,8 +459,7 @@ class DuckDBBackend(DatabaseBackend):
         self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
         staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
-        staged = self._staged_columns(table_cls, staging)
-        insertable_cols = list(staged)
+        insertable_cols = self._insertable_column_names(table_cls, staging)
 
         def _upsert(select_: Any) -> sa.Insert:
             return (
@@ -527,7 +468,7 @@ class DuckDBBackend(DatabaseBackend):
                 .on_conflict_do_nothing(index_elements=pk_cols)
             )
 
-        non_paginated_select = sa.select(*staged.values())
+        non_paginated_select = sa.select(*(staging.c[c] for c in insertable_cols))
         self_referential = bool(self._self_referential_deferred_fks(table_cls))
 
         for batch_range in self._paginate_batches(table_cls, staging, session, merge_batch_size):
@@ -552,9 +493,8 @@ class DuckDBBackend(DatabaseBackend):
         self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
         staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
-        staged = self._staged_columns(table_cls, staging)
-        insertable_cols = list(staged)
-        non_paginated_select = sa.select(*staged.values())
+        insertable_cols = self._insertable_column_names(table_cls, staging)
+        non_paginated_select = sa.select(*(staging.c[c] for c in insertable_cols))
 
         def _insert(select_: Any) -> sa.Insert:
             return sa.insert(target).from_select(insertable_cols, select_)

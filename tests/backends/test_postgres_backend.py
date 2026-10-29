@@ -124,15 +124,6 @@ def test_postgres_backend_create_staging_table_drops_computed_columns(pg_session
     assert cols == {"id", "name", "_rownum"}  # slug is computed, excluded
 
 
-def test_postgres_backend_drop_staging_table():
-    backend = PostgresBackend(staging_schema=STAGING_SCHEMA)
-    session = _FakeSession()
-
-    backend.drop_staging_table(_ComputedTableCls, _sess(session))
-
-    assert session.statements == [f'DROP TABLE IF EXISTS {_STAGING_TABLE_WITH_SCHEMA}']
-
-
 def test_postgres_backend_fk_methods_emit_expected_sql():
     backend = PostgresBackend()
     session = _FakeSession()

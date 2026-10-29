@@ -264,3 +264,23 @@ class DemoBinaryRecord(Base, FileLoadableTableInterface):
 
     demo_id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     demo_blob: so.Mapped[str | None] = so.mapped_column(sa.LargeBinary, nullable=True)
+
+
+class DemoKeyedRecord(Base, FileLoadableTableInterface):
+    """A key the database assigns."""
+
+    __tablename__ = "demo_keyed_record"
+    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+
+    keyed_id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True, autoincrement=True)
+    keyed_name: so.Mapped[str] = so.mapped_column(sa.String, nullable=False)
+
+
+class DemoBadDefaultRecord(Base, FileLoadableTableInterface):
+    """A default that cannot be read as the type of its column."""
+
+    __tablename__ = "demo_bad_default_record"
+    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+
+    bad_id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
+    bad_count: so.Mapped[int | None] = so.mapped_column(sa.Integer, nullable=True, default="abc")
