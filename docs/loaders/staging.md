@@ -34,3 +34,12 @@ A failure in the sink is raised. There is no fallback to another loading path.
 With `dedupe` set, the staging table keeps the first row for each primary key, in source order. The backend removes the others after the load and reports a `DedupeResult` on `LoadReport` with the rows before and the rows removed. The merge step decides what happens when incoming rows overlap with existing target rows.
 
 No schema changes are performed at the loader layer.
+
+---
+
+## Referential integrity
+
+On PostgreSQL and SQLite a load relaxes foreign keys while it merges, so a row loaded before the row it references is accepted. After every table is loaded, `Table.validate_foreign_keys(session)` checks every foreign key of the table with an anti-join and raises `ForeignKeyViolationError` with up to five unmatched keys. Null references are not violations, and the load order does not matter.
+
+DuckDB enforces the keys it creates, so load parent tables first. `load_file` already validates the keys DuckDB never enforces (cross-schema, cyclic and self-referential) after each table's merge, and `validate_foreign_keys` repeats that check, so it works the same way on every backend. A DuckDB table with foreign keys needs `resolved=` for both.
+

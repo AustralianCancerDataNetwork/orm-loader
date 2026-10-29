@@ -7,6 +7,7 @@ from .base import (
     DatabaseBackend,
     DedupeResult,
     Dialect,
+    ForeignKeyViolationError,
     STAGING_SCHEMA,
     staging_schema_claim,
 )
@@ -24,6 +25,7 @@ __all__ = [
     "DedupeResult",
     "Dialect",
     "DuckDBBackend",
+    "ForeignKeyViolationError",
     "MaterializationError",
     "MaterializationFailure",
     "MaterializationOperation",

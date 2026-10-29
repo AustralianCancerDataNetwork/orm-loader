@@ -385,7 +385,8 @@ class FileLoadableTableInterface(ORMTableBase):
             Also run before every intermediate commit a batched merge makes,
             so a violation is caught before that batch commits rather than
             only after the whole load, when an earlier batch's commit can
-            no longer be rolled back.
+            no longer be rolled back. Every other key is verified by
+            ``validate_foreign_keys``.
         resolved
             Topology this table's engine(s) were resolved from. Required on
             DuckDB whenever table_cls has any foreign key at all, to
@@ -510,6 +511,53 @@ class FileLoadableTableInterface(ORMTableBase):
         ).first()
         return row is not None
 
+
+    @classmethod
+    def validate_foreign_keys(
+        cls: Type[FileTableProtocol],
+        session: so.Session,
+        *,
+        staging_schema_tag: str | None = None,
+        resolved: ResolvedDatabase | None = None,
+        physical_schemas: Mapping[str, str | None] | None = None,
+    ) -> None:
+        """
+        Raise if any row references a row that does not exist.
+
+        Loads relax foreign keys during the merge on PostgreSQL and SQLite,
+        so a row loaded before the row it references is accepted. Call this
+        once every table is loaded to verify referential integrity,
+        whatever the load order. DuckDB enforces most of its keys itself, so
+        only the keys it cannot enforce are checked.
+
+        Parameters
+        ----------
+        session
+            An active SQLAlchemy session.
+        staging_schema_tag
+            schema_translate_map tag used to resolve the backend, as in
+            ``load_file``.
+        resolved
+            Topology this table's engine(s) were resolved from. Required on
+            DuckDB for a table with foreign keys.
+        physical_schemas
+            A schema tag's physical name beyond resolved's own configured
+            ones.
+
+        Raises
+        ------
+        ForeignKeyViolationError
+            A non-null reference has no matching row in the referred table.
+        """
+        _require_bind(session, cls)
+        backend = resolve_backend(
+            session,
+            staging_schema_tag=staging_schema_tag,
+            mapper=cls,
+            resolved=resolved,
+            physical_schemas=physical_schemas,
+        )
+        backend.validate_foreign_keys(cls, session)
 
     @classmethod
     def merge_from_staging(

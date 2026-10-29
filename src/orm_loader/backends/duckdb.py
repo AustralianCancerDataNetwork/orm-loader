@@ -7,10 +7,7 @@ import pyarrow as pa
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 from oa_configurator import (
-    ResolvedCDMDatabase,
-    Role,
     UnenforcedForeignKey,
-    is_ephemeral_url,
     physical_schema_of,
     qualified,
     unenforced_foreign_keys,
@@ -18,7 +15,6 @@ from oa_configurator import (
 from sqlalchemy.schema import CreateSequence, DropSequence, DropTable
 from sqlalchemy.sql.compiler import IdentifierPreparer
 
-from ..helpers.engines import dispose_engines
 from .base import BackendCapabilities, DatabaseBackend, DeferredForeignKeyViolationError, Dialect
 
 if TYPE_CHECKING:
@@ -116,69 +112,18 @@ class DuckDBBackend(DatabaseBackend):
             if entry.constraint not in own_fks:
                 continue
             if entry.reason == "cross_database":
-                self._validate_cross_database_fk(entry.constraint, session)
+                self._validate_cross_database_fk(entry.constraint, session, DeferredForeignKeyViolationError)
             else:
-                self._validate_one_deferred_fk(entry.constraint, session)
+                self._validate_one_fk(entry.constraint, session, DeferredForeignKeyViolationError)
 
-    def _validate_cross_database_fk(self, fk: sa.ForeignKeyConstraint, session: so.Session) -> None:
-        """Anti-join fk across two connections by comparing both sides in Python.
+    def validate_foreign_keys(self, table_cls: Type["FileTableProtocol"], session: so.Session) -> None:
+        """Raise if any row in *table_cls* references a row that does not exist.
 
-        Pulls fk's distinct non-null local values from *session*'s own
-        connection, then opens the referred table's own connection (via
-        self.resolved) to check which of them actually exist there. One
-        bulk query per side instead of one query spanning both.
-
-        Raises
-        ------
-        TypeError
-            self.resolved is not a ResolvedCDMDatabase: a cross-database FK
-            can only arise when PRIMARY/VOCAB are split across connections,
-            which only a CDM-aware resolved can describe.
-        ValueError
-            The remote role's connection is ephemeral (DuckDB ``:memory:``):
-            a freshly built engine would get its own, empty database rather
-            than the one already holding the remote data.
-        DeferredForeignKeyViolationError
-            A local value has no match on the referred connection.
+        DuckDB enforces the foreign keys it creates, so only the ones it
+        never enforces need an anti-join, which is
+        :meth:`validate_deferred_fks`.
         """
-        if not isinstance(self.resolved, ResolvedCDMDatabase):
-            raise TypeError(
-                f"{fk.name} was classified cross_database, which requires split PRIMARY/VOCAB "
-                f"connections, but self.resolved is {type(self.resolved).__name__}, not "
-                "ResolvedCDMDatabase."
-            )
-        local_cols = list(fk.columns)
-        remote_cols = [element.column for element in fk.elements]
-        not_null = sa.and_(*(col.isnot(None) for col in local_cols))
-        local_values = session.execute(sa.select(*local_cols).where(not_null).distinct()).all()
-        if not local_values:
-            return
-
-        remote_tag = remote_cols[0].table.schema
-        remote_role = Role.VOCAB if remote_tag == Role.VOCAB.value else Role.PRIMARY
-        remote_connection = self.resolved.connection_for_role(remote_role)
-        if is_ephemeral_url(remote_connection.safe_url):
-            raise ValueError(
-                f"{fk.name} crosses to {remote_connection.name!r}, an ephemeral connection "
-                "(DuckDB ':memory:'): a freshly built engine would see an empty, disconnected "
-                "database instead of the data already loaded there. Cross-database FK "
-                "validation needs a real, file-backed or server-backed remote connection."
-            )
-        primary_engine, vocab_engine = self.resolved.create_engines(register_claims=False)
-        try:
-            remote_engine = vocab_engine if remote_tag == Role.VOCAB.value else primary_engine
-            with remote_engine.connect() as remote_conn:
-                if len(remote_cols) == 1:
-                    condition = remote_cols[0].in_(value for (value,) in local_values)
-                else:
-                    condition = sa.tuple_(*remote_cols).in_(tuple(value) for value in local_values)
-                existing = {tuple(row) for row in remote_conn.execute(sa.select(*remote_cols).where(condition))}
-        finally:
-            dispose_engines(primary_engine, vocab_engine)
-
-        missing = [tuple(value) for value in local_values if tuple(value) not in existing]
-        if missing:
-            raise DeferredForeignKeyViolationError(fk, missing[:5])
+        self.validate_deferred_fks(table_cls, session)
 
     def _tables_referencing(self, target: sa.Table) -> set[sa.Table]:
         """Other tables with an enforced FK pointing at target.

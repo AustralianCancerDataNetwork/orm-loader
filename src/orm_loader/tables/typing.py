@@ -119,6 +119,16 @@ class FileTableProtocol(ORMTableProtocol, Protocol):
     def drop_staging_table(cls, session: so.Session, *, staging_schema_tag: str | None = None) -> None: ...
 
     @classmethod
+    def validate_foreign_keys(
+        cls,
+        session: so.Session,
+        *,
+        staging_schema_tag: str | None = None,
+        resolved: Optional["ResolvedDatabase"] = None,
+        physical_schemas: Optional[Mapping[str, str | None]] = None,
+    ) -> None: ...
+
+    @classmethod
     def _target_has_rows(cls, session: so.Session) -> bool: ...
 
     @classmethod

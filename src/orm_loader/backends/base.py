@@ -5,12 +5,22 @@ from collections.abc import Generator, Iterable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from functools import wraps
-from typing import TYPE_CHECKING, Any, Callable, ParamSpec, Type, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Callable, ClassVar, ParamSpec, Type, TypeVar, cast
 
 import pyarrow as pa
 import sqlalchemy as sa
 import sqlalchemy.orm as so
-from oa_configurator import Dialect, ResolvedDatabase, SchemaClaim, open_connection, qualified
+from oa_configurator import (
+    Dialect,
+    ResolvedCDMDatabase,
+    ResolvedDatabase,
+    Role,
+    SchemaClaim,
+    is_ephemeral_url,
+    open_connection,
+    qualified,
+    unenforced_foreign_keys,
+)
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.sql.compiler import IdentifierPreparer
 
@@ -59,9 +69,18 @@ class BackendCapabilities:
     supports_replace_with_kept_indexes: bool = False
 
 
-class DeferredForeignKeyViolationError(RuntimeError):
-    """A foreign key this backend can't enforce at the DB level is violated.
+class ForeignKeyViolationError(RuntimeError):
+    """Rows reference a row that does not exist in the referred table.
+
+    Parameters
+    ----------
+    constraint
+        The violated foreign key.
+    orphan_keys
+        Up to five referencing key values that have no match.
     """
+
+    qualifier: ClassVar[str] = ""
 
     def __init__(self, constraint: sa.ForeignKeyConstraint, orphan_keys: list[tuple[Any, ...]]) -> None:
         self.constraint = constraint
@@ -69,10 +88,15 @@ class DeferredForeignKeyViolationError(RuntimeError):
         local_cols = ", ".join(c.name for c in constraint.columns)
         referred_table = next(iter(constraint.elements)).column.table.name
         super().__init__(
-            f"{constraint.table.name}.({local_cols}) references {referred_table!r} via a "
-            f"constraint this backend can't enforce at the DB level; {len(orphan_keys)} "
-            f"row(s) violate it (showing up to 5): {orphan_keys}"
+            f"{constraint.table.name}.({local_cols}) references {referred_table!r}{self.qualifier}; "
+            f"{len(orphan_keys)} row(s) violate it (showing up to 5): {orphan_keys}"
         )
+
+
+class DeferredForeignKeyViolationError(ForeignKeyViolationError):
+    """A foreign key this backend can't enforce at the DB level is violated."""
+
+    qualifier = " via a constraint this backend can't enforce at the DB level"
 
 
 STAGING_SCHEMA: str = "staging"
@@ -355,24 +379,133 @@ class DatabaseBackend(ABC):
             referenced table.
         """
         for fk in self.deferred_fk_constraints(table_cls):
-            self._validate_one_deferred_fk(fk, session)
+            self._validate_one_fk(fk, session, DeferredForeignKeyViolationError)
+
+    def validate_foreign_keys(
+        self,
+        table_cls: Type["FileTableProtocol"],
+        session: so.Session,
+    ) -> None:
+        """Raise if any row in *table_cls* references a row that does not exist.
+
+        Checks every foreign key of the table with an anti-join, whether or
+        not the database enforces it. Loads relax foreign keys while merging
+        on backends that can toggle them, so this is how referential
+        integrity is verified once all tables are loaded, in any load order.
+        Null references are not violations.
+
+        Raises
+        ------
+        ForeignKeyViolationError
+            If any row's FK columns are non-null with no matching row in the
+            referred table.
+        """
+        own_fks = tuple(table_cls.__table__.foreign_key_constraints)
+        cross_database: set[sa.ForeignKeyConstraint] = set()
+        if own_fks and self.resolved is not None:
+            metadata = table_cls.__table__.metadata
+            cross_database = {
+                entry.constraint
+                for entry in unenforced_foreign_keys(
+                    tuple(metadata.tables.values()), resolved=self.resolved, physical_schemas=self.physical_schemas
+                )
+                if entry.reason == "cross_database"
+            }
+        for fk in own_fks:
+            if fk in cross_database:
+                self._validate_cross_database_fk(fk, session)
+            else:
+                self._validate_one_fk(fk, session)
+
+    def _validate_cross_database_fk(
+        self,
+        fk: sa.ForeignKeyConstraint,
+        session: so.Session,
+        error: type[ForeignKeyViolationError] = ForeignKeyViolationError,
+    ) -> None:
+        """Anti-join fk across two connections by comparing both sides in Python.
+
+        Pulls fk's distinct non-null local values from *session*'s own
+        connection, then opens the referred table's own connection (via
+        self.resolved) to check which of them actually exist there. One
+        bulk query per side instead of one query spanning both.
+
+        Raises
+        ------
+        TypeError
+            self.resolved is not a ResolvedCDMDatabase: a cross-database FK
+            can only arise when PRIMARY/VOCAB are split across connections,
+            which only a CDM-aware resolved can describe.
+        ValueError
+            The remote role's connection is ephemeral (DuckDB ``:memory:``):
+            a freshly built engine would get its own, empty database rather
+            than the one already holding the remote data.
+        ForeignKeyViolationError
+            A local value has no match on the referred connection.
+        """
+        if not isinstance(self.resolved, ResolvedCDMDatabase):
+            raise TypeError(
+                f"{fk.name} was classified cross_database, which requires split PRIMARY/VOCAB "
+                f"connections, but self.resolved is {type(self.resolved).__name__}, not "
+                "ResolvedCDMDatabase."
+            )
+        local_cols = list(fk.columns)
+        remote_cols = [element.column for element in fk.elements]
+        not_null = sa.and_(*(col.isnot(None) for col in local_cols))
+        local_values = session.execute(sa.select(*local_cols).where(not_null).distinct()).all()
+        if not local_values:
+            return
+
+        remote_tag = remote_cols[0].table.schema
+        remote_role = Role.VOCAB if remote_tag == Role.VOCAB.value else Role.PRIMARY
+        remote_connection = self.resolved.connection_for_role(remote_role)
+        if is_ephemeral_url(remote_connection.safe_url):
+            raise ValueError(
+                f"{fk.name} crosses to {remote_connection.name!r}, an ephemeral connection "
+                "(DuckDB ':memory:'): a freshly built engine would see an empty, disconnected "
+                "database instead of the data already loaded there. Cross-database FK "
+                "validation needs a real, file-backed or server-backed remote connection."
+            )
+        from ..helpers.engines import dispose_engines
+
+        primary_engine, vocab_engine = self.resolved.create_engines(register_claims=False)
+        try:
+            remote_engine = vocab_engine if remote_tag == Role.VOCAB.value else primary_engine
+            with remote_engine.connect() as remote_conn:
+                if len(remote_cols) == 1:
+                    condition = remote_cols[0].in_(value for (value,) in local_values)
+                else:
+                    condition = sa.tuple_(*remote_cols).in_(tuple(value) for value in local_values)
+                existing = {tuple(row) for row in remote_conn.execute(sa.select(*remote_cols).where(condition))}
+        finally:
+            dispose_engines(primary_engine, vocab_engine)
+
+        missing = [tuple(value) for value in local_values if tuple(value) not in existing]
+        if missing:
+            raise error(fk, missing[:5])
 
     @staticmethod
-    def _validate_one_deferred_fk(fk: sa.ForeignKeyConstraint, session: so.Session) -> None:
+    def _validate_one_fk(
+        fk: sa.ForeignKeyConstraint,
+        session: so.Session,
+        error: type[ForeignKeyViolationError] = ForeignKeyViolationError,
+    ) -> None:
         """Raise if any row of fk's local table has a non-null value with no match in the referred table.
 
         Parameters
         ----------
         fk : sa.ForeignKeyConstraint
-            The deferred FK constraint to check.
+            The FK constraint to check.
         session : so.Session
             Session to run the anti-join query against.
+        error
+            Exception raised on a violation.
 
         Raises
         ------
-        DeferredForeignKeyViolationError
+        ForeignKeyViolationError
             If any row's FK column is non-null with no matching row in the
-            referenced table.
+            referenced table (``error`` is raised, a subclass).
 
         Notes
         -----
@@ -394,7 +527,7 @@ class DatabaseBackend(ABC):
             sa.select(*local_cols).where(not_null, ~orphan_exists).limit(5)
         ).all()
         if orphans:
-            raise DeferredForeignKeyViolationError(fk, [tuple(row) for row in orphans])
+            raise error(fk, [tuple(row) for row in orphans])
 
     @abstractmethod
     def create_staging_table(
