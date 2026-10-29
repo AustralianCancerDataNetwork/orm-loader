@@ -143,38 +143,21 @@ class FileLoadableTableInterface(ORMTableBase):
                     f"{_format_elapsed(perf_counter() - commit_started)}."
                 )
 
-        fk_restore_started: float | None = None
         try:
-            logger.info(f"Table `{table_name}`: Disabling foreign key checks before merge.")
-            fk_disable_started = perf_counter()
-            with backend.merge_context(cls, session):
+            with backend.relaxed_foreign_keys(session, mapper=cls, no_autoflush=False):
+                yield
+                logger.info(f"Table `{table_name}`: Committing merged rows.")
+                commit_started = perf_counter()
+                session.commit()
                 logger.info(
-                    f"Table `{table_name}`: Foreign key checks disabled in "
-                    f"{_format_elapsed(perf_counter() - fk_disable_started)}."
+                    f"Table `{table_name}`: Merge commit completed in "
+                    f"{_format_elapsed(perf_counter() - commit_started)}."
                 )
-                try:
-                    yield
-                    logger.info(f"Table `{table_name}`: Committing merged rows.")
-                    commit_started = perf_counter()
-                    session.commit()
-                    logger.info(
-                        f"Table `{table_name}`: Merge commit completed in "
-                        f"{_format_elapsed(perf_counter() - commit_started)}."
-                    )
-                finally:
-                    logger.info(f"Table `{table_name}`: Restoring foreign key checks.")
-                    fk_restore_started = perf_counter()
-            
         except Exception as e:
             session.rollback()
             logger.error(f"Table `{table_name}`: Merge operation failed - {e}")
             raise
         finally:
-            if fk_restore_started is not None:
-                logger.info(
-                    f"Table `{table_name}`: Foreign key checks restored in "
-                    f"{_format_elapsed(perf_counter() - fk_restore_started)}."
-                )
             if indices:
                 logger.info(f"Table `{table_name}`: Verifying/Rebuilding indices.")
                 rebuild_started = perf_counter()

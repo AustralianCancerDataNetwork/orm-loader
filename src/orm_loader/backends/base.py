@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from collections.abc import Collection, Generator, Iterable, Iterator, Mapping, Sequence
-from contextlib import AbstractContextManager, contextmanager
+from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import wraps
+from time import perf_counter
 from typing import TYPE_CHECKING, Any, Callable, ClassVar, ParamSpec, Type, TypeVar, cast
 
 import pyarrow as pa
@@ -28,6 +30,8 @@ if TYPE_CHECKING:
     from ..loaders.loader import LoaderContext
     from ..mappers.materialised_view_contracts import MaterializedViewIndex
     from ..tables.typing import FileTableProtocol
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -917,40 +921,39 @@ class DatabaseBackend(ABC):
         target = table_cls.__table__
         return tuple(fk for fk in self.deferred_fk_constraints(table_cls) if fk.referred_table is target)
 
-    def merge_context(
-        self,
-        table_cls: Type["FileTableProtocol"],
-        session: so.Session,
-    ) -> AbstractContextManager[None]:
-        """Disable backend FK checks for a table's merge and restore them afterward.
-
-        A backend without supports_fk_toggle has no state to disable in the
-        first place, so this skips the attempt entirely rather than raising;
-        such a backend's own merge methods must avoid operations (like
-        deleting a referenced row) that would need the toggle to be safe.
-        """
-        return self.bulk_load_context(
-            session, mapper=table_cls, disable_fk=self.capabilities.supports_fk_toggle, no_autoflush=False
-        )
-
     @contextmanager
-    def bulk_load_context(
+    def relaxed_foreign_keys(
         self,
         session: so.Session,
         *,
         mapper: Any | None = None,
-        disable_fk: bool = True,
         no_autoflush: bool = True,
     ):
         """
-        Generic bulk-load context that defers FK semantics to the backend.
+        Relax foreign key checks for the block where the backend can, and restore them on exit.
+
+        A backend without ``supports_fk_toggle`` has nothing to relax, so its
+        constraints stay enforced and rows must be inserted parents first.
+        The session is rolled back when the block raises.
+
+        Parameters
+        ----------
+        session
+            Session whose connection the foreign key state belongs to.
+        mapper
+            Mapped class selecting the session's bind, for a session with
+            more than one.
+        no_autoflush
+            Whether to suspend the session's autoflush inside the block.
         """
+        scope = f"Table `{mapper.__tablename__}`: " if hasattr(mapper, "__tablename__") else ""
         previous_fk_state: str | int | None = None
         try:
-            if disable_fk:
-                self._require_capability("supports_fk_toggle", "foreign key toggling")
+            if self.capabilities.supports_fk_toggle:
+                started = perf_counter()
                 raw_state = self.disable_fk_check(session, mapper=mapper)
                 previous_fk_state = self._normalize_fk_check_state(raw_state)
+                logger.info(f"{scope}Foreign key checks disabled in {perf_counter() - started:.2f}s.")
 
             if no_autoflush:
                 with session.no_autoflush:
@@ -964,7 +967,9 @@ class DatabaseBackend(ABC):
 
         finally:
             if previous_fk_state is not None:
+                started = perf_counter()
                 self.restore_fk_check(session, previous_fk_state, mapper=mapper)
+                logger.info(f"{scope}Foreign key checks restored in {perf_counter() - started:.2f}s.")
 
     @requires_capability("supports_materialized_views", "materialized views")
     def create_materialized_view(

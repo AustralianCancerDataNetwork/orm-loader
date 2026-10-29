@@ -271,13 +271,22 @@ def test_duckdb_backend_fk_toggle_methods_raise():
 
 @pytest.mark.duckdb
 @pytest.mark.db_dialect
-def test_duckdb_backend_merge_context_runs_without_toggling_fk(duckdb_session):
-    """merge_context() must not require supports_fk_toggle: DuckDB has none."""
+def test_duckdb_backend_relaxed_foreign_keys_runs_without_toggling_fk(duckdb_session):
+    """DuckDB has no foreign key toggle, so the context leaves its keys enforced."""
     backend = DuckDBBackend()
-    backend.create_staging_table(_ComputedTableCls, duckdb_session)
 
-    with backend.merge_context(_ComputedTableCls, duckdb_session):
+    with backend.relaxed_foreign_keys(duckdb_session, mapper=_ComputedTableCls):
         pass
+
+
+@pytest.mark.duckdb
+@pytest.mark.db_dialect
+def test_a_merge_on_duckdb_does_not_log_foreign_key_toggling(duckdb_session, caplog):
+    with caplog.at_level("INFO", logger="orm_loader.backends.base"):
+        with ComputedColumnTable.manage_indices(duckdb_session):  # ty: ignore[invalid-argument-type]
+            pass
+
+    assert "foreign key" not in caplog.text.lower()
 
 
 @pytest.mark.duckdb

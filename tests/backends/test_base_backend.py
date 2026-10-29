@@ -125,15 +125,17 @@ class FakeBackend(DatabaseBackend):
     def _normalize_fk_check_state(previous_state: str | int) -> str | int:
         return previous_state
 
-    def disable_fk_check(self, session: so.Session) -> str | int:
+    def disable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int:
         self.calls.append(("disable_fk_check", session))
         return "enabled"
 
-    def enable_fk_check(self, session: so.Session) -> str | int:
+    def enable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int:
         self.calls.append(("enable_fk_check", session))
         return "disabled"
 
-    def restore_fk_check(self, session: so.Session, previous_state: str | int) -> None:
+    def restore_fk_check(
+        self, session: so.Session, previous_state: str | int, *, mapper: Any | None = None
+    ) -> None:
         self.calls.append(("restore_fk_check", previous_state))
 
     def create_materialized_view(
@@ -197,9 +199,6 @@ def test_fake_backend_can_implement_contract():
     assert backend.resolve_index_strategy("auto") == "drop_rebuild"
     assert backend.resolve_index_strategy("keep") == "keep"
 
-    with backend.merge_context(cast("Type[FileTableProtocol]", None), cast(so.Session, None)):
-        pass
-
 
 def test_require_capability_passes_for_supported_feature():
     backend = FakeBackend()
@@ -234,10 +233,10 @@ def test_insertable_column_names_exclude_computed_columns():
     assert backend._insertable_column_names(_ComputedTableCls) == ["id", "name"]
 
 
-def test_bulk_load_context_toggles_fk_and_restores(sqlite_session):
+def test_relaxed_foreign_keys_toggles_fk_and_restores(sqlite_session):
     backend = FakeBackend()
 
-    with backend.bulk_load_context(sqlite_session):
+    with backend.relaxed_foreign_keys(sqlite_session):
         pass
 
     assert backend.calls == [
@@ -246,16 +245,7 @@ def test_bulk_load_context_toggles_fk_and_restores(sqlite_session):
     ]
 
 
-def test_bulk_load_context_without_fk_toggle(sqlite_session):
-    backend = FakeBackend()
-
-    with backend.bulk_load_context(sqlite_session, disable_fk=False):
-        pass
-
-    assert backend.calls == []
-
-
-def test_bulk_load_context_raises_when_capability_missing(sqlite_session):
+def test_relaxed_foreign_keys_leaves_keys_enforced_when_backend_cannot_toggle(sqlite_session):
     class NoFKBackend(FakeBackend):
         @property
         def capabilities(self) -> BackendCapabilities:
@@ -263,16 +253,17 @@ def test_bulk_load_context_raises_when_capability_missing(sqlite_session):
 
     backend = NoFKBackend()
 
-    with pytest.raises(NotImplementedError, match="does not support foreign key toggling"):
-        with backend.bulk_load_context(sqlite_session):
-            pass
+    with backend.relaxed_foreign_keys(sqlite_session):
+        pass
+
+    assert backend.calls == []
 
 
-def test_bulk_load_context_rolls_back_and_restores(sqlite_session):
+def test_relaxed_foreign_keys_rolls_back_and_restores(sqlite_session):
     backend = FakeBackend()
 
     with pytest.raises(RuntimeError, match="boom"):
-        with backend.bulk_load_context(sqlite_session):
+        with backend.relaxed_foreign_keys(sqlite_session):
             raise RuntimeError("boom")
 
     assert backend.calls == [

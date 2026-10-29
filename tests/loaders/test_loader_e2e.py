@@ -607,7 +607,7 @@ def test_drop_rebuild_logging_shows_merge_phases(sqlite_session, tmp_path, caplo
         ]
     ).to_csv(csv_path, index=False, sep="\t")
 
-    caplog.set_level(logging.INFO, logger="orm_loader.tables.loadable_table")
+    caplog.set_level(logging.INFO, logger="orm_loader")
 
     _SimpleTable.load_file(
         sqlite_session,
@@ -624,7 +624,6 @@ def test_drop_rebuild_logging_shows_merge_phases(sqlite_session, tmp_path, caplo
     assert any("Finished dropping 1 active indices in " in message for message in messages)
     assert any("Committing after index drop." in message for message in messages)
     assert any("Commit after index drop completed in " in message for message in messages)
-    assert any("Disabling foreign key checks before merge." in message for message in messages)
     assert any("Foreign key checks disabled in " in message for message in messages)
     assert any("Merging staging data into target table" in message for message in messages)
     assert any("Merge replace delete phase starting." in message for message in messages)
@@ -634,7 +633,6 @@ def test_drop_rebuild_logging_shows_merge_phases(sqlite_session, tmp_path, caplo
     assert any("Merging staging data into target table" in message for message in messages)
     assert any("Committing merged rows." in message for message in messages)
     assert any("Merge commit completed in " in message for message in messages)
-    assert any("Restoring foreign key checks." in message for message in messages)
     assert any("Foreign key checks restored in " in message for message in messages)
     assert any("Verifying/Rebuilding indices." in message for message in messages)
     assert any("Restoring missing index: ix_test_table_name" in message for message in messages)

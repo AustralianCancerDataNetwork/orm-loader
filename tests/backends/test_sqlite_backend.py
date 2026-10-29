@@ -297,3 +297,12 @@ def test_sqlite_backend_fk_toggle_round_trip(sqlite_session):
 
     backend.restore_fk_check(sqlite_session, previous)
     assert sqlite_session.execute(sa.text("PRAGMA foreign_keys")).scalar() == 1
+
+
+def test_a_merge_on_sqlite_logs_foreign_key_toggling(sqlite_session, caplog):
+    with caplog.at_level("INFO", logger="orm_loader.backends.base"):
+        with ComputedColumnTable.manage_indices(sqlite_session):  # ty: ignore[invalid-argument-type]
+            pass
+
+    assert "Foreign key checks disabled" in caplog.text
+    assert "Foreign key checks restored" in caplog.text
