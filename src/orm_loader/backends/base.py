@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Generator, Iterator, Mapping
+from collections.abc import Generator, Iterable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from functools import wraps
 from typing import TYPE_CHECKING, Any, Callable, ParamSpec, Type, TypeVar, cast
 
+import pyarrow as pa
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 from oa_configurator import Dialect, ResolvedDatabase, SchemaClaim, open_connection, qualified
@@ -14,9 +15,33 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.sql.compiler import IdentifierPreparer
 
 if TYPE_CHECKING:
-    from ..loaders.data_classes import LoaderContext
+    from ..loaders.loader import LoaderContext
     from ..mappers.materialised_view_contracts import MaterializedViewIndex
-    from ..tables.typing import CSVTableProtocol
+    from ..tables.typing import FileTableProtocol
+
+
+@dataclass(frozen=True)
+class DedupeResult:
+    """What deduplicating a staging table removed.
+
+    Attributes
+    ----------
+    key_columns
+        Primary key columns that identify a duplicate.
+    rows_before
+        Rows in the staging table before deduplication.
+    rows_removed
+        Rows removed because an earlier row had the same key.
+    """
+
+    key_columns: tuple[str, ...]
+    rows_before: int
+    rows_removed: int
+
+    @property
+    def rows_after(self) -> int:
+        """Rows left in the staging table."""
+        return self.rows_before - self.rows_removed
 
 
 @dataclass(frozen=True)
@@ -28,7 +53,6 @@ class BackendCapabilities:
     opt into capabilities explicitly.
     """
 
-    supports_fast_load: bool = False
     supports_unlogged_staging: bool = False
     supports_fk_toggle: bool = False
     supports_materialized_views: bool = False
@@ -292,7 +316,7 @@ class DatabaseBackend(ABC):
 
     def _insertable_column_names(
         self,
-        table_cls: Type["CSVTableProtocol"],
+        table_cls: Type["FileTableProtocol"],
     ) -> list[str]:
         """
         Return column names safe to include in generic insert statements.
@@ -304,7 +328,7 @@ class DatabaseBackend(ABC):
 
     def deferred_fk_constraints(
         self,
-        table_cls: Type["CSVTableProtocol"],
+        table_cls: Type["FileTableProtocol"],
     ) -> tuple[sa.ForeignKeyConstraint, ...]:
         """FK constraints on *table_cls* that this backend never enforces at the DB level.
 
@@ -315,7 +339,7 @@ class DatabaseBackend(ABC):
 
     def validate_deferred_fks(
         self,
-        table_cls: Type["CSVTableProtocol"],
+        table_cls: Type["FileTableProtocol"],
         session: so.Session,
     ) -> None:
         """Raise if any row in *table_cls* violates one of its deferred_fk_constraints().
@@ -375,7 +399,7 @@ class DatabaseBackend(ABC):
     @abstractmethod
     def create_staging_table(
         self,
-        table_cls: Type["CSVTableProtocol"],
+        table_cls: Type["FileTableProtocol"],
         session: so.Session,
     ) -> None:
         """Create a staging table for the supplied ORM table class."""
@@ -383,22 +407,106 @@ class DatabaseBackend(ABC):
     @abstractmethod
     def drop_staging_table(
         self,
-        table_cls: Type["CSVTableProtocol"],
+        table_cls: Type["FileTableProtocol"],
         session: so.Session,
     ) -> None:
         """Drop a staging table if it exists."""
 
-    def load_staging_fast(
+    @abstractmethod
+    def insert_batches(
         self,
-        loader_context: "LoaderContext",
-    ) -> int | None:
+        ctx: "LoaderContext",
+        batches: Iterable[pa.Table],
+        columns: Sequence[str],
+    ) -> int:
         """
-        Attempt a backend-native fast-path load.
+        Write typed batches into the load's staging table.
 
-        Return the inserted row count when handled, or ``None`` when the
-        backend has no fast-path loader for the given context.
+        Each backend uses the fastest bulk interface its engine offers.
+
+        Parameters
+        ----------
+        ctx
+            Context of the load; its staging table receives the rows.
+        batches
+            Typed tables, one per batch.
+        columns
+            Names of the columns the batches carry.
+
+        Returns
+        -------
+        int
+            Number of rows written.
+
+        Notes
+        -----
+        A backend may commit between batches to bound memory, which also ends
+        the caller's open transaction.
         """
-        return None
+
+    @staticmethod
+    def _staging_reference(ctx: "LoaderContext", connection: Connection) -> str:
+        """
+        Return the quoted, schema-qualified name of the load's staging table.
+
+        The schema is resolved through the connection's ``schema_translate_map``,
+        for raw SQL that SQLAlchemy does not translate itself.
+
+        Parameters
+        ----------
+        ctx
+            Context of the load.
+        connection
+            Connection the SQL runs on.
+
+        Returns
+        -------
+        str
+            The staging table name as the connection resolves it.
+        """
+        staging = ctx.staging_table
+        translate = connection.get_execution_options().get("schema_translate_map") or {}
+        schema = translate.get(staging.schema, staging.schema)
+        return qualified(connection, staging.name, physical_schema=schema)
+
+    def deduplicate_staging(
+        self,
+        ctx: "LoaderContext",
+        key_columns: Sequence[str],
+    ) -> "DedupeResult":
+        """
+        Keep the first row for each primary key in the load's staging table.
+
+        The first row is the one with the lowest row key, which follows the
+        order of the source file.
+
+        Parameters
+        ----------
+        ctx
+            Context of the load; its staging table is deduplicated.
+        key_columns
+            Primary key columns that identify a duplicate.
+
+        Returns
+        -------
+        DedupeResult
+            How many rows the staging table held and how many were removed.
+        """
+        staging = ctx.staging_table
+        arguments = {"mapper": ctx.tableclass}
+        row_key = self._pagination_column(ctx.tableclass, staging)
+        ranked = sa.select(
+            row_key.label("row_key"),
+            sa.func.row_number()
+            .over(partition_by=[staging.c[name] for name in key_columns], order_by=row_key)
+            .label("position"),
+        ).subquery()
+        duplicates = sa.select(ranked.c.row_key).where(ranked.c.position > 1)
+        count = sa.select(sa.func.count()).select_from(staging)
+        before = ctx.session.execute(count, bind_arguments=arguments).scalar_one()
+        ctx.session.execute(sa.delete(staging).where(row_key.in_(duplicates)), bind_arguments=arguments)
+        after = ctx.session.execute(count, bind_arguments=arguments).scalar_one()
+        return DedupeResult(tuple(key_columns), before, before - after)
 
     @staticmethod
     @abstractmethod
@@ -429,7 +537,7 @@ class DatabaseBackend(ABC):
 
     def check_replace_feasible(
         self,
-        table_cls: Type["CSVTableProtocol"],
+        table_cls: Type["FileTableProtocol"],
         pk_cols: list[str],
         session: so.Session,
     ) -> None:
@@ -445,7 +553,7 @@ class DatabaseBackend(ABC):
     @abstractmethod
     def merge_replace(
         self,
-        table_cls: Type["CSVTableProtocol"],
+        table_cls: Type["FileTableProtocol"],
         session: so.Session,
         pk_cols: list[str],
         *,
@@ -463,7 +571,7 @@ class DatabaseBackend(ABC):
     @abstractmethod
     def merge_upsert(
         self,
-        table_cls: Type["CSVTableProtocol"],
+        table_cls: Type["FileTableProtocol"],
         session: so.Session,
         pk_cols: list[str],
         *,
@@ -479,7 +587,7 @@ class DatabaseBackend(ABC):
     @abstractmethod
     def merge_insert(
         self,
-        table_cls: Type["CSVTableProtocol"],
+        table_cls: Type["FileTableProtocol"],
         session: so.Session,
         *,
         merge_batch_size: int | None = None,
@@ -493,7 +601,7 @@ class DatabaseBackend(ABC):
 
     def _pagination_column(
         self,
-        table_cls: Type["CSVTableProtocol"],
+        table_cls: Type["FileTableProtocol"],
         staging: sa.Table,
     ) -> sa.ColumnElement[int]:
         """Column this backend orders a staging-table scan by, for pagination.
@@ -506,7 +614,7 @@ class DatabaseBackend(ABC):
 
     def _ensure_pagination_index(
         self,
-        table_cls: Type["CSVTableProtocol"],
+        table_cls: Type["FileTableProtocol"],
         staging: sa.Table,
         session: so.Session,
     ) -> None:
@@ -527,7 +635,7 @@ class DatabaseBackend(ABC):
 
     def _paginate_batches(
         self,
-        table_cls: Type["CSVTableProtocol"],
+        table_cls: Type["FileTableProtocol"],
         staging: sa.Table,
         session: so.Session,
         merge_batch_size: int | None,
@@ -560,7 +668,7 @@ class DatabaseBackend(ABC):
 
     def _commit_batch_if_needed(
         self,
-        table_cls: Type["CSVTableProtocol"],
+        table_cls: Type["FileTableProtocol"],
         session: so.Session,
         batch_range: sa.ColumnElement[bool] | None,
         *,
@@ -572,7 +680,7 @@ class DatabaseBackend(ABC):
         Called from every merge_*() method after each batch of rows is processed. 
         Instead of committing directly, a batch that violates a deferred FK is caught
         before the next batch starts. Without this, an earlier batch's commit cannot
-        be undone once a later batch's load_csv()-level validation fails.
+        be undone once a later batch's load_file()-level validation fails.
 
         No-op when there is nothing to validate to not add cost. This is true for every 
         backend but DuckDB, and for DuckDB whenever table_cls has no deferred/
@@ -585,7 +693,7 @@ class DatabaseBackend(ABC):
         session.commit()
 
     def _self_referential_deferred_fks(
-        self, table_cls: Type["CSVTableProtocol"]
+        self, table_cls: Type["FileTableProtocol"]
     ) -> tuple[sa.ForeignKeyConstraint, ...]:
         """Deferred FKs on table_cls that point back at table_cls itself.
 
@@ -600,7 +708,7 @@ class DatabaseBackend(ABC):
 
     def merge_context(
         self,
-        table_cls: Type["CSVTableProtocol"],
+        table_cls: Type["FileTableProtocol"],
         session: so.Session,
     ) -> AbstractContextManager[None]:
         """Disable backend FK checks for a table's merge and restore them afterward.

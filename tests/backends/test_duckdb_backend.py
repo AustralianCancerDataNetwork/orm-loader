@@ -26,15 +26,15 @@ from tests.models import (
 )
 
 if TYPE_CHECKING:
-    from orm_loader.tables.typing import CSVTableProtocol
+    from orm_loader.tables.typing import FileTableProtocol
 
-_ComputedTableCls = cast("Type[CSVTableProtocol]", ComputedColumnTable)
-_CycleATableCls = cast("Type[CSVTableProtocol]", CycleATable)
-_CycleBTableCls = cast("Type[CSVTableProtocol]", CycleBTable)
-_ReferencedParentTableCls = cast("Type[CSVTableProtocol]", ReferencedParentTable)
-_SelfReferentialTableCls = cast("Type[CSVTableProtocol]", SelfReferentialTable)
-_VocabReferencingTableCls = cast("Type[CSVTableProtocol]", VocabReferencingTable)
-_VocabSchemaTableCls = cast("Type[CSVTableProtocol]", VocabSchemaTable)
+_ComputedTableCls = cast("Type[FileTableProtocol]", ComputedColumnTable)
+_CycleATableCls = cast("Type[FileTableProtocol]", CycleATable)
+_CycleBTableCls = cast("Type[FileTableProtocol]", CycleBTable)
+_ReferencedParentTableCls = cast("Type[FileTableProtocol]", ReferencedParentTable)
+_SelfReferentialTableCls = cast("Type[FileTableProtocol]", SelfReferentialTable)
+_VocabReferencingTableCls = cast("Type[FileTableProtocol]", VocabReferencingTable)
+_VocabSchemaTableCls = cast("Type[FileTableProtocol]", VocabSchemaTable)
 _TARGET_TABLE = ComputedColumnTable.__tablename__
 _STAGING_TABLE = f"_staging_{_TARGET_TABLE}"
 
@@ -160,7 +160,6 @@ def test_duckdb_backend_identity_and_capabilities():
     assert backend.name == "duckdb"
     assert backend.dialect == Dialect.DUCKDB
     assert backend.supports_dialect(Dialect.DUCKDB) is True
-    assert backend.capabilities.supports_fast_load is False
     assert backend.capabilities.supports_unlogged_staging is False
     assert backend.capabilities.supports_fk_toggle is False
     assert backend.capabilities.supports_materialized_views is False

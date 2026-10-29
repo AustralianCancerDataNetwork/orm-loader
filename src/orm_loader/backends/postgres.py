@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+import io
+from collections.abc import Iterable, Mapping, Sequence
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
+import pyarrow as pa
+import pyarrow.csv as pacsv
 import sqlalchemy as sa
 import sqlalchemy.event as sae
 import sqlalchemy.orm as so
@@ -30,9 +33,9 @@ if TYPE_CHECKING:
     from oa_configurator import ResolvedDatabase
     from sqlalchemy.engine import Connection, Engine
 
-    from ..loaders.data_classes import LoaderContext
+    from ..loaders.loader import LoaderContext
     from ..mappers.materialised_view_contracts import MaterializedViewIndex
-    from ..tables.typing import CSVTableProtocol
+    from ..tables.typing import FileTableProtocol
 
 _VALID_PG_REPLICATION_ROLES = frozenset({"origin", "local", "replica"})
 
@@ -72,7 +75,6 @@ class PostgresBackend(DatabaseBackend):
     @property
     def capabilities(self) -> BackendCapabilities:
         return BackendCapabilities(
-            supports_fast_load=True,
             supports_unlogged_staging=True,
             supports_fk_toggle=True,
             supports_materialized_views=True,
@@ -81,7 +83,7 @@ class PostgresBackend(DatabaseBackend):
 
     def create_staging_table(
         self,
-        table_cls: type["CSVTableProtocol"],
+        table_cls: type["FileTableProtocol"],
         session: so.Session,
     ) -> None:
         table = table_cls.__table__
@@ -127,7 +129,7 @@ class PostgresBackend(DatabaseBackend):
 
     def drop_staging_table(
         self,
-        table_cls: type["CSVTableProtocol"],
+        table_cls: type["FileTableProtocol"],
         session: so.Session,
     ) -> None:
         staging_name = self.staging_name_for_table(table_cls.__tablename__)
@@ -136,21 +138,41 @@ class PostgresBackend(DatabaseBackend):
             bind_arguments={"mapper": table_cls},
         )
 
-    def load_staging_fast(
+    def insert_batches(
         self,
-        loader_context: "LoaderContext",
-    ) -> int | None:
-        from ..loaders.loading_helpers import quick_load_pg
+        ctx: "LoaderContext",
+        batches: Iterable[pa.Table],
+        columns: Sequence[str],
+    ) -> int:
+        """Stream the batches into the staging table with one COPY, as CSV written by Arrow.
 
-        tablename = loader_context.tableclass.__tablename__
-        return quick_load_pg(
-            path=loader_context.path,
-            session=loader_context.session,
-            tablename=self.staging_name_for_table(tablename),
-            schema=self.staging_schema,
-            quote_mode=loader_context.quote_mode,
-            mapper=loader_context.tableclass,
-        )
+        An unquoted empty field is NULL and a quoted one an empty string, so
+        the null policy's decisions reach the table unchanged. A failure in
+        any batch aborts the COPY.
+        """
+        connection = ctx.session.connection(bind_arguments={"mapper": ctx.tableclass})
+        raw_conn = connection.connection
+        if not hasattr(raw_conn, "cursor"):
+            raise RuntimeError("Expected DB-API connection for COPY")
+        table_ref = self._staging_reference(ctx, connection)
+        column_list = ", ".join(self.identifier_preparer.quote(c) for c in columns)
+        options = pacsv.WriteOptions(include_header=False, quoting_style="needed")
+        total = 0
+        cursor = raw_conn.cursor()
+        try:
+            with cursor.copy(f"COPY {table_ref} ({column_list}) FROM STDIN WITH (FORMAT csv)") as copy:
+                for table in batches:
+                    buffer = io.BytesIO()
+                    pacsv.write_csv(table, buffer, options)
+                    copy.write(buffer.getvalue())
+                    total += table.num_rows
+            ctx.session.flush()
+            return total
+        except Exception:
+            ctx.session.rollback()
+            raise
+        finally:
+            cursor.close()
 
     @staticmethod
     def _normalize_fk_check_state(previous_state: str | int) -> str:
@@ -217,7 +239,7 @@ class PostgresBackend(DatabaseBackend):
 
     def merge_replace(
         self,
-        table_cls: type["CSVTableProtocol"],
+        table_cls: type["FileTableProtocol"],
         session: so.Session,
         pk_cols: list[str],
         *,
@@ -239,7 +261,7 @@ class PostgresBackend(DatabaseBackend):
 
     def merge_upsert(
         self,
-        table_cls: type["CSVTableProtocol"],
+        table_cls: type["FileTableProtocol"],
         session: so.Session,
         pk_cols: list[str],
         *,
@@ -270,7 +292,7 @@ class PostgresBackend(DatabaseBackend):
 
     def merge_insert(
         self,
-        table_cls: type["CSVTableProtocol"],
+        table_cls: type["FileTableProtocol"],
         session: so.Session,
         *,
         merge_batch_size: int | None = None,

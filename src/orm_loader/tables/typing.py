@@ -7,7 +7,8 @@ from contextlib import AbstractContextManager
 if TYPE_CHECKING:
     from oa_configurator import ResolvedDatabase
 
-    from ..loaders import LoaderContext, LoaderInterface
+    from ..conversion import ConversionPolicy
+    from ..loaders import FileReader, LoadReport, LoaderContext
 
 class ToDictKwargs(TypedDict, total=False):
     include_nulls: bool
@@ -51,52 +52,52 @@ class ORMTableProtocol(Protocol):
     def required_columns(cls) -> set[str]: ...
 
 @runtime_checkable
-class CSVTableProtocol(ORMTableProtocol, Protocol):
+class FileTableProtocol(ORMTableProtocol, Protocol):
     """
-    Structural protocol for ORM tables that support CSV-based ingestion.
+    Structural protocol for ORM tables that load from files.
 
     This protocol captures the expected interface for tables that can
-    participate in staged, file-based loading workflows using CSV input.
+    participate in staged, file-based loading workflows.
 
     It defines the contract for:
     - staging table management
-    - loader selection
-    - CSV ingestion and merging semantics
+    - reader selection
+    - file ingestion and merging semantics
 
     No assumptions are made about the underlying database or schema.
     """
 
     @classmethod
-    def _select_loader(cls, path: Path) -> "LoaderInterface": ...
+    def _select_reader(cls, ctx: "LoaderContext") -> "FileReader": ...
 
     @classmethod
     def create_staging_table(cls, session: so.Session, *, staging_schema_tag: str | None = None) -> None: ...
 
     @classmethod
-    def load_staging(cls: Type["CSVTableProtocol"], loader: "LoaderInterface", loader_context: "LoaderContext") -> int: ...
+    def load_staging(cls: Type["FileTableProtocol"], loader_context: "LoaderContext", reader: "FileReader") -> int: ...
 
     @classmethod
-    def load_csv(
+    def load_file(
         cls,
         session: so.Session,
         path: Path,
         *,
-        loader: Optional["LoaderInterface"] = None,
+        reader: Optional["FileReader"] = None,
         normalise: bool = True,
         dedupe: bool = False,
         chunksize: int | None = None,
         merge_strategy: str = "replace",
-        quote_mode: str = "csv",
+        quote_mode: str = "auto",
         index_strategy: str = "auto",
         merge_batch_size: int | None = None,
         staging_schema_tag: str | None = None,
         validate_deferred_fks: bool = True,
         resolved: Optional["ResolvedDatabase"] = None,
         physical_schemas: Optional[Mapping[str, str | None]] = None,
+        policy: Optional["ConversionPolicy"] = None,
+        rejects_dir: Optional[Path] = None,
+        report: Optional["LoadReport"] = None,
     ) -> int: ...
-
-    @classmethod
-    def orm_staging_load(cls, loader: "LoaderInterface", loader_context: "LoaderContext") -> int: ...
 
     @classmethod
     def get_staging_table(cls, session: so.Session, *, staging_schema_tag: str | None = None) -> sa.Table: ...

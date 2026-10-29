@@ -7,8 +7,8 @@ import sqlalchemy as sa
 import sqlalchemy.orm as so
 from dotenv import load_dotenv
 
-from oa_configurator import Role
-from oa_configurator.testing import ScopedTestSchema, isolated_test_database, scoped_test_schema
+from oa_configurator import Dialect, Role
+from oa_configurator.testing import DIALECT_PARAMS, ScopedTestSchema, isolated_test_database, scoped_test_schema
 from orm_loader.backends import staging_schema_claim
 from orm_loader.config import OrmLoaderConfig
 from tests.models import Base
@@ -96,3 +96,32 @@ def schema_scoped_session(
             table.create(conn, checkfirst=True)
         with so.Session(scoped.engine) as sqlite_session:
             yield scoped, sqlite_session
+
+
+# ---------------------------------------------------------------------------
+# One session per supported dialect
+# ---------------------------------------------------------------------------
+
+_SESSION_FIXTURE_BY_DIALECT = {
+    Dialect.SQLITE: "sqlite_session",
+    Dialect.POSTGRESQL: "pg_session",
+    Dialect.DUCKDB: "duckdb_session",
+}
+assert set(_SESSION_FIXTURE_BY_DIALECT) == {param.values[0] for param in DIALECT_PARAMS}, (
+    "_SESSION_FIXTURE_BY_DIALECT is missing an entry for a dialect DIALECT_PARAMS now covers."
+)
+
+
+def session_for(request: pytest.FixtureRequest, dialect: Dialect) -> so.Session:
+    """Return the session fixture of one dialect.
+
+    The lookup is dynamic, so the dialect's own mark and ``forked`` come from
+    ``DIALECT_PARAMS`` on the parametrised value rather than from fixture names.
+    """
+    return request.getfixturevalue(_SESSION_FIXTURE_BY_DIALECT[dialect])
+
+
+@pytest.fixture(params=DIALECT_PARAMS)
+def dialect_session(request: pytest.FixtureRequest) -> so.Session:
+    """A session on each supported dialect in turn."""
+    return session_for(request, request.param)

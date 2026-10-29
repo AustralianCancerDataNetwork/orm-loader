@@ -11,16 +11,15 @@ from typing import Type, cast
 import pyarrow as pa
 import pytest
 import sqlalchemy as sa
-from oa_configurator.testing import DIALECT_PARAMS
 
-from orm_loader.backends import STAGING_SCHEMA, Dialect
+from orm_loader.backends import STAGING_SCHEMA
 from orm_loader.helpers import IngestError
-from orm_loader.loaders.data.converters import cast_arrow_column, cast_scalar
-from orm_loader.tables.typing import CSVTableProtocol
+from orm_loader.tables.typing import FileTableProtocol
 from tests.models import DemoRecord, DemoRequiredRecord
+from tests.support import interpret, read
 
-_Demo = cast(Type[CSVTableProtocol], DemoRecord)
-_DemoRequired = cast(Type[CSVTableProtocol], DemoRequiredRecord)
+_Demo = cast(Type[FileTableProtocol], DemoRecord)
+_DemoRequired = cast(Type[FileTableProtocol], DemoRequiredRecord)
 
 MARKER_WORDS = [
     "Null", "NULL", "null", "None", "none", "NA", "N/A", "NaN", "nan",
@@ -37,129 +36,105 @@ SEVEN_EXPECTED = {
 }
 
 
-_SESSION_FIXTURE_BY_DIALECT = {
-    Dialect.SQLITE: "sqlite_session",
-    Dialect.POSTGRESQL: "pg_session",
-    Dialect.DUCKDB: "duckdb_session",
-}
-
-
-@pytest.fixture(params=DIALECT_PARAMS)
-def session(request):
-    return request.getfixturevalue(_SESSION_FIXTURE_BY_DIALECT[request.param])
-
-
 def _write(tmp_path: Path, table: type, text: str) -> Path:
     path = tmp_path / f"{table.__tablename__}.csv"
     path.write_text(text, encoding="utf-8", newline="")
     return path
 
 
-def _load(session, tmp_path: Path, table, text: str, **kwargs) -> int:
-    tag = None if session.get_bind().dialect.name == "sqlite" else STAGING_SCHEMA
-    n = table.load_csv(session, _write(tmp_path, table, text), staging_schema_tag=tag, **kwargs)
-    session.commit()
-    session.expire_all()
+def _load(dialect_session, tmp_path: Path, table, text: str, **kwargs) -> int:
+    tag = None if dialect_session.get_bind().dialect.name == "sqlite" else STAGING_SCHEMA
+    n = table.load_file(dialect_session, _write(tmp_path, table, text), staging_schema_tag=tag, **kwargs)
+    dialect_session.commit()
+    dialect_session.expire_all()
     return n
 
 
-def _labels(session, model) -> dict[int, str | None]:
-    rows = session.execute(sa.select(model.demo_id, model.demo_label).order_by(model.demo_id)).all()
+def _labels(dialect_session, model) -> dict[int, str | None]:
+    rows = dialect_session.execute(sa.select(model.demo_id, model.demo_label).order_by(model.demo_id)).all()
     return {r[0]: r[1] for r in rows}
 
 
 # Marker-like text through each entry point
 
 @pytest.mark.parametrize("word", MARKER_WORDS)
-def test_scalar_text_keeps_marker_words(word):
-    assert cast_scalar(word, sa.String()) == word
-
-
-@pytest.mark.parametrize("word", MARKER_WORDS)
-def test_arrow_text_keeps_marker_words(word):
-    out = cast_arrow_column(pa.array([word, "plain"]), DemoRecord.__table__.c.demo_label)
-    assert out.to_pylist() == [word, "plain"]
-
-
-@pytest.mark.parametrize("word", MARKER_WORDS)
-def test_dict_path_keeps_marker_words(word):
-    obj = DemoRecord(**DemoRecord.clean_kwargs({"demo_id": 1, "demo_label": word}))
-    assert obj.demo_label == word
+def test_text_keeps_marker_words(word):
+    out, _ = interpret([word, "plain"], DemoRecord.__table__.c.demo_label.type)
+    assert out == [word, "plain"]
 
 
 # Actual missing objects
 
-@pytest.mark.parametrize("value", [None, float("nan"), "", "   "])
-def test_scalar_missing_objects_are_null(value):
-    assert cast_scalar(value, sa.String()) is None
+@pytest.mark.parametrize("value", [None, "", "   "])
+def test_missing_text_is_null(value):
+    assert read(value, sa.String()) is None
 
 
 def test_arrow_null_bitmap_and_nan_are_null():
     col = DemoRecord.__table__.c.demo_number
-    assert cast_arrow_column(pa.array([1, None, 0], pa.int64()), col).to_pylist() == [1, None, 0]
-    assert cast_arrow_column(pa.array([1.0, float("nan")], pa.float64()), col).to_pylist() == [1, None]
+    assert interpret(pa.array([1, None, 0], pa.int64()), col.type)[0] == [1, None, 0]
+    assert interpret(pa.array([1.0, float("nan")], pa.float64()), col.type)[0] == [1, None]
 
 
 # Whitespace and identifiers
 
 def test_text_is_stripped_by_default():
-    assert cast_scalar("  x  ", sa.String()) == "x"
+    assert read("  x  ", sa.String()) == "x"
 
 
 @pytest.mark.parametrize("code", ["007", "0123456", "1.50", "+5", "12.0"])
 def test_text_is_never_canonicalised_as_a_number(code):
-    assert cast_scalar(code, sa.String()) == code
-    assert cast_arrow_column(pa.array([code]), DemoRecord.__table__.c.demo_label).to_pylist() == [code]
+    assert read(code, DemoRecord.__table__.c.demo_label.type) == code
 
 
 # Typed columns: valid value, missing word, or error
 
 @pytest.mark.parametrize("word", ["null", "None", "NA", "N/A", "NaN", "#N/A"])
 def test_typed_missing_words_are_null(word):
-    assert cast_scalar(word, sa.Integer()) is None
-    assert cast_scalar(word, sa.Date()) is None
+    assert read(word, sa.Integer()) is None
+    assert read(word, sa.Date()) is None
 
 
 @pytest.mark.parametrize("word", ["null", "None", "NA", "N/A", "NaN"])
 def test_typed_float_missing_words_are_null(word):
-    assert cast_scalar(word, sa.Float()) is None
+    assert read(word, sa.Float()) is None
 
 
 # Persisted round trips
 
-def test_seven_row_fixture_preserves_text(session, tmp_path):
-    _load(session, tmp_path, _Demo, SEVEN_ROWS)
-    assert _labels(session, DemoRecord) == SEVEN_EXPECTED
+def test_seven_row_fixture_preserves_text(dialect_session, tmp_path):
+    _load(dialect_session, tmp_path, _Demo, SEVEN_ROWS)
+    assert _labels(dialect_session, DemoRecord) == SEVEN_EXPECTED
 
 
-def test_seven_row_fixture_every_field_quoted(session, tmp_path):
-    _load(session, tmp_path, _Demo, SEVEN_ROWS_QUOTED)
-    assert _labels(session, DemoRecord) == SEVEN_EXPECTED
+def test_seven_row_fixture_every_field_quoted(dialect_session, tmp_path):
+    _load(dialect_session, tmp_path, _Demo, SEVEN_ROWS_QUOTED)
+    assert _labels(dialect_session, DemoRecord) == SEVEN_EXPECTED
 
 
-def test_marker_words_survive_tab_delimited_load(session, tmp_path):
+def test_marker_words_survive_tab_delimited_load(dialect_session, tmp_path):
     words = [w for w in MARKER_WORDS if w != '"NULL"']
     text = "demo_id\tdemo_label\n" + "".join(f"{i}\t{w}\n" for i, w in enumerate(words, 1))
-    _load(session, tmp_path, _Demo, text)
-    assert _labels(session, DemoRecord) == dict(enumerate(words, 1))
+    _load(dialect_session, tmp_path, _Demo, text)
+    assert _labels(dialect_session, DemoRecord) == dict(enumerate(words, 1))
 
 
-def test_literal_quotes_survive_tab_delimited_load(session, tmp_path):
+def test_literal_quotes_survive_tab_delimited_load(dialect_session, tmp_path):
     values = ['"NULL"', '"word" label', "Null", "NA"]
     text = "demo_id\tdemo_label\n" + "".join(f"{i}\t{v}\n" for i, v in enumerate(values, 1)) + "5\t\n"
-    _load(session, tmp_path, _Demo, text, quote_mode="literal")
-    assert _labels(session, DemoRecord) == {**dict(enumerate(values, 1)), 5: None}
+    _load(dialect_session, tmp_path, _Demo, text, quote_mode="literal")
+    assert _labels(dialect_session, DemoRecord) == {**dict(enumerate(values, 1)), 5: None}
 
 
-def test_typed_values_round_trip(session, tmp_path):
+def test_typed_values_round_trip(dialect_session, tmp_path):
     text = (
         "demo_id,demo_label,demo_number,demo_flag,demo_date\n"
         "1,a,0,false,20200229\n"
         "2,b,NA,,\n"
         "3,c,7,true,2020-01-02\n"
     )
-    _load(session, tmp_path, _Demo, text)
-    rows = session.execute(sa.select(
+    _load(dialect_session, tmp_path, _Demo, text)
+    rows = dialect_session.execute(sa.select(
         DemoRecord.demo_id, DemoRecord.demo_number, DemoRecord.demo_flag, DemoRecord.demo_date
     ).order_by(DemoRecord.demo_id)).all()
     assert [tuple(r) for r in rows] == [
@@ -180,37 +155,34 @@ def test_typed_values_round_trip(session, tmp_path):
         ("demo_number", "1.5"),
     ],
 )
-def test_unreadable_typed_value_raises_and_loads_nothing(session, tmp_path, column, bad):
+def test_unreadable_typed_value_raises_and_loads_nothing(dialect_session, tmp_path, column, bad):
     cols = {"demo_number": "", "demo_date": ""}
     cols[column] = bad
     text = f"demo_id,demo_label,demo_number,demo_date\n1,a,,\n2,b,{cols['demo_number']},{cols['demo_date']}\n"
     with pytest.raises(IngestError, match=column):
-        _load(session, tmp_path, _Demo, text)
-    session.rollback()
-    assert session.execute(sa.select(sa.func.count()).select_from(DemoRecord)).scalar_one() == 0
+        _load(dialect_session, tmp_path, _Demo, text)
+    assert dialect_session.execute(sa.select(sa.func.count()).select_from(DemoRecord)).scalar_one() == 0
 
 
 # Required columns
 
-def test_required_text_accepts_marker_words(session, tmp_path):
+def test_required_text_accepts_marker_words(dialect_session, tmp_path):
     words = ["Null", "None", "NA", "N/A", "NaN"]
     text = "demo_id,demo_label\n" + "".join(f"{i},{w}\n" for i, w in enumerate(words, 1))
-    _load(session, tmp_path, _DemoRequired, text)
-    assert _labels(session, DemoRequiredRecord) == dict(enumerate(words, 1))
+    _load(dialect_session, tmp_path, _DemoRequired, text)
+    assert _labels(dialect_session, DemoRequiredRecord) == dict(enumerate(words, 1))
 
 
 @pytest.mark.parametrize("missing", ["", '""', "   "])
-def test_required_text_empty_raises_and_loads_nothing(session, tmp_path, missing):
+def test_required_text_empty_raises_and_loads_nothing(dialect_session, tmp_path, missing):
     text = f"demo_id,demo_label\n1,ok\n2,{missing}\n"
     with pytest.raises(IngestError, match="demo_label"):
-        _load(session, tmp_path, _DemoRequired, text)
-    session.rollback()
-    assert session.execute(sa.select(sa.func.count()).select_from(DemoRequiredRecord)).scalar_one() == 0
+        _load(dialect_session, tmp_path, _DemoRequired, text)
+    assert dialect_session.execute(sa.select(sa.func.count()).select_from(DemoRequiredRecord)).scalar_one() == 0
 
 
-def test_required_empty_raises_atomically_with_batching(session, tmp_path):
+def test_required_empty_raises_atomically_with_batching(dialect_session, tmp_path):
     text = "demo_id,demo_label\n1,a\n2,b\n3,\n"
     with pytest.raises(IngestError, match="demo_label"):
-        _load(session, tmp_path, _DemoRequired, text, merge_batch_size=1)
-    session.rollback()
-    assert session.execute(sa.select(sa.func.count()).select_from(DemoRequiredRecord)).scalar_one() == 0
+        _load(dialect_session, tmp_path, _DemoRequired, text, merge_batch_size=1)
+    assert dialect_session.execute(sa.select(sa.func.count()).select_from(DemoRequiredRecord)).scalar_one() == 0

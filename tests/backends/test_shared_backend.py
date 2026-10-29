@@ -9,24 +9,16 @@ from oa_configurator import Dialect
 from oa_configurator.testing import DIALECT_PARAMS
 from orm_loader.backends import STAGING_SCHEMA, DatabaseBackend
 from orm_loader.backends.resolve import resolve_backend
+from tests.conftest import session_for
 from tests.models import ComputedColumnTable, CompositeTable
 
 if TYPE_CHECKING:
     import sqlalchemy.orm as so
 
-    from orm_loader.tables.typing import CSVTableProtocol
+    from orm_loader.tables.typing import FileTableProtocol
 
-_ComputedTableCls = cast("Type[CSVTableProtocol]", ComputedColumnTable)
-_CompositeTableCls = cast("Type[CSVTableProtocol]", CompositeTable)
-
-_SESSION_FIXTURE_BY_DIALECT = {
-    Dialect.POSTGRESQL: "pg_session",
-    Dialect.SQLITE: "sqlite_session",
-    Dialect.DUCKDB: "duckdb_session",
-}
-assert set(_SESSION_FIXTURE_BY_DIALECT) == {param.values[0] for param in DIALECT_PARAMS}, (
-    "_SESSION_FIXTURE_BY_DIALECT is missing an entry for a dialect DIALECT_PARAMS now covers."
-)
+_ComputedTableCls = cast("Type[FileTableProtocol]", ComputedColumnTable)
+_CompositeTableCls = cast("Type[FileTableProtocol]", CompositeTable)
 
 # merge_replace deletes on sqlite/postgres but updates in place on DuckDB
 # (see DuckDBBackend.merge_replace); these tests check the delete-only behavior.
@@ -43,8 +35,7 @@ def merge_backend(request: pytest.FixtureRequest) -> tuple[DatabaseBackend, "so.
     pytest's collection-time fixturenames computation (the usual
     pg_db-in-fixturenames auto-detection can't see it).
     """
-    session_fixture = _SESSION_FIXTURE_BY_DIALECT[request.param]
-    session = request.getfixturevalue(session_fixture)
+    session = session_for(request, request.param)
     staging_schema_tag = STAGING_SCHEMA if request.param != Dialect.SQLITE else None
     return resolve_backend(session, staging_schema_tag=staging_schema_tag), session
 

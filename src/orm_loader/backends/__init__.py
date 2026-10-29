@@ -5,6 +5,7 @@ from .sqlite import SQLiteBackend
 from .base import (
     BackendCapabilities,
     DatabaseBackend,
+    DedupeResult,
     Dialect,
     STAGING_SCHEMA,
     staging_schema_claim,
@@ -20,6 +21,7 @@ __all__ = [
     "BackendCapabilities",
     "ConcurrentRefreshNotEligibleError",
     "DatabaseBackend",
+    "DedupeResult",
     "Dialect",
     "DuckDBBackend",
     "MaterializationError",

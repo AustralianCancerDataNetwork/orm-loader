@@ -7,7 +7,7 @@ import sqlalchemy.orm as so
 from oa_configurator import Role as SchemaRole
 from sqlalchemy.orm import declarative_base
 
-from orm_loader.tables import CSVLoadableTableInterface
+from orm_loader.tables import FileLoadableTableInterface
 
 Base = declarative_base()
 
@@ -17,18 +17,15 @@ class Role(str, Enum):
     LAST_AUTHOR = "last author"
 
 
-class Flag(str, Enum):
-    STANDARD = "S"
-    CLASSIFICATION = "C"
 
-class PandasLoaderTable(CSVLoadableTableInterface, Base):
-    __tablename__ = "test_pandas_loader"
+class FileLoaderTable(FileLoadableTableInterface, Base):
+    __tablename__ = "test_file_loader"
     __table_args__ = {"schema": SchemaRole.PRIMARY.value}
     id = sa.Column(sa.Integer, primary_key=True)
     value = sa.Column(sa.String, nullable=False)
 
 
-class SimpleTable(Base, CSVLoadableTableInterface):
+class SimpleTable(Base, FileLoadableTableInterface):
     __tablename__ = "test_table"
     __table_args__ = (
         sa.Index("ix_test_table_name", "name"),
@@ -39,7 +36,7 @@ class SimpleTable(Base, CSVLoadableTableInterface):
     name: so.Mapped[str] = so.mapped_column(sa.String, nullable=False)
 
 
-class RequiredTable(Base, CSVLoadableTableInterface):
+class RequiredTable(Base, FileLoadableTableInterface):
     __tablename__ = "required_table"
     __table_args__ = {"schema": SchemaRole.PRIMARY.value}
 
@@ -47,7 +44,7 @@ class RequiredTable(Base, CSVLoadableTableInterface):
     name: so.Mapped[str] = so.mapped_column(sa.String, nullable=False)
 
 
-class CompositeTable(Base, CSVLoadableTableInterface):
+class CompositeTable(Base, FileLoadableTableInterface):
     __tablename__ = "composite_table"
     __table_args__ = {"schema": SchemaRole.PRIMARY.value}
 
@@ -56,7 +53,7 @@ class CompositeTable(Base, CSVLoadableTableInterface):
     value: so.Mapped[str] = so.mapped_column(sa.String)
 
 
-class CycleATable(Base, CSVLoadableTableInterface):
+class CycleATable(Base, FileLoadableTableInterface):
     """Mutually-referencing pair with CycleBTable, for deferred-FK tests:
     DuckDB can't execute the ALTER TABLE ADD CONSTRAINT this cycle forces."""
 
@@ -69,7 +66,7 @@ class CycleATable(Base, CSVLoadableTableInterface):
     )
 
 
-class CycleBTable(Base, CSVLoadableTableInterface):
+class CycleBTable(Base, FileLoadableTableInterface):
     __tablename__ = "cycle_b_table"
     __table_args__ = {"schema": SchemaRole.PRIMARY.value}
 
@@ -79,13 +76,9 @@ class CycleBTable(Base, CSVLoadableTableInterface):
     )
 
 
-class EnumTable(Base, CSVLoadableTableInterface):
-    """A genuine sa.Enum column, unmodified -- register_column_cast_rule's
-    enum_type matches a raw value (e.g. "first author") by .value but stores
-    the matching member's .name, which is exactly sa.Enum's own default
-    column-storage convention -- no values_callable or other customisation
-    needed for this, the common case.
-    """
+class EnumTable(Base, FileLoadableTableInterface):
+    """A genuine sa.Enum column. Files hold the member names, which is what
+    sa.Enum stores by default."""
 
     __tablename__ = "enum_table"
     __table_args__ = {"schema": SchemaRole.PRIMARY.value}
@@ -94,11 +87,11 @@ class EnumTable(Base, CSVLoadableTableInterface):
     role: so.Mapped[Role | None] = so.mapped_column(sa.Enum(Role), nullable=True)
 
 
-class ComputedColumnTable(Base, CSVLoadableTableInterface):
+class ComputedColumnTable(Base, FileLoadableTableInterface):
     """A real, registered table with a computed column, for merge-method
     tests that need get_staging_table() to work. Unlike a bare
     __tablename__/__table__ pair, this actually implements
-    CSVLoadableTableInterface."""
+    FileLoadableTableInterface."""
 
     __tablename__ = "computed_column_table"
     __table_args__ = {"schema": SchemaRole.PRIMARY.value}
@@ -109,20 +102,7 @@ class ComputedColumnTable(Base, CSVLoadableTableInterface):
     slug: so.Mapped[str | None] = so.mapped_column(sa.String, sa.Computed("lower(name)"))
 
 
-class ImpliedEnumTable(Base, CSVLoadableTableInterface):
-    """A plain String column with no type-level enum signal at all -- the
-    OMOP CDM concept.standard_concept/invalid_reason shape register_column_cast_rule
-    exists to cover, since sa.Enum-keyed dispatch can never reach a column like this.
-    """
-
-    __tablename__ = "implied_enum_table"
-    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
-
-    id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
-    flag: so.Mapped[str | None] = so.mapped_column(sa.String(1), nullable=True)
-
-
-class ReferencedParentTable(Base, CSVLoadableTableInterface):
+class ReferencedParentTable(Base, FileLoadableTableInterface):
     """Referenced by ReferencingChildTable *and* owns its own FK, for
     merge_replace's up-front DuckDB guard: a table in this shape can't be
     SET on its own FK column while still referenced, even with indexes
@@ -138,7 +118,7 @@ class ReferencedParentTable(Base, CSVLoadableTableInterface):
     name: so.Mapped[str] = so.mapped_column(sa.String)
 
 
-class UnreferencedGrandparentTable(Base, CSVLoadableTableInterface):
+class UnreferencedGrandparentTable(Base, FileLoadableTableInterface):
     __tablename__ = "unreferenced_grandparent_table"
     __table_args__ = {"schema": SchemaRole.PRIMARY.value}
 
@@ -146,7 +126,7 @@ class UnreferencedGrandparentTable(Base, CSVLoadableTableInterface):
     name: so.Mapped[str] = so.mapped_column(sa.String)
 
 
-class ReferencingChildTable(Base, CSVLoadableTableInterface):
+class ReferencingChildTable(Base, FileLoadableTableInterface):
     __tablename__ = "referencing_child_table"
     __table_args__ = {"schema": SchemaRole.PRIMARY.value}
 
@@ -156,7 +136,7 @@ class ReferencingChildTable(Base, CSVLoadableTableInterface):
     )
 
 
-class VocabSchemaTable(Base, CSVLoadableTableInterface):
+class VocabSchemaTable(Base, FileLoadableTableInterface):
     """A VOCAB-tagged table, so tests can prove the staging/index schema
     derivation actually resolves a non-primary schema tag correctly."""
 
@@ -170,7 +150,7 @@ class VocabSchemaTable(Base, CSVLoadableTableInterface):
     name: so.Mapped[str] = so.mapped_column(sa.String, nullable=False)
 
 
-class VocabReferencingTable(Base, CSVLoadableTableInterface):
+class VocabReferencingTable(Base, FileLoadableTableInterface):
     """PRIMARY-tagged table with a foreign key into VocabSchemaTable (VOCAB),
     for cross-schema foreign-key classification tests: DuckDB cannot
     enforce a key between two physical schemas, so oa-configurator omits
@@ -186,7 +166,7 @@ class VocabReferencingTable(Base, CSVLoadableTableInterface):
     )
 
 
-class SelfReferentialTable(Base, CSVLoadableTableInterface):
+class SelfReferentialTable(Base, FileLoadableTableInterface):
     """A table referencing its own rows, for dependency-ordered batching
     tests: a child row's parent may legitimately land in a later
     pagination batch of the same load. use_alter=True since DuckDB can't
@@ -204,7 +184,7 @@ class SelfReferentialTable(Base, CSVLoadableTableInterface):
     )
 
 
-class DemoRecord(Base, CSVLoadableTableInterface):
+class DemoRecord(Base, FileLoadableTableInterface):
     """Optional text label plus one column of each typed kind, for null-handling tests."""
 
     __tablename__ = "demo_record"
@@ -217,7 +197,7 @@ class DemoRecord(Base, CSVLoadableTableInterface):
     demo_date: so.Mapped[date | None] = so.mapped_column(sa.Date, nullable=True)
 
 
-class DemoRequiredRecord(Base, CSVLoadableTableInterface):
+class DemoRequiredRecord(Base, FileLoadableTableInterface):
     """Same shape as DemoRecord with a required text label."""
 
     __tablename__ = "demo_required_record"

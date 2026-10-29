@@ -1,36 +1,8 @@
-import logging
 from contextlib import contextmanager
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 from typing import Generator
 
-logger = logging.getLogger(__name__)
-
-def disable_fk_check(session: Session) -> str | int:
-    """Disable foreign-key checks for the current session and return the previous state."""
-    from ..backends.resolve import resolve_backend
-    previous_state = resolve_backend(session).disable_fk_check(session)
-    logger.info("Disabled foreign key checks for bulk load.")
-    if not isinstance(previous_state, (str, int)):
-        logger.error(f"Unexpected FK state type: {type(previous_state)}. Expected str or int.")
-        raise TypeError(f"Expected previous FK state to be str or int, got {type(previous_state)}")
-    return previous_state
-
-def enable_fk_check(session: Session) -> str | int:
-    """Enable foreign-key checks for the current session and return the previous state."""
-    from ..backends.resolve import resolve_backend
-    previous_state = resolve_backend(session).enable_fk_check(session)
-    logger.info("Explicitly re-enabled foreign key checks.")
-    if not isinstance(previous_state, (str, int)):
-        logger.error(f"Unexpected FK state type: {type(previous_state)}. Expected str or int.")
-        raise TypeError(f"Expected previous FK state to be str or int, got {type(previous_state)}")
-    return previous_state
-
-def restore_fk_check(session: Session, previous_state: str | int):
-    """Restore foreign-key checks to a previously captured backend-specific state."""
-    from ..backends.resolve import resolve_backend
-    resolve_backend(session).restore_fk_check(session, previous_state)
-    logger.info(f"Restored foreign key checks to state: {previous_state}")
 
 @contextmanager
 def bulk_load_context(
@@ -42,8 +14,8 @@ def bulk_load_context(
     """
     Wrap a trusted bulk operation in backend-aware session settings.
 
-    This is a thin helper over ``DatabaseBackend.bulk_load_context()``.
-    It exists so older call sites can keep using the helper import path.
+    Foreign-key checks are disabled and autoflush is suspended for the
+    duration, then restored. See ``DatabaseBackend.bulk_load_context``.
     """
     from ..backends.resolve import resolve_backend
     backend = resolve_backend(session)

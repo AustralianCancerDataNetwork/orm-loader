@@ -11,12 +11,11 @@ from oa_configurator import Role as SchemaRole
 from sqlalchemy.exc import UnboundExecutionError
 
 from orm_loader.backends import staging_schema_claim
-from orm_loader.loaders.loader_interface import PandasLoader
 from tests.conftest import schema_scoped_session
 from tests.models import SimpleTable, VocabSchemaTable
 
 
-def test_vocab_csv_load_routes_every_session_bind_to_vocab_file(tmp_path):
+def test_vocab_file_load_routes_every_session_bind_to_vocab_file(tmp_path):
     resolver = Resolver(
         StackConfig.for_session(
             connections={
@@ -59,12 +58,11 @@ def test_vocab_csv_load_routes_every_session_bind_to_vocab_file(tmp_path):
     pd.DataFrame([{"id": 7, "name": "vocab-row"}]).to_csv(csv_path, index=False, sep="\t")
     sqlite_session = MapperRoutedSession()
     try:
-        VocabSchemaTable.load_csv(
+        VocabSchemaTable.load_file(
             sqlite_session,
             csv_path,
             merge_strategy="insert_if_empty",
             dedupe=False,
-            loader=PandasLoader(),
             staging_schema_tag=staging_schema_claim().schema_tag,
         )
         sqlite_session.commit()
@@ -81,7 +79,7 @@ def test_vocab_csv_load_routes_every_session_bind_to_vocab_file(tmp_path):
     vocab_engine.dispose()
 
 
-def test_load_csv_across_two_genuinely_separate_connections(pg_db, sqlite_session, tmp_path):
+def test_load_file_across_two_genuinely_separate_connections(pg_db, sqlite_session, tmp_path):
     """``pg_db`` (real Postgres, primary connection) and ``sqlite_session`` (real
     SQLite, vocab connection, via the module-level ``sqlite_engine``/``sqlite_session``
     fixtures) are two entirely different engines against two entirely
@@ -97,10 +95,10 @@ def test_load_csv_across_two_genuinely_separate_connections(pg_db, sqlite_sessio
         # Interleaved on purpose: primary, then vocab, then primary again, so a
         # module-level cache keyed wrong (or reused across calls) would surface
         # as data landing in the wrong database.
-        SimpleTable.load_csv(primary_session, primary_csv, dedupe=False, loader=PandasLoader())
+        SimpleTable.load_file(primary_session, primary_csv, dedupe=False)
         primary_session.commit()
 
-        VocabSchemaTable.load_csv(sqlite_session, vocab_csv, dedupe=False, loader=PandasLoader())
+        VocabSchemaTable.load_file(sqlite_session, vocab_csv, dedupe=False)
         sqlite_session.commit()
 
         with scoped.engine.connect() as conn:

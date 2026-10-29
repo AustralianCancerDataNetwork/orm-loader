@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping, Sequence
 import logging
 import sqlite3
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import pyarrow as pa
+import pyarrow.compute as pc
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 from sqlalchemy import event, text
@@ -20,7 +22,8 @@ if TYPE_CHECKING:
     from oa_configurator import ResolvedDatabase
     from sqlalchemy.engine import Connection, Engine
 
-    from ..tables.typing import CSVTableProtocol
+    from ..loaders.loader import LoaderContext
+    from ..tables.typing import FileTableProtocol
 
 
 logger = logging.getLogger(__name__)
@@ -103,7 +106,6 @@ class SQLiteBackend(DatabaseBackend):
     @property
     def capabilities(self) -> BackendCapabilities:
         return BackendCapabilities(
-            supports_fast_load=False,
             supports_unlogged_staging=False,
             supports_fk_toggle=True,
             supports_materialized_views=False,
@@ -114,9 +116,44 @@ class SQLiteBackend(DatabaseBackend):
     def default_index_strategy(self) -> str:
         return "keep"
 
+    def insert_batches(
+        self,
+        ctx: "LoaderContext",
+        batches: Iterable[pa.Table],
+        columns: Sequence[str],
+    ) -> int:
+        """Insert the batches with one native ``executemany`` per batch.
+
+        The statement goes straight to the DB-API without per-value bind
+        processing, so the connection's schema translation is applied here.
+        Dates, timestamps and decimals are passed as the text SQLAlchemy
+        itself stores for them.
+        """
+        connection = ctx.session.connection(bind_arguments={"mapper": ctx.tableclass})
+        preparer = connection.dialect.identifier_preparer
+        table_ref = self._staging_reference(ctx, connection)
+        sql = (
+            f"INSERT INTO {table_ref} ({', '.join(preparer.quote(c) for c in columns)}) "
+            f"VALUES ({', '.join('?' for _ in columns)})"
+        )
+        total = 0
+        for table in batches:
+            values = [self._storable(table[name]) for name in columns]
+            connection.exec_driver_sql(sql, list(zip(*values)))
+            total += table.num_rows
+        return total
+
+    @staticmethod
+    def _storable(column: pa.ChunkedArray) -> list[Any]:
+        """Return a column as Python values SQLite can bind."""
+        kind = column.type
+        if pa.types.is_date(kind) or pa.types.is_timestamp(kind) or pa.types.is_decimal(kind):
+            column = pc.cast(column, pa.string())
+        return column.to_pylist()
+
     def create_staging_table(
         self,
-        table_cls: type["CSVTableProtocol"],
+        table_cls: type["FileTableProtocol"],
         session: so.Session,
     ) -> None:
         staging_name = self.staging_name_for_table(table_cls.__tablename__)
@@ -140,7 +177,7 @@ class SQLiteBackend(DatabaseBackend):
 
     def drop_staging_table(
         self,
-        table_cls: type["CSVTableProtocol"],
+        table_cls: type["FileTableProtocol"],
         session: so.Session,
     ) -> None:
         staging_name = self.staging_name_for_table(table_cls.__tablename__)
@@ -177,13 +214,13 @@ class SQLiteBackend(DatabaseBackend):
         session.execute(text(f"PRAGMA foreign_keys = {safe_state}"), **execute_options)
 
     def _pagination_column(
-        self, table_cls: type["CSVTableProtocol"], staging: sa.Table
+        self, table_cls: type["FileTableProtocol"], staging: sa.Table
     ) -> sa.ColumnElement[int]:
         """SQLite's implicit rowid is already gapless and indexed."""
         return sa.literal_column("rowid")
 
     def _ensure_pagination_index(
-        self, table_cls: type["CSVTableProtocol"], staging: sa.Table, session: so.Session
+        self, table_cls: type["FileTableProtocol"], staging: sa.Table, session: so.Session
     ) -> None:
         """No-op: rowid needs no index, and the staging table has no _rownum column."""
         return
@@ -198,7 +235,7 @@ class SQLiteBackend(DatabaseBackend):
 
     def merge_replace(
         self,
-        table_cls: type["CSVTableProtocol"],
+        table_cls: type["FileTableProtocol"],
         session: so.Session,
         pk_cols: list[str],
         *,
@@ -235,7 +272,7 @@ class SQLiteBackend(DatabaseBackend):
 
     def merge_upsert(
         self,
-        table_cls: type["CSVTableProtocol"],
+        table_cls: type["FileTableProtocol"],
         session: so.Session,
         pk_cols: list[str],
         *,
@@ -263,7 +300,7 @@ class SQLiteBackend(DatabaseBackend):
 
     def merge_insert(
         self,
-        table_cls: type["CSVTableProtocol"],
+        table_cls: type["FileTableProtocol"],
         session: so.Session,
         *,
         merge_batch_size: int | None = None,

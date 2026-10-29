@@ -10,11 +10,10 @@ import sqlalchemy.orm as so
 from sqlalchemy.dialects import sqlite as sqlite_dialect
 
 from orm_loader.backends import Dialect, SQLiteBackend
-from orm_loader.helpers.sqlite import attach_sqlite_bulk_load_pragmas
 from tests.models import ComputedColumnTable
 
 if TYPE_CHECKING:
-    from orm_loader.tables.typing import CSVTableProtocol
+    from orm_loader.tables.typing import FileTableProtocol
 
 _TARGET_TABLE = ComputedColumnTable.__tablename__
 _STAGING_TABLE = f"_staging_{_TARGET_TABLE}"
@@ -42,7 +41,7 @@ class _FakeSession:
         return _Result(self.scalar_result)
 
 
-_ComputedTableCls = cast("Type[CSVTableProtocol]", ComputedColumnTable)
+_ComputedTableCls = cast("Type[FileTableProtocol]", ComputedColumnTable)
 
 
 def _sess(s: _FakeSession) -> so.Session:
@@ -55,7 +54,6 @@ def test_sqlite_backend_identity_and_capabilities():
     assert backend.name == "sqlite"
     assert backend.dialect == Dialect.SQLITE
     assert backend.supports_dialect(Dialect.SQLITE) is True
-    assert backend.capabilities.supports_fast_load is False
     assert backend.capabilities.supports_unlogged_staging is False
     assert backend.capabilities.supports_fk_toggle is True
     assert backend.capabilities.supports_materialized_views is False
@@ -235,11 +233,11 @@ def test_sqlite_backend_restore_journal_mode(tmp_path: Path):
     assert str(journal_mode).lower() == "delete"
 
 
-def test_attach_sqlite_bulk_load_pragmas_installs_backend_hook(tmp_path: Path):
+def test_install_engine_hooks_sets_bulk_load_pragmas(tmp_path: Path):
     db_path = tmp_path / "attached.db"
     sqlite_engine = sa.create_engine(f"sqlite:///{db_path}", future=True)
 
-    attach_sqlite_bulk_load_pragmas(sqlite_engine, busy_timeout_ms=45000)
+    SQLiteBackend(busy_timeout_ms=45000).install_engine_hooks(sqlite_engine)
 
     with sqlite_engine.connect() as conn:
         busy_timeout = conn.execute(sa.text("PRAGMA busy_timeout")).scalar_one()

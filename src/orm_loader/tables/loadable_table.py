@@ -1,4 +1,11 @@
 # pyright: reportPrivateUsage=false
+"""Staged, file-based loading for ORM tables, whatever the file format.
+
+A table loads a file into a staging table through a reader, the conversion
+policy and the backend's bulk sink, then merges the staging table into the
+target table. Readers choose the file formats; backends choose the merge
+and index handling.
+"""
 import logging
 from collections.abc import Mapping
 from contextlib import contextmanager
@@ -12,9 +19,10 @@ from oa_configurator import Dialect, ResolvedDatabase, physical_schema_of
 from sqlalchemy.exc import InvalidRequestError, UnboundExecutionError
 
 from ..backends.resolve import resolve_backend
-from ..loaders.loader_interface import LoaderContext, LoaderInterface, PandasLoader, ParquetLoader
+from ..conversion import ConversionPolicy
+from ..loaders import FileReader, LoadReport, LoaderContext, open_reader, stage_file
 from .orm_table import ORMTableBase
-from .typing import CSVTableProtocol
+from .typing import FileTableProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -32,33 +40,15 @@ def _require_bind(session: so.Session, mapper: Any | None = None) -> sa.Engine |
         raise RuntimeError("Session is not bound to an engine") from exc
 
 
-"""
-CSV Loadable Table Mixins
-==================================
-
-This module provides mixins that add staged, file-based ingestion
-capabilities to SQLAlchemy ORM-mapped tables.
-
-The functionality here is intentionally infrastructure-focused and
-model-agnostic, supporting:
-- CSV-based bulk ingestion via staging tables
-- optional fast-path database COPY operations
-- database-portable merge strategies
-- pluggable loader implementations
-
-No schema semantics or domain rules are imposed.
-"""
-
-
-class CSVLoadableTableInterface(ORMTableBase):
+class FileLoadableTableInterface(ORMTableBase):
     """
-    Mixin for ORM tables that support staged CSV-based ingestion.
+    Mixin for ORM tables that load from files through a staging table.
 
-    This interface implements a database-portable ingestion workflow
-    based on temporary staging tables. It supports:
+    A file is read in batches by a reader, converted under a conversion
+    policy, written to a staging table by the backend's bulk sink, and
+    merged into the target table. It supports:
     - dialect-aware staging table creation
-    - fast-path COPY-based loading where available
-    - ORM-based fallback loading
+    - delimited text and Parquet files, and other formats through readers
     - configurable merge strategies
     - explicit staging table lifecycle management
 
@@ -70,7 +60,7 @@ class CSVLoadableTableInterface(ORMTableBase):
 
     @classmethod
     def create_staging_table(
-        cls: Type[CSVTableProtocol],
+        cls: Type[FileTableProtocol],
         session: so.Session,
         *,
         staging_schema_tag: str | None = None,
@@ -104,7 +94,7 @@ class CSVLoadableTableInterface(ORMTableBase):
     @classmethod
     @contextmanager
     def manage_indices(
-        cls: Type['CSVTableProtocol'],
+        cls: Type['FileTableProtocol'],
         session: so.Session,
         index_strategy: str = "auto",
         *,
@@ -218,7 +208,7 @@ class CSVLoadableTableInterface(ORMTableBase):
 
     @classmethod
     def get_staging_table(
-        cls: Type[CSVTableProtocol],
+        cls: Type[FileTableProtocol],
         session: so.Session,
         *,
         staging_schema_tag: str | None = None,
@@ -275,22 +265,19 @@ class CSVLoadableTableInterface(ORMTableBase):
 
     @classmethod
     def load_staging(
-        cls: Type[CSVTableProtocol],
-        loader: LoaderInterface,
+        cls: Type[FileTableProtocol],
         loader_context: LoaderContext,
+        reader: FileReader,
     ) -> int:
         """
-        Load data into the staging table.
-
-        This method attempts a fast-path database-native load where
-        supported, falling back to an ORM-based loader if necessary.
+        Create the staging table and load the file into it.
 
         Parameters
         ----------
-        loader
-            Loader implementation used for ORM-based loading.
         loader_context
             Context object containing session, path, and load options.
+        reader
+            Reader that yields the file as Arrow batches.
 
         Returns
         -------
@@ -298,74 +285,42 @@ class CSVLoadableTableInterface(ORMTableBase):
             Number of rows loaded into the staging table.
         """
         _require_bind(loader_context.session, cls)
-
-        backend = resolve_backend(
-            loader_context.session, staging_schema_tag=loader_context.staging_schema_tag, mapper=cls
-        )
-        total = 0
-
         cls.create_staging_table(loader_context.session, staging_schema_tag=loader_context.staging_schema_tag)
-
-        try:
-            total = backend.load_staging_fast(loader_context=loader_context)
-            if total is not None:
-                return total
-        except Exception as e:
-            loader_context.session.rollback()
-            logger.warning(f"Fast-path load failed for {cls.__tablename__}: {e}")
-            logger.info('Falling back to ORM-based load functionality')
-
-        total = cls.orm_staging_load(
-            loader=loader,
-            loader_context=loader_context
-        )
-        return total
+        return stage_file(loader_context, reader)
 
     @classmethod
-    def orm_staging_load(
-        cls: Type[CSVTableProtocol],
-        loader: LoaderInterface,
-        loader_context: LoaderContext
-    ) -> int:
+    def _select_reader(cls: Type[FileTableProtocol], ctx: LoaderContext) -> FileReader:
         """
-        Load data into the staging table using an ORM-based loader.
+        Select the reader for a file. Override to read other formats.
 
-        Returns
-        -------
-        int
-            Number of rows loaded.
-        """
-        return loader.orm_file_load(ctx=loader_context)
-
-    @classmethod
-    def _select_loader(cls: Type[CSVTableProtocol], path: Path) -> LoaderInterface:
-        """
-        Select an appropriate loader based on file type.
+        The default picks the reader from the file suffix: Parquet for
+        ``.parquet`` and delimited text for every other suffix.
 
         Parameters
         ----------
-        path
-            Path to the input file.
+        ctx
+            Context of the load.
 
         Returns
         -------
-        LoaderInterface
-            A loader instance suitable for the file type.
+        FileReader
+            Reader for the file.
         """
-        suffix = path.suffix.lower()
-        if suffix == ".parquet":
-            return ParquetLoader()
-        else:
-            return PandasLoader()
-
+        return open_reader(
+            ctx.path,
+            ctx.tableclass.model_columns(),
+            nulls=ctx.policy.nulls,
+            quote_mode=ctx.quote_mode,
+            chunksize=ctx.chunksize,
+        )
 
     @classmethod
-    def load_csv(
-        cls: Type[CSVTableProtocol],
+    def load_file(
+        cls: Type[FileTableProtocol],
         session: so.Session,
         path: Path,
         *,
-        loader: LoaderInterface | None = None,
+        reader: FileReader | None = None,
         normalise: bool = True,
         dedupe: bool = False,
         chunksize: int | None = None,
@@ -377,12 +332,16 @@ class CSVLoadableTableInterface(ORMTableBase):
         validate_deferred_fks: bool = True,
         resolved: ResolvedDatabase | None = None,
         physical_schemas: Mapping[str, str | None] | None = None,
+        policy: ConversionPolicy | None = None,
+        rejects_dir: Path | None = None,
+        report: LoadReport | None = None,
     ) -> int:
 
         """
-        Load a CSV (or CSV-like) file into the target table.
+        Load a file into the target table.
 
-        This method orchestrates the full staged ingestion lifecycle:
+        The file name without its suffix must equal the table name. This
+        method orchestrates the full staged ingestion lifecycle:
         - staging table creation
         - file loading
         - merge into the target table
@@ -393,22 +352,25 @@ class CSVLoadableTableInterface(ORMTableBase):
         session
             An active SQLAlchemy session.
         path
-            Path to the input CSV or Parquet file.
-        loader
-            Optional explicit loader instance.
+            Path to the input file.
+        reader
+            Reader for the file. The table's ``_select_reader`` chooses one
+            when omitted, and ``chunksize`` and ``quote_mode`` then configure it.
         normalise
-            Whether to apply table-level normalisation.
+            Whether to convert values to the column types under the policy.
+            When false, values are written as read.
         dedupe
             Whether to deduplicate incoming rows.
         chunksize
-            Optional chunk size for incremental loading.
+            Rows per batch for the default reader of formats that batch by
+            rows.
         merge_strategy
             Merge strategy to apply (e.g. ``replace``, ``upsert``, or
             ``insert_if_empty``).
         quote_mode
-            Quoting mode. Governs parsing on both the PostgreSQL COPY
-            fast-path and the pandas ORM fallback, so a file that falls back
-            to the ORM path is still parsed identically.
+            How double quotes in delimited text are read: ``"csv"`` (field
+            quoting), ``"literal"`` (kept as data), ``"by_delimiter"``
+            (literal for tab-delimited files) or ``"auto"`` (sample the file).
         index_strategy
             Index handling strategy during merge. Use ``"auto"`` to let
             the backend choose a sensible default.
@@ -434,6 +396,18 @@ class CSVLoadableTableInterface(ORMTableBase):
         physical_schemas
             A schema tag's physical name beyond resolved's own configured
             ones. Forwarded alongside resolved.
+        policy
+            How values are interpreted and what happens to unreadable ones.
+            The default policy preserves nonempty text and treats only empty
+            values as missing in text columns.
+        rejects_dir
+            Directory that rejected rows are written to when the policy sets
+            ``on_error="reject_row"``, as ``<file name>.rejects.csv``.
+            Defaults to a ``rejects`` directory inside the source file's
+            directory.
+        report
+            Receives the load's row accounting. A new report is used when
+            omitted.
 
         Returns
         -------
@@ -441,11 +415,11 @@ class CSVLoadableTableInterface(ORMTableBase):
             Number of rows loaded into staging before merge.
         """
 
-        logger.debug(f"Table `{cls.__tablename__}`: Loading CSV from {path}")
+        logger.debug(f"Table `{cls.__tablename__}`: Loading file {path}")
 
         if path.stem.lower() != cls.__tablename__:
             raise ValueError(
-                f"CSV filename '{path.name}' does not match table '{cls.__tablename__}'"
+                f"File name '{path.name}' does not match table '{cls.__tablename__}'"
             )
 
         if merge_strategy == "insert_if_empty":
@@ -483,14 +457,14 @@ class CSVLoadableTableInterface(ORMTableBase):
             dedupe=dedupe,
             quote_mode=quote_mode,
             staging_schema_tag=staging_schema_tag,
+            policy=policy or ConversionPolicy(),
+            rejects_dir=rejects_dir,
+            report=report or LoadReport(),
         )
-
-        if loader is None:
-            loader = cls._select_loader(path)
 
         # Load to staging (Indices are already excluded via updated create_staging_table)
         logger.info(f"Table `{cls.__tablename__}`: Loading data into staging table")
-        total = cls.load_staging(loader=loader, loader_context=loader_context)
+        total = cls.load_staging(loader_context, reader or cls._select_reader(loader_context))
 
         # Merge staging to target (Wrapped in our index dropper!)
         logger.info(f"Table `{cls.__tablename__}`: Merging staging data into target table")
@@ -524,7 +498,7 @@ class CSVLoadableTableInterface(ORMTableBase):
 
     @classmethod
     def _target_has_rows(
-        cls: Type[CSVTableProtocol],
+        cls: Type[FileTableProtocol],
         session: so.Session,
     ) -> bool:
         """
@@ -539,7 +513,7 @@ class CSVLoadableTableInterface(ORMTableBase):
 
     @classmethod
     def merge_from_staging(
-        cls: Type[CSVTableProtocol],
+        cls: Type[FileTableProtocol],
         session: so.Session,
         merge_strategy: str = "replace",
         *,
@@ -565,9 +539,9 @@ class CSVLoadableTableInterface(ORMTableBase):
         validate_deferred_fks
             Forwarded to the backend's merge methods, which validate
             deferred FKs before every intermediate commit a batched merge
-            makes. See ``load_csv()``.
+            makes. See ``load_file()``.
         resolved, physical_schemas
-            Forwarded to ``resolve_backend()``. See ``load_csv()``.
+            Forwarded to ``resolve_backend()``. See ``load_file()``.
         """
         target = cls.__tablename__
         pk_cols = cls.pk_names()
@@ -658,7 +632,7 @@ class CSVLoadableTableInterface(ORMTableBase):
     
     @classmethod
     def drop_staging_table(
-        cls: Type[CSVTableProtocol],
+        cls: Type[FileTableProtocol],
         session: so.Session,
         *,
         staging_schema_tag: str | None = None,
@@ -676,20 +650,3 @@ class CSVLoadableTableInterface(ORMTableBase):
         """
         backend = resolve_backend(session, staging_schema_tag=staging_schema_tag, mapper=cls)
         backend.drop_staging_table(cls, session)
-
-    @classmethod
-    def csv_columns(cls) -> dict[str, sa.ColumnElement[Any]]:
-        """
-        Return a mapping of CSV column names to model columns.
-
-        By default this is equivalent to :meth:`model_columns`.
-        Override this method to implement custom column mappings.
-
-        Returns
-        -------
-        dict[str, sqlalchemy.ColumnElement]
-            Mapping of input column names to SQLAlchemy columns.
-        """
-        cols = cls.model_columns()
-        computed_names = {c.name for c in cls.__table__.columns if c.computed is not None}  # type: ignore
-        return {k: v for k, v in cols.items() if k not in computed_names}

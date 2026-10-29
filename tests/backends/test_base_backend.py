@@ -20,8 +20,7 @@ from orm_loader.backends import (
 )
 
 if TYPE_CHECKING:
-    from orm_loader.loaders.data_classes import LoaderContext
-    from orm_loader.tables.typing import CSVTableProtocol
+    from orm_loader.tables.typing import FileTableProtocol
 
 
 class _BlockPsycopg(importlib.abc.MetaPathFinder):
@@ -40,6 +39,13 @@ class FakeBackend(DatabaseBackend):
     def __init__(self) -> None:
         self.calls: list[tuple[str, object]] = []
 
+    def insert_batches(self, ctx, batches, columns) -> int:
+        total = 0
+        for table in batches:
+            ctx.session.execute(ctx.staging_table.insert(), table.to_pylist())
+            total += table.num_rows
+        return total
+
     @property
     def name(self) -> str:
         return "fake"
@@ -57,7 +63,6 @@ class FakeBackend(DatabaseBackend):
     @property
     def capabilities(self) -> BackendCapabilities:
         return BackendCapabilities(
-            supports_fast_load=True,
             supports_fk_toggle=True,
         )
 
@@ -66,18 +71,18 @@ class FakeBackend(DatabaseBackend):
         return f"_staging_{tablename}"
 
     def create_staging_table(
-        self, _table_cls: Type[CSVTableProtocol], _session: so.Session
+        self, _table_cls: Type[FileTableProtocol], _session: so.Session
     ) -> None:
         return None
 
     def drop_staging_table(
-        self, _table_cls: Type[CSVTableProtocol], _session: so.Session
+        self, _table_cls: Type[FileTableProtocol], _session: so.Session
     ) -> None:
         return None
 
     def merge_replace(
         self,
-        _table_cls: Type[CSVTableProtocol],
+        _table_cls: Type[FileTableProtocol],
         _session: so.Session,
         _target_name: str,
         _pk_cols: list[str],
@@ -88,7 +93,7 @@ class FakeBackend(DatabaseBackend):
 
     def merge_upsert(
         self,
-        _table_cls: Type[CSVTableProtocol],
+        _table_cls: Type[FileTableProtocol],
         _session: so.Session,
         _target_name: str,
         _pk_cols: list[str],
@@ -99,7 +104,7 @@ class FakeBackend(DatabaseBackend):
 
     def merge_insert(
         self,
-        _table_cls: Type[CSVTableProtocol],
+        _table_cls: Type[FileTableProtocol],
         _session: so.Session,
         _target_name: str,
         *,
@@ -108,7 +113,7 @@ class FakeBackend(DatabaseBackend):
         return None
 
     def _pagination_column(
-        self, _table_cls: Type[CSVTableProtocol], _staging: sa.Table
+        self, _table_cls: Type[FileTableProtocol], _staging: sa.Table
     ) -> sa.ColumnElement[int]:
         return sa.literal_column("rowid")
 
@@ -165,13 +170,12 @@ class _ComputedTable:
     )
 
 
-_ComputedTableCls = cast("Type[CSVTableProtocol]", _ComputedTable)
+_ComputedTableCls = cast("Type[FileTableProtocol]", _ComputedTable)
 
 
 def test_backend_capabilities_defaults():
     caps = BackendCapabilities()
 
-    assert caps.supports_fast_load is False
     assert caps.supports_unlogged_staging is False
     assert caps.supports_fk_toggle is False
     assert caps.supports_materialized_views is False
@@ -187,22 +191,20 @@ def test_fake_backend_can_implement_contract():
 
     assert backend.name == "fake"
     assert backend.dialect == Dialect.SQLITE
-    assert backend.capabilities.supports_fast_load is True
     assert backend.capabilities.supports_fk_toggle is True
     assert backend.supports_dialect(Dialect.SQLITE) is True
     assert backend.supports_dialect(Dialect.POSTGRESQL) is False
     assert backend.resolve_index_strategy("auto") == "drop_rebuild"
     assert backend.resolve_index_strategy("keep") == "keep"
-    assert backend.load_staging_fast(cast("LoaderContext", None)) is None
 
-    with backend.merge_context(cast("Type[CSVTableProtocol]", None), cast(so.Session, None)):
+    with backend.merge_context(cast("Type[FileTableProtocol]", None), cast(so.Session, None)):
         pass
 
 
 def test_require_capability_passes_for_supported_feature():
     backend = FakeBackend()
 
-    backend._require_capability("supports_fast_load", "fast loading")
+    backend._require_capability("supports_fk_toggle", "foreign key toggling")
 
 
 def test_require_capability_raises_for_unsupported_feature():
@@ -329,7 +331,6 @@ def test_capable_backend_inheriting_default_materialized_view_methods_fails_loud
         @property
         def capabilities(self) -> BackendCapabilities:
             return BackendCapabilities(
-                supports_fast_load=True,
                 supports_fk_toggle=True,
                 supports_materialized_views=True,
             )

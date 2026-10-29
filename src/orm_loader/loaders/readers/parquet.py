@@ -1,0 +1,53 @@
+"""Parquet files as record batches."""
+
+from __future__ import annotations
+
+from collections.abc import Iterator, Mapping
+from pathlib import Path
+from typing import Any
+
+import pyarrow as pa
+import pyarrow.dataset as ds
+import sqlalchemy as sa
+
+from ...conversion import NullPolicy
+from .base import FileReader
+
+
+class ParquetReader(FileReader):
+    """A Parquet file read with its stored types.
+
+    Parameters
+    ----------
+    path
+        File to read.
+    model_columns
+        Model columns by name; only these are read.
+    nulls
+        Null policy whose quote-sensitive markers are applied while reading. A
+        Parquet string was never quoted, so every marker match counts as
+        unquoted.
+    chunksize
+        Rows per batch.
+    """
+
+    def __init__(
+        self,
+        path: Path,
+        model_columns: Mapping[str, sa.ColumnElement[Any]],
+        nulls: NullPolicy | None = None,
+        chunksize: int | None = None,
+    ) -> None:
+        super().__init__(path, model_columns, nulls)
+        self.chunksize = chunksize or 64_000
+        self._dataset = ds.dataset(path, format="parquet")
+        self.columns = [name for name in self._dataset.schema.names if name in model_columns]
+
+    def batches(self) -> Iterator[pa.RecordBatch]:
+        """Yield the stored rows in batches of ``chunksize`` rows."""
+        markers = self.reader_markers()
+        for batch in self._dataset.to_batches(columns=self.columns, batch_size=self.chunksize):
+            if markers:
+                batch = self.null_markers(batch, markers)
+            if batch.num_rows:
+                yield batch

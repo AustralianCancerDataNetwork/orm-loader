@@ -1,4 +1,4 @@
-# Loader Context and Diagnostics
+# Loader Context and Report
 
 This page documents the shared data structures used by the loaders
 subsystem.
@@ -22,47 +22,28 @@ on globals or implicit configuration.
 | `session` | Active SQLAlchemy session |
 | `path` | Path to the input file |
 | `staging_table` | SQLAlchemy Table used for staging |
-| `chunksize` | Optional chunk size |
-| `normalise` | Whether to cast values to ORM types |
-| `dedupe` | Whether to deduplicate incoming data |
-| `quote_mode` | CSV quoting mode, resolved to the same concrete mode on both the PostgreSQL COPY fast-path and the pandas ORM fallback |
+| `chunksize` | Rows per batch for the default reader of formats that batch by rows |
+| `normalise` | Whether to interpret values under the policy; when false, values are written as read |
+| `dedupe` | Whether the staging table keeps only the first row for each primary key |
+| `quote_mode` | Quoting mode for delimited text: `csv`, `literal`, `by_delimiter` or `auto` |
+| `policy` | `ConversionPolicy`: how values are interpreted and what happens to unreadable ones |
+| `rejects_dir` | Directory that rejected rows are written to |
+| `report` | `LoadReport` row accounting |
 
-::: orm_loader.loaders.data_classes.LoaderContext
+::: orm_loader.loaders.loader.LoaderContext
 
 ---
 
-## Casting statistics
+## LoadReport
 
-Loaders track **casting failures** during normalisation to support
-debugging and auditability.
+`LoadReport` accounts for every row of a load: rows read, loaded, rejected and removed as duplicates. `DedupeResult` holds the key columns and the rows removed. A load that cannot account for every row raises.
 
-### ColumnCastingStats
-
-Tracks casting failures for a single column:
-
-- total failure count
-- representative example values
-
-### TableCastingStats
-
-Aggregates column-level statistics for a table.
-
-This enables loaders to emit warnings such as:
-
-- unexpected nulls in required columns
-- values that could not be cast to target types
-
-Statistics are logged, not raised as exceptions.
-
-::: orm_loader.loaders.data_classes.ColumnCastingStats
-::: orm_loader.loaders.data_classes.TableCastingStats
+::: orm_loader.loaders.loader.LoadReport
+::: orm_loader.backends.base.DedupeResult
 
 ---
 
 ## Design notes
 
-- Casting failures do **not** abort loads
-- Rows violating required constraints are dropped explicitly
-- Examples are capped to avoid log flooding
-
-This design favours **observability over strict enforcement**.
+- Unreadable values and missing required values raise by default, so no row disappears without a trace
+- With `ErrorPolicy(on_error="reject_row")` each rejected row is written to a rejects file with its raw text and the reason

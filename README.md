@@ -40,25 +40,26 @@ class MyTable(ORMTableBase, Base):
 ```
 You can inherit from it directly or pick it up through one of the higher-level mixins.
 
-2. CSV-based ingestion mixins
+2. File ingestion mixins
 
-`CSVLoadableTableInterface` adds staged file loading to ORM tables. It can use pandas or PyArrow loaders, and on PostgreSQL it can use a fast `COPY` path when the input is clean enough.
+`FileLoadableTableInterface` adds staged file loading to ORM tables. Files are read with PyArrow on every backend, interpreted under a `ConversionPolicy`, and written to staging through each backend's bulk path.
 
 Features include:
 * staging table creation and cleanup
-* chunked loading for large files
-* optional casting and deduplication before insert
+* files streamed in bounded batches, so memory does not grow with the row count
+* optional conversion to column types and deduplication of the staging table
 * backend-specific merge behaviour
-* PostgreSQL fast-path loading with ORM fallback
+* Arrow-based loading with a configurable conversion policy on PostgreSQL, DuckDB and SQLite
+* delimited text (tab or comma delimiter, detected encoding) and Parquet input
 * backend-aware index handling during merge
 
 ```python
-class MyTable(CSVLoadableTableInterface, ORMTableBase, Base):
+class MyTable(FileLoadableTableInterface, ORMTableBase, Base):
     __tablename__ = "my_table"
 
 ```
 
-The main extension points here are loader choice, column mapping, and the normal SQLAlchemy model definitions themselves. Most downstream projects do not need to override much beyond `csv_columns()` and the model schema.
+The main extension points here are reader choice and the normal SQLAlchemy model definitions themselves. Most downstream projects do not need to override much beyond the model schema.
 
 3. Structured serialisation and hashing
 

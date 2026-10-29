@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
-from typing import TYPE_CHECKING, Any, Type, cast
+from collections.abc import Iterable, Iterator, Sequence
+from typing import TYPE_CHECKING, Any, ClassVar, Type, cast
 
+import pyarrow as pa
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 from oa_configurator import (
@@ -21,7 +22,8 @@ from ..helpers.engines import dispose_engines
 from .base import BackendCapabilities, DatabaseBackend, DeferredForeignKeyViolationError, Dialect
 
 if TYPE_CHECKING:
-    from ..tables.typing import CSVTableProtocol
+    from ..loaders.loader import LoaderContext
+    from ..tables.typing import FileTableProtocol
 
 
 class DuckDBBackend(DatabaseBackend):
@@ -43,10 +45,13 @@ class DuckDBBackend(DatabaseBackend):
 
         return duckdb_sqlalchemy.Dialect().identifier_preparer
 
+    # Batches per commit of the staging table. DuckDB keeps uncommitted rows in memory, so this bounds
+    # the memory of a load.
+    STAGING_COMMIT_EVERY: ClassVar[int] = 5
+
     @property
     def capabilities(self) -> BackendCapabilities:
         return BackendCapabilities(
-            supports_fast_load=False,
             supports_unlogged_staging=False,
             supports_fk_toggle=False,
             supports_materialized_views=False,
@@ -71,7 +76,7 @@ class DuckDBBackend(DatabaseBackend):
         if self.resolved is None:
             raise ValueError(
                 "DuckDBBackend needs resolved=<ResolvedDatabase> to classify foreign-key "
-                "enforcement. Pass it to load_csv(...) or resolve_backend(...)."
+                "enforcement. Pass it to load_file(...) or resolve_backend(...)."
             )
         return unenforced_foreign_keys(
             tables, resolved=self.resolved, physical_schemas=self.physical_schemas
@@ -79,7 +84,7 @@ class DuckDBBackend(DatabaseBackend):
 
     def deferred_fk_constraints(
         self,
-        table_cls: Type["CSVTableProtocol"],
+        table_cls: Type["FileTableProtocol"],
     ) -> tuple[sa.ForeignKeyConstraint, ...]:
         """FK constraints on *table_cls* this backend's database will not enforce:
         - omitted (cross-database/cross-schema), or
@@ -93,7 +98,7 @@ class DuckDBBackend(DatabaseBackend):
         unenforced = {entry.constraint for entry in self._unenforced_constraints(tuple(metadata.tables.values()))}
         return tuple(fk for fk in own_fks if fk in unenforced)
 
-    def validate_deferred_fks(self, table_cls: Type["CSVTableProtocol"], session: so.Session) -> None:
+    def validate_deferred_fks(self, table_cls: Type["FileTableProtocol"], session: so.Session) -> None:
         """Validate every deferred FK on table_cls, including a cross-database one.
 
         A cross-schema or cyclic deferred FK points to a table in the same
@@ -218,7 +223,7 @@ class DuckDBBackend(DatabaseBackend):
 
     def create_staging_table(
         self,
-        table_cls: type["CSVTableProtocol"],
+        table_cls: type["FileTableProtocol"],
         session: so.Session,
     ) -> None:
         bind_arguments = {"mapper": table_cls}
@@ -253,7 +258,7 @@ class DuckDBBackend(DatabaseBackend):
 
     def drop_staging_table(
         self,
-        table_cls: type["CSVTableProtocol"],
+        table_cls: type["FileTableProtocol"],
         session: so.Session,
     ) -> None:
         bind_arguments = {"mapper": table_cls}
@@ -298,7 +303,7 @@ class DuckDBBackend(DatabaseBackend):
 
     def _paginate_batches(
         self,
-        table_cls: type["CSVTableProtocol"],
+        table_cls: type["FileTableProtocol"],
         staging: sa.Table,
         session: so.Session,
         merge_batch_size: int | None,
@@ -318,7 +323,7 @@ class DuckDBBackend(DatabaseBackend):
 
     def _self_referential_batches(
         self,
-        table_cls: type["CSVTableProtocol"],
+        table_cls: type["FileTableProtocol"],
         staging: sa.Table,
         session: so.Session,
         merge_batch_size: int | None,
@@ -383,9 +388,45 @@ class DuckDBBackend(DatabaseBackend):
         """
         return True
 
+    def insert_batches(
+        self,
+        ctx: "LoaderContext",
+        batches: Iterable[pa.Table],
+        columns: Sequence[str],
+    ) -> int:
+        """Insert the batches into the staging table straight from Arrow.
+
+        Notes
+        -----
+        - The fastest bulk insertion method is DuckDB's ``INSERT ... SELECT`` from a
+        temporary view over the Arrow memory. 
+        - The staging table is committed every ``STAGING_COMMIT_EVERY`` batches,
+        because DuckDB keeps uncommitted rows in memory and one transaction would 
+        hold the whole file.
+
+        Notes
+        -----
+        Committing the staging table also ends the caller's open transaction.
+        """
+        batch = sa.table("_orm_loader_batch", *(sa.column(c) for c in columns))
+        insert = ctx.staging_table.insert().from_select(list(columns), sa.select(*batch.c))
+        bind_arguments = {"mapper": ctx.tableclass}
+        total = 0
+        for index, table in enumerate(batches, start=1):
+            native = ctx.session.connection(bind_arguments=bind_arguments).connection
+            native.register("_orm_loader_batch", table)
+            try:
+                ctx.session.execute(insert, bind_arguments=bind_arguments)
+            finally:
+                native.unregister("_orm_loader_batch")
+            total += table.num_rows
+            if index % self.STAGING_COMMIT_EVERY == 0:
+                ctx.session.commit()
+        return total
+
     def check_replace_feasible(
         self,
-        table_cls: type["CSVTableProtocol"],
+        table_cls: type["FileTableProtocol"],
         pk_cols: list[str],
         session: so.Session,
     ) -> None:
@@ -423,7 +464,7 @@ class DuckDBBackend(DatabaseBackend):
 
     def merge_replace(
         self,
-        table_cls: type["CSVTableProtocol"],
+        table_cls: type["FileTableProtocol"],
         session: so.Session,
         pk_cols: list[str],
         *,
@@ -524,7 +565,7 @@ class DuckDBBackend(DatabaseBackend):
 
     def merge_upsert(
         self,
-        table_cls: type["CSVTableProtocol"],
+        table_cls: type["FileTableProtocol"],
         session: so.Session,
         pk_cols: list[str],
         *,
@@ -561,7 +602,7 @@ class DuckDBBackend(DatabaseBackend):
 
     def merge_insert(
         self,
-        table_cls: type["CSVTableProtocol"],
+        table_cls: type["FileTableProtocol"],
         session: so.Session,
         *,
         merge_batch_size: int | None = None,

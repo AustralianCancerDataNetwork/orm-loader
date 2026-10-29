@@ -13,18 +13,18 @@ from oa_configurator import SCHEMA_TRANSLATE_MAP_KEY, Role, qualified
 from oa_configurator.testing import isolated_test_schema
 from orm_loader.backends import STAGING_SCHEMA, Dialect, PostgresBackend
 from orm_loader.backends.resolve import resolve_backend
-from tests.models import ComputedColumnTable
+from tests.models import ComputedColumnTable, EnumTable, Role as AuthorRole, SimpleTable
 
 _TARGET_TABLE = ComputedColumnTable.__tablename__
 _STAGING_TABLE = f"_staging_{_TARGET_TABLE}"
 _PREPARER = postgresql.dialect().identifier_preparer
 _STAGING_TABLE_WITH_SCHEMA: str = qualified(_PREPARER, _STAGING_TABLE, physical_schema=STAGING_SCHEMA)
 
-_ComputedTableCls = cast("Type[CSVTableProtocol]", ComputedColumnTable)
+_ComputedTableCls = cast("Type[FileTableProtocol]", ComputedColumnTable)
 
 
 if TYPE_CHECKING:
-    from orm_loader.tables.typing import CSVTableProtocol
+    from orm_loader.tables.typing import FileTableProtocol
 
 
 class _FakeSession:
@@ -85,7 +85,6 @@ def test_postgres_backend_identity_and_capabilities():
     assert backend.name == "postgres"
     assert backend.dialect == Dialect.POSTGRESQL
     assert backend.supports_dialect(Dialect.POSTGRESQL) is True
-    assert backend.capabilities.supports_fast_load is True
     assert backend.capabilities.supports_unlogged_staging is True
     assert backend.capabilities.supports_fk_toggle is True
     assert backend.capabilities.supports_materialized_views is True
@@ -640,3 +639,72 @@ def test_postgres_backend_engine_with_replica_role_unregisters_listener(monkeypa
         "SET session_replication_role = DEFAULT",
         "SHOW session_replication_role",
     ]
+
+
+# ---------------------------------------------------------------------------
+# Loading files into real Postgres
+# ---------------------------------------------------------------------------
+
+
+def _write_simple(tmp_path, rows: list[tuple[int, str]]):
+    path = tmp_path / "test_table.csv"
+    path.write_text("id,name\n" + "".join(f"{i},{n}\n" for i, n in rows))
+    return path
+
+
+def _simple_rows(session) -> list[tuple[int, str]]:
+    return [(r.id, r.name) for r in session.execute(sa.select(SimpleTable).order_by(SimpleTable.id)).scalars()]
+
+
+def test_staging_table_has_the_target_columns_and_an_identity_row_number(pg_session):
+    SimpleTable.create_staging_table(pg_session, staging_schema_tag=STAGING_SCHEMA)
+    staging_name = resolve_backend(pg_session).staging_name_for_table(SimpleTable.__tablename__)
+    cols = pg_session.execute(sa.text(
+        "SELECT column_name, data_type FROM information_schema.columns"
+        " WHERE table_schema = :s AND table_name = :t ORDER BY ordinal_position"
+    ), {"s": STAGING_SCHEMA, "t": staging_name}).all()
+    assert [(n, d) for n, d in cols if n != "_rownum"] == [("id", "integer"), ("name", "character varying")]
+    assert ("_rownum", "bigint") in [(n, d) for n, d in cols]
+
+
+def test_load_file_merges_into_the_target(pg_session, tmp_path):
+    inserted = SimpleTable.load_file(pg_session, _write_simple(tmp_path, [(1, "alpha"), (2, "beta")]), staging_schema_tag=STAGING_SCHEMA)
+    pg_session.commit()
+    assert inserted == 2
+    assert _simple_rows(pg_session) == [(1, "alpha"), (2, "beta")]
+
+
+def test_a_large_file_loads_in_full(pg_session, tmp_path):
+    rows = [(i, f"name_{i}") for i in range(1, 10_000)]
+    inserted = SimpleTable.load_file(pg_session, _write_simple(tmp_path, rows), staging_schema_tag=STAGING_SCHEMA)
+    pg_session.commit()
+    assert inserted == 9999
+    assert pg_session.execute(sa.select(sa.func.count()).select_from(SimpleTable)).scalar_one() == 9999
+
+
+def test_upsert_does_not_update_existing_rows(pg_session, tmp_path):
+    SimpleTable.load_file(pg_session, _write_simple(tmp_path, [(1, "alpha")]), staging_schema_tag=STAGING_SCHEMA)
+    pg_session.commit()
+    SimpleTable.load_file(
+        pg_session, _write_simple(tmp_path, [(1, "alpha_updated")]), merge_strategy="upsert", staging_schema_tag=STAGING_SCHEMA
+    )
+    pg_session.commit()
+    assert _simple_rows(pg_session) == [(1, "alpha")]
+
+
+def test_insert_if_empty_loads_an_empty_target_and_refuses_a_non_empty_one(pg_session, tmp_path):
+    path = _write_simple(tmp_path, [(1, "alpha"), (2, "beta")])
+    assert SimpleTable.load_file(pg_session, path, merge_strategy="insert_if_empty", staging_schema_tag=STAGING_SCHEMA) == 2
+    pg_session.commit()
+    assert _simple_rows(pg_session) == [(1, "alpha"), (2, "beta")]
+    with pytest.raises(ValueError, match="is not empty; cannot use merge strategy 'insert_if_empty'"):
+        SimpleTable.load_file(pg_session, path, merge_strategy="insert_if_empty", staging_schema_tag=STAGING_SCHEMA)
+
+
+def test_a_native_enum_column_loads_member_names(pg_session, tmp_path):
+    path = tmp_path / "enum_table.csv"
+    path.write_text("id,role\n1,FIRST_AUTHOR\n2,LAST_AUTHOR\n3,\n")
+    assert EnumTable.load_file(pg_session, path, quote_mode="csv") == 3
+    pg_session.commit()
+    rows = dict(pg_session.execute(sa.select(EnumTable.id, EnumTable.role)).all())
+    assert rows == {1: AuthorRole.FIRST_AUTHOR, 2: AuthorRole.LAST_AUTHOR, 3: None}
