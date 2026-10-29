@@ -42,8 +42,9 @@ class FileReader(ABC):
     empty
         True when the file has no content at all.
     skipped
-        Lines the reader left out as malformed, each with the reason, filled
-        in while the batches are read.
+        Lines the reader left out as malformed, each as the number of the
+        line in the file (None when unknown) and the reason, filled in while
+        the batches are read.
     """
 
     def __init__(
@@ -58,7 +59,7 @@ class FileReader(ABC):
         self.columns: list[str] = []
         self.file_columns: list[str] = []
         self.empty = False
-        self.skipped: list[str] = []
+        self.skipped: list[tuple[int | None, str]] = []
 
     def normalise_headers(self, names: Iterable[str]) -> list[str]:
         """Return header names lowercased, stripped of quotes and padding and of a ``_hash`` suffix.

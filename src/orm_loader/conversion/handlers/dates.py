@@ -161,12 +161,16 @@ class DateHandler(ConvertingHandler):
 class DateTimeHandler(DateHandler):
     """Reads ISO timestamps, and date-only values in the declared date formats.
 
-    A timestamp has date and time separated by ``T`` or a space, with
-    optional seconds and up to six fractional digits. A date-only value
-    becomes midnight. The column type decides about time zones: a
-    ``DateTime(timezone=True)`` column requires an offset (``Z`` or
-    ``+hh:mm``) and stores UTC, and a column without a time zone rejects
-    an offset. A date-only value is not read for a time zone column.
+    - A timestamp has date and time separated by ``T`` or a space, with
+    optional seconds and up to six fractional digits.
+    -  A date-only value becomes midnight. 
+    - The column type decides about time zones: 
+        - ``DateTime(timezone=True)`` column requires an offset (``Z`` or
+    ``+hh:mm``) and stores UTC, and 
+        - a column without a time zone rejects an offset. 
+    - A date-only value is not read for a time zone column. 
+    - Typed input follows the same rule: a time zone aware timestamp does not fill a
+    naive column and a naive one does not fill an aware column.
     """
 
     distinct: ClassVar[bool] = False
@@ -180,6 +184,13 @@ class DateTimeHandler(DateHandler):
 
     def expected(self, sa_type: TypeEngine[Any]) -> str:
         return "DateTime with an offset (Z or +hh:mm)" if getattr(sa_type, "timezone", False) else "DateTime without an offset"
+
+    def _interpret_typed(self, arr: pa.Array, sa_type: TypeEngine[Any]) -> Interpretation:
+        target = self.arrow_type(sa_type)
+        stored_aware = pa.types.is_timestamp(arr.type) and arr.type.tz is not None
+        if not pa.types.is_null(arr.type) and stored_aware != (target.tz is not None):
+            return Interpretation(pa.nulls(len(arr), target), pc.is_valid(arr))
+        return super()._interpret_typed(arr, sa_type)
 
     def parse(self, cleaned: pa.Array, sa_type: TypeEngine[Any]) -> Interpretation:
         target = self.arrow_type(sa_type)

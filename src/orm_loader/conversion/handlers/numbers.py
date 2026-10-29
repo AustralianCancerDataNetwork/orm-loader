@@ -85,8 +85,8 @@ class NumericHandler(NumberHandler):
     """Accepts decimal forms and keeps the column's declared precision and scale.
 
     A precision without a scale has scale 0. A column without a precision is
-    read as ``decimal128(38, 18)``. A value with more digits than the column
-    holds is unreadable; trailing zeros beyond the scale are accepted.
+    read as ``decimal128(38, 18)``. Trailing zeros of the fraction are
+    dropped, and a value with more digits than the column holds is unreadable.
     """
 
     @staticmethod
@@ -100,11 +100,17 @@ class NumericHandler(NumberHandler):
     def arrow_type(self, sa_type: TypeEngine[Any]) -> pa.DataType:
         return pa.decimal128(*self.precision_scale(sa_type))
 
+    def clean(self, raw: pa.Array, trimmed: pa.Array) -> pa.Array:
+        return pc.replace_substring_regex(trimmed, r"(\.\d*?)0+$", r"\1")
+
     def pattern(self, sa_type: TypeEngine[Any]) -> str:
-        """Return the decimal forms whose integer part fits the column.
+        """Return the decimal forms that fit the column's integer and fraction digits.
 
         Arrow wraps around instead of failing when a string has more digits
-        than a decimal holds, so the integer digits are bounded here.
+        than a decimal holds, so both parts are bounded here.
         """
         precision, scale = self.precision_scale(sa_type)
-        return rf"^[+-]?(0*\d{{0,{precision - scale}}}(\.\d*)?|\.\d+)$"
+        forms = [rf"0*\d{{0,{precision - scale}}}(\.\d{{0,{scale}}})?"]
+        if scale:
+            forms.append(rf"\.\d{{1,{scale}}}")
+        return rf"^[+-]?({'|'.join(forms)})$"

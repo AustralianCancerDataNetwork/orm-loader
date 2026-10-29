@@ -12,12 +12,13 @@ import sqlalchemy as sa
 
 from orm_loader.backends import STAGING_SCHEMA, resolve_backend
 from orm_loader.conversion import ConversionPolicy, ErrorPolicy
-from orm_loader.helpers import IngestError
+from orm_loader.helpers import IngestError, PolicyError
 from orm_loader.loaders import DelimitedTextReader, LoadReport, ParquetReader
 from orm_loader.tables.typing import FileTableProtocol
-from tests.models import DemoRecord
+from tests.models import DemoBinaryRecord, DemoRecord, DemoRequiredRecord
 
 _Demo = cast(Type[FileTableProtocol], DemoRecord)
+_DemoRequired = cast(Type[FileTableProtocol], DemoRequiredRecord)
 REJECT = ConversionPolicy(errors=ErrorPolicy(on_error="reject_row"))
 COLUMNS = DemoRecord.model_columns()
 
@@ -58,7 +59,26 @@ def test_ragged_lines_are_rejected_with_their_text_under_reject_row(dialect_sess
         "expected 2 columns, got 1: 2",
         "expected 2 columns, got 3: 3,c,extra",
     ]
-    assert all(r["row"] is None and not r["column"] for r in rejects)
+    assert [r["row"] for r in rejects] == [2, 3] and not any(r["column"] for r in rejects)
+
+
+def test_row_numbers_count_the_malformed_lines_before_them(dialect_session, tmp_path):
+    report = LoadReport()
+    text = "demo_id,demo_label,demo_number\n1,a,1\n2,b\n3,c,3\n4,d,x\n5,e,5\n"
+    assert _load(dialect_session, tmp_path, text, policy=REJECT, report=report) == 3
+    assert [(r["row"], r["column"]) for r in _rejects(report.rejects_path)] == [(2, ""), (4, "demo_number")]
+
+
+def test_a_required_value_error_names_the_row_in_the_file(dialect_session, tmp_path):
+    from orm_loader.helpers import RequiredValueError
+    from tests.models import DemoRequiredRecord
+
+    path = tmp_path / "demo_required_record.csv"
+    path.write_text("demo_id,demo_label\n1,a\n2\n3,\n")
+    reader = DelimitedTextReader(path, DemoRequiredRecord.model_columns(), skip_malformed=True)
+    with pytest.raises(RequiredValueError) as error:
+        _DemoRequired.load_file(dialect_session, path, reader=reader, policy=ConversionPolicy())
+    assert error.value.rows == [3]
 
 
 def test_a_file_of_only_ragged_lines_is_rejected_not_silently_empty(dialect_session, tmp_path):
@@ -121,3 +141,23 @@ def test_duplicate_names_after_normalisation_are_an_error(tmp_path):
     path.write_text("demo_id,Demo_ID\n1,2\n")
     with pytest.raises(IngestError, match="duplicate column names"):
         DelimitedTextReader(path, COLUMNS)
+
+
+def test_invalid_utf8_is_reported_without_the_quote_mode_hint(tmp_path):
+    path = tmp_path / "demo_record.csv"
+    path.write_bytes(b"demo_id,demo_label\n1,a\xff\n")
+    reader = DelimitedTextReader(path, COLUMNS)
+    reader.encoding = "utf-8"
+    with pytest.raises(IngestError, match="demo_record.csv") as error:
+        list(reader.batches())
+    assert "quote_mode" not in str(error.value)
+
+
+def test_a_column_type_without_a_handler_is_fine_when_values_are_not_interpreted(dialect_session, tmp_path):
+    path = tmp_path / "demo_binary_record.csv"
+    path.write_text("demo_id,demo_blob\n1,abc\n")
+    tag = None if dialect_session.get_bind().dialect.name == "sqlite" else STAGING_SCHEMA
+    table = cast(Type[FileTableProtocol], DemoBinaryRecord)
+    with pytest.raises(PolicyError, match="demo_blob"):
+        table.load_file(dialect_session, path, staging_schema_tag=tag)
+    assert table.load_file(dialect_session, path, staging_schema_tag=tag, normalise=False) == 1

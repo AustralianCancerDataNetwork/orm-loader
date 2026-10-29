@@ -236,3 +236,31 @@ class DemoTypedRecord(Base, FileLoadableTableInterface):
     typed_stamp: so.Mapped[datetime | None] = so.mapped_column(sa.DateTime, nullable=True)
     typed_stamp_utc: so.Mapped[datetime | None] = so.mapped_column(sa.DateTime(timezone=True), nullable=True)
     typed_label: so.Mapped[str | None] = so.mapped_column(sa.String(10), nullable=True)
+
+
+class DemoDefaultKinds(Base, FileLoadableTableInterface):
+    """One column for each kind of default a column can declare."""
+
+    __tablename__ = "demo_default_kinds"
+    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+
+    kind_id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
+    kind_text: so.Mapped[str] = so.mapped_column(sa.String, nullable=False, server_default="it's text")
+    kind_int: so.Mapped[int] = so.mapped_column(sa.Integer, nullable=False, server_default="7")
+    kind_bool: so.Mapped[bool] = so.mapped_column(sa.Boolean, nullable=False, server_default=sa.true())
+    kind_date: so.Mapped[date] = so.mapped_column(sa.Date, nullable=False, server_default="2000-01-02")
+    kind_stamp: so.Mapped[datetime] = so.mapped_column(sa.DateTime, nullable=False, server_default="2000-01-02 10:30:00")
+    kind_expression: so.Mapped[str] = so.mapped_column(sa.String, nullable=False, server_default=sa.text("'expr'"))
+    kind_now: so.Mapped[datetime | None] = so.mapped_column(sa.DateTime, nullable=True, server_default=sa.func.current_timestamp())
+    kind_py_int: so.Mapped[int | None] = so.mapped_column(sa.Integer, nullable=True, default=5)
+    kind_py_date: so.Mapped[date | None] = so.mapped_column(sa.Date, nullable=True, default=date(2001, 2, 3))
+
+
+class DemoBinaryRecord(Base, FileLoadableTableInterface):
+    """A column type that the conversion policy has no handler for."""
+
+    __tablename__ = "demo_binary_record"
+    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+
+    demo_id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
+    demo_blob: so.Mapped[str | None] = so.mapped_column(sa.LargeBinary, nullable=True)

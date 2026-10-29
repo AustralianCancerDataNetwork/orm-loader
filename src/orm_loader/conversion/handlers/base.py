@@ -39,8 +39,8 @@ class ColumnHandler(ABC):
         Returns
         -------
         Interpretation
-            Converted values with nulls where a value is missing or
-            unreadable, and a mask that is true where a value was unreadable.
+            Converted values with nulls where a value is missing, and a mask
+            that is true where a value was unreadable.
         """
 
     def expected(self, sa_type: TypeEngine[Any]) -> str:

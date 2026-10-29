@@ -1,8 +1,10 @@
+import logging
+from typing import Any
+
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 from sqlalchemy.exc import NoInspectionAvailable
-from typing import Any
-import logging
+
 from .allocators import IdAllocator
 
 logger = logging.getLogger(__name__)
@@ -164,12 +166,13 @@ class ORMTableBase:
     @classmethod
     def sql_defaults(cls) -> dict[str, sa.ColumnElement[Any]]:
         """
-        Return the default of each non-nullable column as a SQL expression.
+        Return the default of each column that has one SQL can apply.
 
-        A server default given as text is cast to the column type, one given
-        as a SQL expression is used as written, and a scalar Python default
-        is a literal. A callable or context-sensitive default has no SQL
-        form, so its column is not listed.
+        A server default given as text is written inline, as in the DDL, so
+        the database reads it as the column's type. One given as a SQL
+        expression is used as written, and a scalar Python default is a typed
+        literal. A callable or context-sensitive default has no SQL form, so
+        its column is not listed.
 
         Returns
         -------
@@ -178,11 +181,9 @@ class ORMTableBase:
         """
         defaults: dict[str, sa.ColumnElement[Any]] = {}
         for c in cls.mapper_for().columns:
-            if c.nullable:
-                continue
             server_default = getattr(c.server_default, "arg", None)
             if isinstance(server_default, str):
-                defaults[c.name] = sa.cast(sa.literal(server_default), c.type)
+                defaults[c.name] = sa.literal(server_default, sa.String()).render_literal_execute()
             elif server_default is not None:
                 defaults[c.name] = server_default
             elif c.default is not None and c.default.is_scalar:

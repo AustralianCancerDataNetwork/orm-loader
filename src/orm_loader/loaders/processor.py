@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+from bisect import bisect_left
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -92,8 +93,9 @@ class BatchProcessor:
     normalise
         Whether to interpret values. When false, batches pass through.
     skipped
-        Lines the reader left out as malformed, each with the reason. They
-        are written to the rejects file and count as rows read and rejected.
+        Lines the reader left out as malformed, each as its line number in the
+        file and the reason. They are written to the rejects file and count as
+        rows read and rejected.
     """
 
     def __init__(
@@ -104,17 +106,21 @@ class BatchProcessor:
         report: LoadReport,
         rejects_path: Path,
         normalise: bool = True,
-        skipped: list[str] | None = None,
+        skipped: list[tuple[int | None, str]] | None = None,
     ) -> None:
         self.columns = columns
         self.skipped = skipped if skipped is not None else []
+        self._parsed = 0
+        self._shifts: list[int] = []
         self.policy = policy
         self.report = report
         self.normalise = normalise
         self.table_name = tableclass.__tablename__
         model_columns = tableclass.model_columns()
         self.types = {name: underlying_type(model_columns[name].type) for name in columns}
-        self.handlers = {name: policy.for_column(self.types[name], self.table_name, name) for name in columns}
+        self.handlers = (
+            {name: policy.for_column(self.types[name], self.table_name, name) for name in columns} if normalise else {}
+        )
         self.required = [c for c in tableclass.required_columns() if c in columns]
         self.rejects = RejectsWriter(rejects_path)
         if policy.errors.on_error == "reject_row":
@@ -125,8 +131,8 @@ class BatchProcessor:
         """Yield typed tables for the raw batches, closing the rejects file afterwards."""
         try:
             for raw in batches:
-                table = self.process(raw)
                 self._reject_skipped()
+                table = self.process(raw)
                 if table.num_rows:
                     yield table
             self._reject_skipped()
@@ -156,7 +162,8 @@ class BatchProcessor:
         RejectLimitError
             Rejected rows exceed ``max_rejects``.
         """
-        first_row = self.report.rows_read + 1
+        first = self._parsed
+        self._parsed += raw.num_rows
         self.report.rows_read += raw.num_rows
         if not self.normalise:
             return pa.Table.from_batches([raw])
@@ -167,8 +174,8 @@ class BatchProcessor:
         failures = self._failures(results)
         if failures:
             if self.policy.errors.on_error == "raise":
-                self._raise(raw, results, first_row)
-            return self._reject(raw, results, failures, first_row)
+                self._raise(raw, results, first)
+            return self._reject(raw, results, failures, first)
         return pa.table({name: results[name].values for name in self.columns})
 
     def _failures(self, results: dict[str, Any]) -> dict[str, tuple[pa.Array, str]]:
@@ -215,7 +222,7 @@ class BatchProcessor:
             samples=raw.filter(invalid).slice(0, 3).to_pylist(),
         )
 
-    def _raise(self, raw: pa.RecordBatch, results: dict[str, Any], first_row: int) -> None:
+    def _raise(self, raw: pa.RecordBatch, results: dict[str, Any], first: int) -> None:
         for name in self.columns:
             error = self._conversion_error(name, raw.column(name), results[name].invalid)
             if error is not None:
@@ -224,7 +231,7 @@ class BatchProcessor:
             missing = pc.is_null(results[name].values)
             count = pc.sum(pc.cast(missing, pa.int64())).as_py() or 0
             if count:
-                rows = [first_row + index for index in pc.indices_nonzero(missing).slice(0, 3).to_pylist()]
+                rows = self._row_numbers(first, raw.num_rows).take(pc.indices_nonzero(missing).slice(0, 3)).to_pylist()
                 raise RequiredValueError(
                     table_name=self.table_name, column_name=name, count=count, rows=rows
                 )
@@ -234,7 +241,7 @@ class BatchProcessor:
         raw: pa.RecordBatch,
         results: dict[str, Any],
         failures: dict[str, tuple[pa.Array, str]],
-        first_row: int,
+        first: int,
     ) -> pa.Table:
         rejected = no_failures(raw.num_rows)
         column = pa.nulls(raw.num_rows, pa.string())
@@ -244,7 +251,7 @@ class BatchProcessor:
             column = pc.if_else(first_hit, pa.scalar(name), column)
             reason = pc.if_else(first_hit, pa.scalar(why), reason)
             rejected = pc.or_(rejected, mask)
-        row_numbers = pc.add(pa.array(range(raw.num_rows), pa.int64()), first_row)
+        row_numbers = self._row_numbers(first, raw.num_rows)
         plain = [c.dictionary_decode() if pa.types.is_dictionary(c.type) else c for c in raw.columns]
         listing = pa.table(
             [row_numbers, column, reason, *plain], names=["row", "column", "reason", *raw.schema.names]
@@ -257,16 +264,36 @@ class BatchProcessor:
         keep = pc.invert(rejected)
         return pa.table({n: results[n].values for n in self.columns}).filter(keep)
 
+    def _row_numbers(self, first: int, count: int) -> pa.Array:
+        """Return the data row numbers in the file of ``count`` parsed rows, counting malformed lines.
+
+        Parameters
+        ----------
+        first
+            Position among the parsed rows of the first row (starting at 0).
+        count
+            Number of rows.
+        """
+        positions = range(first + 1, first + count + 1)
+        return pa.array([p + bisect_left(self._shifts, p) for p in positions], pa.int64())
+
     def _reject_skipped(self) -> None:
-        """Write the lines the reader left out to the rejects file, without a row number."""
+        """Write the lines the reader left out to the rejects file and remember where they were."""
         count = len(self.skipped)
         if not count:
             return
         text, empty = pa.string(), pa.nulls(count, pa.string())
         rows = pa.table(
-            {"row": pa.nulls(count, pa.int64()), "column": empty, "reason": pa.array(self.skipped, text)}
+            {
+                "row": pa.array([None if n is None else n - 1 for n, _ in self.skipped], pa.int64()),
+                "column": empty,
+                "reason": pa.array([why for _, why in self.skipped], text),
+            }
             | {name: empty for name in self.columns}
         )
+        for number, _ in self.skipped:
+            if number is not None:
+                self._shifts.append(number - 1 - (len(self._shifts) + 1))
         self.skipped.clear()
         self.rejects.write(rows)
         self.report.rows_read += count

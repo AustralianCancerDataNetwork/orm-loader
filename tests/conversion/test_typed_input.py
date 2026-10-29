@@ -72,3 +72,12 @@ def test_year_zero_dates_are_unreadable_on_typed_input():
     year_zero, year_two_thousand = -719_528, 10_957
     _, invalid = _result(pa.array([year_zero, year_two_thousand], pa.date32()), sa.Date())
     assert invalid == [True, False]
+
+
+def test_the_time_zone_rule_of_the_column_applies_to_typed_timestamps():
+    aware = pa.array([datetime(2020, 1, 1, 10, tzinfo=timezone.utc), None], pa.timestamp("us", "UTC"))
+    naive = pa.array([datetime(2020, 1, 1, 10), None], pa.timestamp("us"))
+    assert _result(aware, sa.DateTime())[1] == [True, False]
+    assert _result(naive, sa.DateTime(timezone=True))[1] == [True, False]
+    assert _result(pa.array([date(2020, 1, 1)], pa.date32()), sa.DateTime(timezone=True))[1] == [True]
+    assert _result(pa.array([date(2020, 1, 1)], pa.date32()), sa.DateTime())[1] == [False]

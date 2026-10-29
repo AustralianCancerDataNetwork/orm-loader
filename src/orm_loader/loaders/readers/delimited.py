@@ -82,7 +82,7 @@ class DelimitedTextReader(FileReader):
         return self.normalise_headers(header.lstrip("\ufeff").rstrip("\r\n").split(self.delimiter))
 
     def _skip_row(self, row: pv.InvalidRow) -> Literal["skip"]:
-        self.skipped.append(f"expected {row.expected_columns} columns, got {row.actual_columns}: {row.text.rstrip()}")
+        self.skipped.append((row.number, f"expected {row.expected_columns} columns, got {row.actual_columns}: {row.text.rstrip()}"))
         return "skip"
 
     def _warn_if_everything_is_quoted(self) -> None:
@@ -114,6 +114,7 @@ class DelimitedTextReader(FileReader):
                     skip_rows=1,
                     block_size=self.block_size,
                     encoding=self.encoding,
+                    use_threads=not self.skip_malformed,
                 ),
                 parse_options=pv.ParseOptions(
                     delimiter=self.delimiter,
@@ -134,12 +135,14 @@ class DelimitedTextReader(FileReader):
                 for batch in reader:
                     if batch.num_rows:
                         yield batch
-        except (pa.ArrowInvalid, UnicodeDecodeError) as exc:
+        except UnicodeDecodeError as exc:
+            raise IngestError(f"{self.path.name}: cannot decode the file as {self.encoding}: {exc.reason}.") from exc
+        except pa.ArrowInvalid as exc:
             if "Empty CSV file" in str(exc):
                 return
             hint = (
                 " The file may contain literal double quotes; try quote_mode='literal' or 'by_delimiter'."
-                if self.quote == "csv"
+                if self.quote == "csv" and str(exc).startswith("CSV parse error")
                 else ""
             )
             raise IngestError(f"{self.path.name}: {exc}.{hint}") from exc

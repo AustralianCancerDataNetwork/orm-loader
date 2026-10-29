@@ -125,3 +125,18 @@ def test_one_bad_value_in_a_large_batch_does_not_slow_the_whole_batch():
     values, invalid = interpret(raw, sa.BigInteger())
     assert time.perf_counter() - started < 0.5
     assert sum(invalid) == 1 and invalid[100_000]
+
+
+def test_numeric_fractions_longer_than_the_decimal_do_not_wrap_around():
+    values = ["1.5" + "0" * 45, "1.50" + "0" * 40, "0." + "1" * 50, "1.234", "1.2300"]
+    assert interpret(values, sa.Numeric(10, 2)) == (
+        [Decimal("1.50"), Decimal("1.50"), None, None, Decimal("1.23")],
+        [False, False, True, True, False],
+    )
+
+
+def test_numeric_with_scale_zero_accepts_a_zero_fraction_only():
+    assert interpret(["2", "2.0", "2.5", "."], sa.Numeric(30)) == (
+        [Decimal("2"), Decimal("2"), None, None],
+        [False, False, True, True],
+    )

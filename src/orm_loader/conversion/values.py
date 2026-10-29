@@ -17,7 +17,8 @@ class Interpretation(NamedTuple):
     Attributes
     ----------
     values
-        Converted values, null where a value is missing or unreadable.
+        Converted values, null where a value is missing. Where ``invalid`` is
+        true the value is not meaningful and is not used.
     invalid
         Boolean array that is true where a value could not be read.
     """

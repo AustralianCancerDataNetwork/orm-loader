@@ -109,18 +109,22 @@ class PostgresBackend(DatabaseBackend):
             bind_arguments=bind_arguments,
         )
 
-        for name in table_cls.sql_defaults():
-            session.execute(
-                sa.text(f'ALTER TABLE {staging_ref} ALTER COLUMN {preparer.quote_identifier(name)} DROP NOT NULL;'),
-                bind_arguments=bind_arguments,
-            )
-
         computed_cols = [c.name for c in table.columns if c.computed is not None]
         for col in computed_cols:
             session.execute(
                 sa.text(f'ALTER TABLE {staging_ref} DROP COLUMN {preparer.quote_identifier(col)};'),
                 bind_arguments=bind_arguments,
             )
+
+        # staging only lands the file, so a null reaches the merge, where the column's default
+        # or the required check deals with it; LIKE would keep the NOT NULL of the target
+        nullable = ", ".join(
+            f"ALTER COLUMN {preparer.quote_identifier(c.name)} DROP NOT NULL"
+            for c in table.columns
+            if c.computed is None and not c.nullable
+        )
+        if nullable:
+            session.execute(sa.text(f"ALTER TABLE {staging_ref} {nullable};"), bind_arguments=bind_arguments)
 
         # allows pagination in O(N log N) time for large tables in merge_insert without needing to add an index on every staging table
         session.execute(

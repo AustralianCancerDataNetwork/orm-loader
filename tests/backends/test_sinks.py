@@ -85,3 +85,14 @@ def test_a_failing_batch_source_is_raised_not_swallowed(dialect_session, tmp_pat
 
     with pytest.raises(RuntimeError, match="boom"):
         backend.insert_batches(ctx, batches(), COLUMNS)
+
+
+def test_a_staging_table_accepts_a_null_in_every_column(dialect_session):
+    from tests.models import DemoRequiredRecord
+
+    table = cast(Type[FileTableProtocol], DemoRequiredRecord)
+    tag = None if dialect_session.get_bind().dialect.name == "sqlite" else STAGING_SCHEMA
+    table.create_staging_table(dialect_session, staging_schema_tag=tag)
+    staging = table.get_staging_table(dialect_session, staging_schema_tag=tag)
+    assert not DemoRequiredRecord.__table__.c.demo_label.nullable
+    assert [c.name for c in staging.c if not c.nullable and c.name != "_rownum"] == []
