@@ -949,11 +949,7 @@ class DatabaseBackend(ABC):
         try:
             if disable_fk:
                 self._require_capability("supports_fk_toggle", "foreign key toggling")
-                raw_state = (
-                    self.disable_fk_check(session)
-                    if mapper is None
-                    else self.disable_fk_check(session, mapper=mapper)
-                )
+                raw_state = self.disable_fk_check(session, mapper=mapper)
                 previous_fk_state = self._normalize_fk_check_state(raw_state)
 
             if no_autoflush:
@@ -968,10 +964,7 @@ class DatabaseBackend(ABC):
 
         finally:
             if previous_fk_state is not None:
-                if mapper is None:
-                    self.restore_fk_check(session, previous_fk_state)
-                else:
-                    self.restore_fk_check(session, previous_fk_state, mapper=mapper)
+                self.restore_fk_check(session, previous_fk_state, mapper=mapper)
 
     @requires_capability("supports_materialized_views", "materialized views")
     def create_materialized_view(
