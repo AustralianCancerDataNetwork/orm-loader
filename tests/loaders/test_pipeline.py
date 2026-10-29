@@ -2,7 +2,8 @@
 
 import csv
 import io
-from datetime import date
+from datetime import date, datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 from typing import Type, cast
 
@@ -16,10 +17,11 @@ from orm_loader.conversion import ConversionPolicy, ErrorPolicy
 from orm_loader.helpers import ConversionError, RequiredValueError
 from orm_loader.loaders import DelimitedTextReader, LoaderContext, ParquetReader, stage_file
 from orm_loader.tables.typing import FileTableProtocol
-from tests.models import DemoRecord, DemoRequiredRecord
+from tests.models import DemoRecord, DemoRequiredRecord, DemoTypedRecord
 
 _Demo = cast(Type[FileTableProtocol], DemoRecord)
 _DemoRequired = cast(Type[FileTableProtocol], DemoRequiredRecord)
+_Typed = cast(Type[FileTableProtocol], DemoTypedRecord)
 
 HEADER = ["demo_id", "demo_label", "demo_number", "demo_flag", "demo_date"]
 REJECT = ConversionPolicy(errors=ErrorPolicy(on_error="reject_row"))
@@ -142,3 +144,93 @@ def test_a_failing_reader_is_raised_and_stages_nothing(dialect_session, tmp_path
         _stage(dialect_session, _Demo, path, reader=reader)
     tag = None if dialect_session.get_bind().dialect.name == "sqlite" else STAGING_SCHEMA
     assert _staged(dialect_session, _Demo.get_staging_table(dialect_session, staging_schema_tag=tag), "demo_id") == []
+
+
+TYPED_HEADER = [
+    "typed_id", "typed_small", "typed_float", "typed_numeric", "typed_flag",
+    "typed_date", "typed_stamp", "typed_stamp_utc", "typed_label",
+]
+UTC = timezone.utc
+
+
+def _typed_file(tmp_path: Path, **overrides: pa.Array) -> Path:
+    columns = {
+        "typed_id": pa.array([1, 2], pa.int64()),
+        "typed_small": pa.array([7, None], pa.int32()),
+        "typed_float": pa.array([1.5, float("nan")], pa.float32()),
+        "typed_numeric": pa.array([Decimal("12.34"), None], pa.decimal128(10, 2)),
+        "typed_flag": pa.array([True, None], pa.bool_()),
+        "typed_date": pa.array([date(2020, 2, 29), None], pa.date32()),
+        "typed_stamp": pa.array([datetime(2020, 1, 1, 10, 30), None], pa.timestamp("us")),
+        "typed_stamp_utc": pa.array([datetime(2020, 1, 1, 10, 30, tzinfo=UTC), None], pa.timestamp("us", "UTC")),
+        "typed_label": pa.array(["alpha", None], pa.string()),
+        **overrides,
+    }
+    path = tmp_path / "demo_typed_record.parquet"
+    pq.write_table(pa.table(columns), path)
+    return path
+
+
+def test_typed_parquet_columns_keep_their_values_on_every_dialect(dialect_session, tmp_path):
+    loaded, ctx, staging = _stage(dialect_session, _Typed, _typed_file(tmp_path))
+    assert loaded == 2 and ctx.report.accounted
+    rows = _staged(dialect_session, staging, *TYPED_HEADER)
+    assert rows[0] == (
+        1, 7, 1.5, Decimal("12.34"), True, date(2020, 2, 29),
+        datetime(2020, 1, 1, 10, 30), datetime(2020, 1, 1, 10, 30, tzinfo=UTC), "alpha",
+    )
+    assert rows[1] == (2, None, None, None, None, None, None, None, None)
+
+
+@pytest.mark.parametrize(
+    "column, bad",
+    [
+        ("typed_flag", pa.array([1, 2], pa.int64())),
+        ("typed_date", pa.array([datetime(2020, 1, 1), datetime(2020, 1, 1, 12)], pa.timestamp("us"))),
+        ("typed_small", pa.array([1, 70_000], pa.int64())),
+        ("typed_label", pa.array([1, 12345678901], pa.int64())),
+        ("typed_numeric", pa.array([Decimal("1.25"), Decimal("1.234")], pa.decimal128(10, 3))),
+    ],
+)
+def test_typed_parquet_values_that_would_change_are_unreadable(dialect_session, tmp_path, column, bad):
+    with pytest.raises(ConversionError, match=column):
+        _stage(dialect_session, _Typed, _typed_file(tmp_path, **{column: bad}))
+    loaded, ctx, _ = _stage(dialect_session, _Typed, _typed_file(tmp_path, **{column: bad}), policy=REJECT)
+    assert loaded == 1 and ctx.report.rows_rejected == 1 and ctx.report.accounted
+
+
+def _typed_rows(**cells: str) -> list[tuple]:
+    return [tuple(cells.get(name, "1" if name == "typed_id" else "") for name in TYPED_HEADER)]
+
+
+def test_offsets_are_stored_as_utc_in_a_time_zone_column_and_rejected_in_a_naive_one(dialect_session, tmp_path):
+    rows = _typed_rows(typed_stamp_utc="2020-01-01T10:00:00+10:00", typed_stamp="2020-01-01 10:00:00")
+    _, _, staging = _stage(dialect_session, _Typed, _write(tmp_path, DemoTypedRecord, "csv", rows, TYPED_HEADER))
+    assert _staged(dialect_session, staging, "typed_stamp", "typed_stamp_utc") == [
+        (datetime(2020, 1, 1, 10), datetime(2020, 1, 1, 0, tzinfo=UTC))
+    ]
+    with pytest.raises(ConversionError, match="typed_stamp.*without an offset"):
+        bad = _typed_rows(typed_stamp="2020-01-01T10:00:00+10:00")
+        _stage(dialect_session, _Typed, _write(tmp_path, DemoTypedRecord, "csv", bad, TYPED_HEADER))
+    with pytest.raises(ConversionError, match="typed_stamp_utc.*with an offset"):
+        bad = _typed_rows(typed_stamp_utc="2020-01-01 10:00:00")
+        _stage(dialect_session, _Typed, _write(tmp_path, DemoTypedRecord, "csv", bad, TYPED_HEADER))
+
+
+@pytest.mark.parametrize("policy", [None, REJECT], ids=["raise", "reject_row"])
+def test_an_integer_too_wide_for_the_column_never_reaches_the_database(dialect_session, tmp_path, policy):
+    rows = [*_typed_rows(typed_small="32767"), *_typed_rows(typed_id="2", typed_small="32768")]
+    path = _write(tmp_path, DemoTypedRecord, "csv", rows, TYPED_HEADER)
+    if policy is None:
+        with pytest.raises(ConversionError, match="typed_small"):
+            _stage(dialect_session, _Typed, path)
+        return
+    loaded, ctx, staging = _stage(dialect_session, _Typed, path, policy=policy)
+    assert loaded == 1 and ctx.report.rows_rejected == 1
+    assert _staged(dialect_session, staging, "typed_small") == [(32767,)]
+
+
+def test_year_zero_is_rejected_on_every_dialect(dialect_session, tmp_path):
+    rows = _typed_rows(typed_date="0000-01-01", typed_stamp="0000-01-01 00:00:00")
+    with pytest.raises(ConversionError, match="typed_date"):
+        _stage(dialect_session, _Typed, _write(tmp_path, DemoTypedRecord, "csv", rows, TYPED_HEADER))

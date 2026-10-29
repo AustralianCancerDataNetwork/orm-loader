@@ -17,6 +17,8 @@ from .base import FileReader
 class ParquetReader(FileReader):
     """A Parquet file read with its stored types.
 
+    Column names are normalised as described by ``normalise_headers``.
+
     Parameters
     ----------
     path
@@ -41,12 +43,16 @@ class ParquetReader(FileReader):
         super().__init__(path, model_columns, nulls)
         self.chunksize = chunksize or 64_000
         self._dataset = ds.dataset(path, format="parquet")
-        self.columns = [name for name in self._dataset.schema.names if name in model_columns]
+        self.file_columns = self.normalise_headers(self._dataset.schema.names)
+        stored = dict(zip(self.file_columns, self._dataset.schema.names))
+        self.columns = [name for name in self.file_columns if name in model_columns]
+        self._stored = [stored[name] for name in self.columns]
 
     def batches(self) -> Iterator[pa.RecordBatch]:
         """Yield the stored rows in batches of ``chunksize`` rows."""
         markers = self.reader_markers()
-        for batch in self._dataset.to_batches(columns=self.columns, batch_size=self.chunksize):
+        for batch in self._dataset.to_batches(columns=self._stored, batch_size=self.chunksize):
+            batch = batch.rename_columns(self.columns)
             if markers:
                 batch = self.null_markers(batch, markers)
             if batch.num_rows:

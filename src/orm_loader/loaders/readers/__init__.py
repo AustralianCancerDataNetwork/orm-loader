@@ -15,8 +15,9 @@ def open_reader(
     model_columns: Mapping[str, sa.ColumnElement[Any]],
     *,
     nulls: NullPolicy | None = None,
-    quote_mode: str = "auto",
+    quote_mode: str = "by_delimiter",
     chunksize: int | None = None,
+    skip_malformed: bool = False,
 ) -> FileReader:
     """Open a file with the reader for its format.
 
@@ -35,6 +36,9 @@ def open_reader(
         Quote handling for delimited text.
     chunksize
         Rows per batch for formats that batch by rows.
+    skip_malformed
+        Leave out lines with the wrong number of fields and record them in
+        the reader's ``skipped`` list. Delimited text only.
 
     Returns
     -------
@@ -43,7 +47,7 @@ def open_reader(
     """
     if path.suffix.lower() == ".parquet":
         return ParquetReader(path, model_columns, nulls, chunksize)
-    return DelimitedTextReader(path, model_columns, nulls, quote_mode)
+    return DelimitedTextReader(path, model_columns, nulls, quote_mode, skip_malformed=skip_malformed)
 
 
 

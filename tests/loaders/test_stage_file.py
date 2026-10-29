@@ -1,7 +1,10 @@
 from pathlib import Path
 
+import pytest
 import sqlalchemy as sa
 
+from orm_loader.backends import resolve_backend
+from orm_loader.helpers import IngestError
 from orm_loader.loaders import LoaderContext, stage_file
 from tests.models import FileLoaderTable
 
@@ -170,3 +173,25 @@ def test_file_without_data_rows_loads_nothing_whatever_its_header(tmp_path, sqli
         )
         assert stage_file(ctx, ctx.tableclass._select_reader(ctx)) == 0
         assert ctx.report.rows_read == 0
+
+
+def test_accounting_is_checked_against_the_staging_table(tmp_path, sqlite_session, monkeypatch):
+    """A sink that silently loses rows is caught, because the staged rows are counted in the database."""
+    csv = tmp_path / "test_file_loader.csv"
+    csv.write_text("id,value\n1,a\n2,b\n3,c\n")
+    ctx = LoaderContext(
+        tableclass=FileLoaderTable,
+        session=sqlite_session,
+        path=csv,
+        staging_table=FileLoaderTable.__table__,
+        dedupe=False,
+    )
+    backend = resolve_backend(sqlite_session, mapper=FileLoaderTable)
+    insert = type(backend).insert_batches
+
+    def losing(self, ctx, batches, columns):
+        insert(self, ctx, list(batches)[:-1] or [], columns)
+
+    monkeypatch.setattr(type(backend), "insert_batches", losing)
+    with pytest.raises(IngestError, match="read 3 rows but loaded 0"):
+        stage_file(ctx, ctx.tableclass._select_reader(ctx))

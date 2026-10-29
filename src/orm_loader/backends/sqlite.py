@@ -121,7 +121,7 @@ class SQLiteBackend(DatabaseBackend):
         ctx: "LoaderContext",
         batches: Iterable[pa.Table],
         columns: Sequence[str],
-    ) -> int:
+    ) -> None:
         """Insert the batches with one native ``executemany`` per batch.
 
         The statement goes straight to the DB-API without per-value bind
@@ -136,12 +136,9 @@ class SQLiteBackend(DatabaseBackend):
             f"INSERT INTO {table_ref} ({', '.join(preparer.quote(c) for c in columns)}) "
             f"VALUES ({', '.join('?' for _ in columns)})"
         )
-        total = 0
         for table in batches:
             values = [self._storable(table[name]) for name in columns]
             connection.exec_driver_sql(sql, list(zip(*values)))
-            total += table.num_rows
-        return total
 
     @staticmethod
     def _storable(column: pa.ChunkedArray) -> list[Any]:
@@ -282,7 +279,8 @@ class SQLiteBackend(DatabaseBackend):
         self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
         staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
-        insertable_cols = self._insertable_column_names(table_cls)
+        staged = self._staged_columns(table_cls, staging)
+        insertable_cols = list(staged)
 
         def _upsert(select_: Any) -> sa.Insert:
             return (
@@ -291,7 +289,7 @@ class SQLiteBackend(DatabaseBackend):
                 .on_conflict_do_nothing(index_elements=pk_cols)
             )
 
-        non_paginated_select = sa.select(*(staging.c[c] for c in insertable_cols))
+        non_paginated_select = sa.select(*staged.values())
 
         for batch_range in self._paginate_batches(table_cls, staging, session, merge_batch_size):
 
@@ -309,8 +307,9 @@ class SQLiteBackend(DatabaseBackend):
         self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
         staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
-        insertable_cols = self._insertable_column_names(table_cls)
-        non_paginated_select = sa.select(*(staging.c[c] for c in insertable_cols))
+        staged = self._staged_columns(table_cls, staging)
+        insertable_cols = list(staged)
+        non_paginated_select = sa.select(*staged.values())
 
         def _insert(select_: Any) -> sa.Insert:
             return sa.insert(target).from_select(insertable_cols, select_)

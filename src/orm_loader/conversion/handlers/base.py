@@ -9,7 +9,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 from sqlalchemy.types import TypeEngine
 
-from ..values import Interpretation, as_array, is_text_like, no_failures, NULL_STRING, safe_cast
+from ..values import NULL_STRING, Interpretation, as_array, is_text_like, no_failures, safe_cast
 
 if TYPE_CHECKING:
     from ..policy import NullPolicy
@@ -62,7 +62,9 @@ class ConvertingHandler(ColumnHandler):
     """Converts a column in four stages: clean, detect missing, parse, check.
 
     Text input follows the stages. Input that already has a type, such as a
-    Parquet column, is cast directly with floating NaN read as missing.
+    Parquet column, is cast directly with floating NaN read as missing. A
+    value that does not survive the cast back to its input type is lossy and
+    unreadable, and ``check`` runs on the cast values.
     Subclasses supply ``arrow_type`` and ``parse`` and may override ``clean``,
     ``missing`` and ``check``.
 
@@ -132,6 +134,13 @@ class ConvertingHandler(ColumnHandler):
         return Interpretation(values, invalid if rejected is None else pc.or_(invalid, rejected))
 
     def _interpret_typed(self, arr: pa.Array, sa_type: TypeEngine[Any]) -> Interpretation:
+        target = self.arrow_type(sa_type)
+        if pa.types.is_null(arr.type):
+            return Interpretation(pa.nulls(len(arr), target), no_failures(len(arr)))
         if pa.types.is_floating(arr.type):
             arr = pc.if_else(pc.fill_null(pc.is_nan(arr), False), pa.scalar(None, arr.type), arr)
-        return Interpretation(*safe_cast(arr, self.arrow_type(sa_type)))
+        values, invalid = safe_cast(arr, target)
+        round_trip, _ = safe_cast(values, arr.type)
+        invalid = pc.or_(invalid, pc.fill_null(pc.not_equal(round_trip, arr), False))
+        rejected = self.check(values, sa_type)
+        return Interpretation(values, invalid if rejected is None else pc.or_(invalid, rejected))

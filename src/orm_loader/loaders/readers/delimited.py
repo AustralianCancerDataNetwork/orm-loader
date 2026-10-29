@@ -6,7 +6,7 @@ import codecs
 import logging
 from collections.abc import Iterator, Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import pyarrow as pa
 import pyarrow.csv as pv
@@ -14,8 +14,8 @@ import sqlalchemy as sa
 
 from ...conversion import NullPolicy
 from ...helpers import IngestError
-from .detection import infer_delim, infer_encoding, resolve_quote_mode
 from .base import FileReader
+from .detection import infer_delim, infer_encoding, resolve_quote_mode
 
 logger = logging.getLogger(__name__)
 
@@ -26,9 +26,9 @@ class DelimitedTextReader(FileReader):
     """A delimited text file read as raw strings in bounded blocks.
 
     Date columns are dictionary-encoded. An unquoted empty field is null and
-    a quoted empty field is an empty string. Header names are lowercased and
-    stripped of quotes and a ``_hash`` suffix. File columns that are not
-    model columns are ignored.
+    a quoted empty field is an empty string. Header names are normalised as
+    described by ``normalise_headers``. File columns that are not model
+    columns are ignored.
 
     Parameters
     ----------
@@ -41,9 +41,12 @@ class DelimitedTextReader(FileReader):
     quote_mode
         ``"csv"`` reads double quotes as field quoting, ``"literal"`` keeps
         them as data, ``"by_delimiter"`` chooses ``"literal"`` for tab
-        delimited files and ``"csv"`` otherwise, ``"auto"`` samples the file.
+        delimited files and ``"csv"`` otherwise.
     block_size
         Bytes per block; memory use follows this, not the row count.
+    skip_malformed
+        Leave out a line with the wrong number of fields and record it in
+        ``skipped``, instead of failing the read.
     """
 
     def __init__(
@@ -51,11 +54,13 @@ class DelimitedTextReader(FileReader):
         path: Path,
         model_columns: Mapping[str, sa.ColumnElement[Any]],
         nulls: NullPolicy | None = None,
-        quote_mode: str = "auto",
+        quote_mode: str = "by_delimiter",
         block_size: int = 4 << 20,
+        skip_malformed: bool = False,
     ) -> None:
         super().__init__(path, model_columns, nulls)
         self.block_size = block_size
+        self.skip_malformed = skip_malformed
         if path.stat().st_size == 0:
             self.empty = True
             return
@@ -65,7 +70,7 @@ class DelimitedTextReader(FileReader):
             codecs.lookup(self.encoding)
         except LookupError as exc:
             raise IngestError(f"{path.name}: unsupported encoding {self.encoding!r}") from exc
-        self.quote = resolve_quote_mode(quote_mode, path, self.delimiter, self.encoding)
+        self.quote = resolve_quote_mode(quote_mode, self.delimiter)
         self.file_columns = self._header_names()
         self.columns = [name for name in self.file_columns if name in model_columns]
         if self.nulls.marker_quoting == "unquoted_only" and self.nulls.text_markers:
@@ -74,13 +79,11 @@ class DelimitedTextReader(FileReader):
     def _header_names(self) -> list[str]:
         with open(self.path, "rb") as handle:
             header = handle.readline().decode(self.encoding, errors="replace")
-        header = header.lstrip("﻿").rstrip("\r\n")
-        names = [
-            name.strip().strip('"').strip().lower().replace("_hash", "") for name in header.split(self.delimiter)
-        ]
-        if len(set(names)) != len(names):
-            raise IngestError(f"{self.path.name}: duplicate column names in header {names}")
-        return names
+        return self.normalise_headers(header.lstrip("\ufeff").rstrip("\r\n").split(self.delimiter))
+
+    def _skip_row(self, row: pv.InvalidRow) -> Literal["skip"]:
+        self.skipped.append(f"expected {row.expected_columns} columns, got {row.actual_columns}: {row.text.rstrip()}")
+        return "skip"
 
     def _warn_if_everything_is_quoted(self) -> None:
         with open(self.path, "rb") as handle:
@@ -117,6 +120,7 @@ class DelimitedTextReader(FileReader):
                     quote_char='"' if self.quote == "csv" else False,
                     escape_char=False,
                     newlines_in_values=self.quote == "csv",
+                    invalid_row_handler=self._skip_row if self.skip_malformed else None,
                 ),
                 convert_options=pv.ConvertOptions(
                     column_types=column_types,
@@ -130,7 +134,7 @@ class DelimitedTextReader(FileReader):
                 for batch in reader:
                     if batch.num_rows:
                         yield batch
-        except pa.ArrowInvalid as exc:
+        except (pa.ArrowInvalid, UnicodeDecodeError) as exc:
             if "Empty CSV file" in str(exc):
                 return
             hint = (

@@ -1,5 +1,6 @@
 
-from datetime import date
+from datetime import date, datetime
+from decimal import Decimal
 from enum import Enum
 
 import sqlalchemy as sa
@@ -205,3 +206,33 @@ class DemoRequiredRecord(Base, FileLoadableTableInterface):
 
     demo_id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     demo_label: so.Mapped[str] = so.mapped_column(sa.String, nullable=False)
+
+
+class DemoDefaultedRecord(Base, FileLoadableTableInterface):
+    """Non-nullable columns with a server default, a scalar default and a callable default."""
+
+    __tablename__ = "demo_defaulted_record"
+    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+
+    demo_id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
+    demo_status: so.Mapped[str] = so.mapped_column(sa.String, nullable=False, server_default="open")
+    demo_priority: so.Mapped[int] = so.mapped_column(sa.Integer, nullable=False, default=5)
+    demo_stamp: so.Mapped[str] = so.mapped_column(sa.String, nullable=False, default=lambda: "made")
+    demo_note: so.Mapped[str | None] = so.mapped_column(sa.String, nullable=True, default="n")
+
+
+class DemoTypedRecord(Base, FileLoadableTableInterface):
+    """One column of each kind a typed (Parquet) input can fill."""
+
+    __tablename__ = "demo_typed_record"
+    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+
+    typed_id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
+    typed_small: so.Mapped[int | None] = so.mapped_column(sa.SmallInteger, nullable=True)
+    typed_float: so.Mapped[float | None] = so.mapped_column(sa.Float, nullable=True)
+    typed_numeric: so.Mapped[Decimal | None] = so.mapped_column(sa.Numeric(10, 2), nullable=True)
+    typed_flag: so.Mapped[bool | None] = so.mapped_column(sa.Boolean, nullable=True)
+    typed_date: so.Mapped[date | None] = so.mapped_column(sa.Date, nullable=True)
+    typed_stamp: so.Mapped[datetime | None] = so.mapped_column(sa.DateTime, nullable=True)
+    typed_stamp_utc: so.Mapped[datetime | None] = so.mapped_column(sa.DateTime(timezone=True), nullable=True)
+    typed_label: so.Mapped[str | None] = so.mapped_column(sa.String(10), nullable=True)

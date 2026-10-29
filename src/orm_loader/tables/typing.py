@@ -51,6 +51,9 @@ class ORMTableProtocol(Protocol):
     @classmethod
     def required_columns(cls) -> set[str]: ...
 
+    @classmethod
+    def sql_defaults(cls) -> dict[str, sa.ColumnElement[Any]]: ...
+
 @runtime_checkable
 class FileTableProtocol(ORMTableProtocol, Protocol):
     """
@@ -87,7 +90,7 @@ class FileTableProtocol(ORMTableProtocol, Protocol):
         dedupe: bool = False,
         chunksize: int | None = None,
         merge_strategy: str = "replace",
-        quote_mode: str = "auto",
+        quote_mode: str = "by_delimiter",
         index_strategy: str = "auto",
         merge_batch_size: int | None = None,
         staging_schema_tag: str | None = None,

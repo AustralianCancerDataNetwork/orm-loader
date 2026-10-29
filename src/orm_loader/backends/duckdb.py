@@ -338,25 +338,21 @@ class DuckDBBackend(DatabaseBackend):
         ctx: "LoaderContext",
         batches: Iterable[pa.Table],
         columns: Sequence[str],
-    ) -> int:
+    ) -> None:
         """Insert the batches into the staging table straight from Arrow.
 
         Notes
         -----
-        - The fastest bulk insertion method is DuckDB's ``INSERT ... SELECT`` from a
-        temporary view over the Arrow memory. 
-        - The staging table is committed every ``STAGING_COMMIT_EVERY`` batches,
-        because DuckDB keeps uncommitted rows in memory and one transaction would 
-        hold the whole file.
-
-        Notes
-        -----
-        Committing the staging table also ends the caller's open transaction.
+        Each batch is registered as a temporary view over the Arrow memory and
+        copied with ``INSERT ... SELECT``, which is DuckDB's fastest bulk path.
+        The staging table is committed every ``STAGING_COMMIT_EVERY`` batches,
+        because DuckDB keeps uncommitted rows in memory and one transaction
+        would hold the whole file. The commit also ends the caller's open
+        transaction.
         """
         batch = sa.table("_orm_loader_batch", *(sa.column(c) for c in columns))
         insert = ctx.staging_table.insert().from_select(list(columns), sa.select(*batch.c))
         bind_arguments = {"mapper": ctx.tableclass}
-        total = 0
         for index, table in enumerate(batches, start=1):
             native = ctx.session.connection(bind_arguments=bind_arguments).connection
             native.register("_orm_loader_batch", table)
@@ -364,10 +360,8 @@ class DuckDBBackend(DatabaseBackend):
                 ctx.session.execute(insert, bind_arguments=bind_arguments)
             finally:
                 native.unregister("_orm_loader_batch")
-            total += table.num_rows
             if index % self.STAGING_COMMIT_EVERY == 0:
                 ctx.session.commit()
-        return total
 
     def check_replace_feasible(
         self,
@@ -439,7 +433,8 @@ class DuckDBBackend(DatabaseBackend):
         self.check_replace_feasible(table_cls, pk_cols, session)
         target = table_cls.__table__
         staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
-        update_cols = [c for c in self._insertable_column_names(table_cls) if c not in pk_cols]
+        staged = self._staged_columns(table_cls, staging)
+        update_cols = [c for c in staged if c not in pk_cols]
         pk_join = sa.and_(*(target.c[c] == staging.c[c] for c in pk_cols))
 
         def _batch_keys(extra: sa.ColumnElement[bool] | None = None) -> sa.Select[Any]:
@@ -454,7 +449,7 @@ class DuckDBBackend(DatabaseBackend):
             return sa.tuple_(*(target.c[c] for c in pk_cols)).in_(keys)
 
         def _update(extra: sa.ColumnElement[bool] | None = None) -> None:
-            stmt = sa.update(target).values({c: staging.c[c] for c in update_cols}).where(pk_join)
+            stmt = sa.update(target).values({c: staged[c] for c in update_cols}).where(pk_join)
             if extra is not None:
                 stmt = stmt.where(_pk_in(_batch_keys(extra)))
             session.execute(stmt)
@@ -477,8 +472,8 @@ class DuckDBBackend(DatabaseBackend):
 
         self_referential_fks = self._self_referential_deferred_fks(table_cls)
         if self_referential_fks:
-            insertable_cols = self._insertable_column_names(table_cls)
-            non_paginated_select = sa.select(*(staging.c[c] for c in insertable_cols))
+            insertable_cols = list(staged)
+            non_paginated_select = sa.select(*staged.values())
 
             def _insert(select_: Any) -> sa.Insert:
                 return sa.insert(target).from_select(insertable_cols, select_)
@@ -522,7 +517,8 @@ class DuckDBBackend(DatabaseBackend):
         self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
         staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
-        insertable_cols = self._insertable_column_names(table_cls)
+        staged = self._staged_columns(table_cls, staging)
+        insertable_cols = list(staged)
 
         def _upsert(select_: Any) -> sa.Insert:
             return (
@@ -531,7 +527,7 @@ class DuckDBBackend(DatabaseBackend):
                 .on_conflict_do_nothing(index_elements=pk_cols)
             )
 
-        non_paginated_select = sa.select(*(staging.c[c] for c in insertable_cols))
+        non_paginated_select = sa.select(*staged.values())
         self_referential = bool(self._self_referential_deferred_fks(table_cls))
 
         for batch_range in self._paginate_batches(table_cls, staging, session, merge_batch_size):
@@ -556,8 +552,9 @@ class DuckDBBackend(DatabaseBackend):
         self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
         staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
-        insertable_cols = self._insertable_column_names(table_cls)
-        non_paginated_select = sa.select(*(staging.c[c] for c in insertable_cols))
+        staged = self._staged_columns(table_cls, staging)
+        insertable_cols = list(staged)
+        non_paginated_select = sa.select(*staged.values())
 
         def _insert(select_: Any) -> sa.Insert:
             return sa.insert(target).from_select(insertable_cols, select_)

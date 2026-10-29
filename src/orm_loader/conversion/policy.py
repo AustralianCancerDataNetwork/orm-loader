@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any, ClassVar, Literal
 
 import pyarrow as pa
@@ -12,6 +13,7 @@ from sqlalchemy.types import (
     Boolean,
     Date,
     DateTime,
+    Enum,
     Float,
     Integer,
     Numeric,
@@ -19,18 +21,19 @@ from sqlalchemy.types import (
     TypeEngine,
 )
 
+from ..helpers import PolicyError
 from .handlers import (
     BooleanHandler,
     ColumnHandler,
     DateHandler,
     DateTimeHandler,
+    EnumHandler,
     FloatHandler,
     IntegerHandler,
     NumericHandler,
-    PassthroughHandler,
     TextHandler,
 )
-from .values import no_failures
+from .values import no_failures, underlying_type
 
 
 @dataclass(frozen=True)
@@ -68,24 +71,20 @@ class NullPolicy:
         if self.marker_quoting not in ("ignore", "unquoted_only"):
             raise ValueError(f"marker_quoting must be 'ignore' or 'unquoted_only', not {self.marker_quoting!r}")
 
-    def text_missing(self, trimmed: pa.Array, markers: frozenset[str] | None = None) -> pa.Array:
+    def text_missing(self, trimmed: pa.Array) -> pa.Array:
         """Return a mask of trimmed text values that are missing in a text column.
 
         Parameters
         ----------
         trimmed
             String array without surrounding whitespace.
-        markers
-            Markers that replace ``text_markers``, or None to use them.
 
         Returns
         -------
         pa.Array
             Boolean array that is true where the value is missing.
         """
-        words = self.text_markers if markers is None else markers
-        if self.marker_quoting != "ignore":
-            words = frozenset()
+        words = self.text_markers if self.marker_quoting == "ignore" else frozenset()
         return self._mask(trimmed, words, empty=self.empty_is_null, casefold=False)
 
     def typed_missing(self, trimmed: pa.Array) -> pa.Array:
@@ -131,8 +130,9 @@ class ConversionPolicy:
     """The settings of one load, shared by every column.
 
     The handler for a column is, in order, the entry in ``columns`` and the
-    handler for the most specific class of the column type among
-    ``handlers`` and the built-in fields.
+    handler for the most specific class of the column type (the stored type
+    of a ``TypeDecorator``) among ``handlers`` and the built-in fields. A
+    column type with no handler is an error.
 
     Attributes
     ----------
@@ -142,6 +142,8 @@ class ConversionPolicy:
         What happens to unreadable and missing required values.
     text
         Handler for string and text columns.
+    enum
+        Handler for enumerated columns.
     integer
         Handler for integer columns.
     floating
@@ -164,6 +166,7 @@ class ConversionPolicy:
     nulls: NullPolicy = field(default_factory=NullPolicy)
     errors: ErrorPolicy = field(default_factory=ErrorPolicy)
     text: TextHandler = field(default_factory=TextHandler)
+    enum: EnumHandler = field(default_factory=EnumHandler)
     integer: IntegerHandler = field(default_factory=IntegerHandler)
     floating: FloatHandler = field(default_factory=FloatHandler)
     numeric: NumericHandler = field(default_factory=NumericHandler)
@@ -174,10 +177,8 @@ class ConversionPolicy:
     columns: Mapping[tuple[str, str], ColumnHandler] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if self.nulls.marker_quoting == "unquoted_only":
-            texts = [self.text, *self.columns.values(), *self.handlers.values()]
-            if any(isinstance(h, TextHandler) and h.markers is not None for h in texts):
-                raise ValueError("marker_quoting='unquoted_only' supports NullPolicy.text_markers only")
+        object.__setattr__(self, "handlers", MappingProxyType(dict(self.handlers)))
+        object.__setattr__(self, "columns", MappingProxyType(dict(self.columns)))
 
     def for_column(
         self, sa_type: TypeEngine[Any], table_name: str | None = None, column_name: str | None = None
@@ -196,8 +197,13 @@ class ConversionPolicy:
         Returns
         -------
         ColumnHandler
-            The handler for the column; a passthrough handler for a column
-            type with none.
+            The handler for the column.
+
+        Raises
+        ------
+        PolicyError
+            No handler matches the column type. Passthrough is chosen
+            explicitly with ``columns``.
         """
         if table_name and column_name:
             handler = self.columns.get((table_name, column_name))
@@ -206,6 +212,7 @@ class ConversionPolicy:
         # Dispatch default first and then overwrite with any registered handlers
         by_type: dict[type, ColumnHandler] = {
             String: self.text,
+            Enum: self.enum,
             Integer: self.integer,
             Float: self.floating,
             Numeric: self.numeric,
@@ -214,7 +221,7 @@ class ConversionPolicy:
             DateTime: self.datetime,
             **self.handlers,
         }
-        for cls in type(sa_type).__mro__:
+        for cls in type(underlying_type(sa_type)).__mro__:
             if cls in by_type:
                 return by_type[cls]
-        return PassthroughHandler()
+        raise PolicyError(table_name=table_name, column_name=column_name, column_type=repr(sa_type))

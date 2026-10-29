@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 import numpy as np
 import pyarrow as pa
@@ -137,6 +137,36 @@ def test_default_formats_are_mutually_distinguishable():
 
 def test_typed_input_is_cast_without_parsing():
     assert read(date(2020, 5, 17), sa.Date()) == date(2020, 5, 17)
-    assert read(datetime(2020, 5, 17, 14, 30), sa.Date()) == date(2020, 5, 17)
+    assert read(datetime(2020, 5, 17), sa.Date()) == date(2020, 5, 17)
     assert read(datetime(2020, 5, 17, 14, 30, 5), sa.DateTime()) == datetime(2020, 5, 17, 14, 30, 5)
     assert read(date(2020, 5, 17), sa.DateTime()) == datetime(2020, 5, 17)
+
+
+def test_typed_timestamp_with_a_time_is_not_a_date():
+    assert unreadable(datetime(2020, 5, 17, 14, 30), sa.Date())
+
+
+@pytest.mark.parametrize("sa_type", [sa.Date(), sa.DateTime()])
+def test_year_zero_is_unreadable(sa_type):
+    assert unreadable("0000-01-01", sa_type)
+    assert read("0001-01-01", sa_type) is not None
+
+
+def test_a_timezone_column_requires_an_offset_and_stores_utc():
+    aware = sa.DateTime(timezone=True)
+    assert read("2020-01-01T10:00:00+10:00", aware) == datetime(2020, 1, 1, tzinfo=timezone.utc)
+    assert read("2020-01-01 10:00:00Z", aware) == datetime(2020, 1, 1, 10, tzinfo=timezone.utc)
+    assert unreadable("2020-01-01 10:00:00", aware)
+    assert unreadable("20200101", aware)
+
+
+def test_a_column_without_a_time_zone_rejects_an_offset():
+    assert read("2020-01-01 10:00:00", sa.DateTime()) == datetime(2020, 1, 1, 10)
+    assert unreadable("2020-01-01T10:00:00+10:00", sa.DateTime())
+    assert unreadable("2020-01-01T10:00:00Z", sa.DateTime())
+
+
+def test_a_batch_with_one_bad_date_isolates_it():
+    values, invalid = interpret(["20200101"] * 1000 + ["20200231"] + ["20200102"] * 1000, sa.Date())
+    assert [i for i, bad in enumerate(invalid) if bad] == [1000]
+    assert values[0] == date(2020, 1, 1) and values[-1] == date(2020, 1, 2)

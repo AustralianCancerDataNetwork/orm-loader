@@ -68,6 +68,13 @@ def test_quote_modes_decide_what_double_quotes_mean(tmp_path):
     assert label("by_delimiter") == '"x"'
 
 
+def test_a_quote_far_into_a_tab_delimited_file_is_read_literally_by_default(tmp_path):
+    lines = "".join(f"{i}\tlabel {i}\n" for i in range(1, 5001))
+    path = _write(tmp_path, "demo_id\tdemo_label\n" + lines + '5001\t"Sick" headaches\n5002\tnext\n', "demo_record.tsv")
+    rows = _rows(DelimitedTextReader(path, COLUMNS))
+    assert [r["demo_label"] for r in rows[-2:]] == ['"Sick" headaches', "next"]
+
+
 def test_a_file_is_read_in_several_batches_without_losing_rows(tmp_path):
     lines = "".join(f"{i},label {i}\n" for i in range(1, 20_001))
     path = _write(tmp_path, "demo_id,demo_label\n" + lines)

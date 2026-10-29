@@ -12,7 +12,7 @@ import pytest
 import sqlalchemy as sa
 
 from orm_loader.backends import STAGING_SCHEMA
-from orm_loader.conversion import ConversionPolicy, DateHandler, ErrorPolicy, NullPolicy, TextHandler
+from orm_loader.conversion import ConversionPolicy, DateHandler, ErrorPolicy, NullPolicy
 from orm_loader.helpers import ConversionError, IngestError, RejectLimitError, RequiredValueError
 from orm_loader.backends import DedupeResult
 from orm_loader.loaders import LoadReport
@@ -62,12 +62,6 @@ def test_marker_in_a_required_column_raises(dialect_session, tmp_path):
         _load(dialect_session, tmp_path, _DemoRequired, text, policy=MARKER)
 
 
-def test_column_markers_apply_only_to_their_column(dialect_session, tmp_path):
-    policy = ConversionPolicy(columns={("demo_record", "demo_label"): TextHandler(markers=frozenset({"N/A"}))})
-    _load(dialect_session, tmp_path, _Demo, "demo_id,demo_label\n1,N/A\n2,NULL\n", policy=policy)
-    assert _labels(dialect_session, DemoRecord) == {1: None, 2: "NULL"}
-
-
 def test_quote_sensitive_marker_matches_only_unquoted(dialect_session, tmp_path):
     policy = ConversionPolicy(nulls=NullPolicy(text_markers=frozenset({"NULL"}), marker_quoting="unquoted_only"))
     _load(dialect_session, tmp_path, _Demo, SEVEN_ROWS, policy=policy)
@@ -83,14 +77,6 @@ def test_quote_sensitive_marker_warns_when_every_field_is_quoted(dialect_session
         _load(dialect_session, tmp_path, _Demo, text, policy=policy)
     assert "quotes every field" in caplog.text
     assert _labels(dialect_session, DemoRecord) == {1: "NULL", 2: "x"}
-
-
-def test_quote_sensitive_markers_reject_column_markers():
-    with pytest.raises(ValueError, match="unquoted_only"):
-        ConversionPolicy(
-            nulls=NullPolicy(marker_quoting="unquoted_only"),
-            columns={("t", "c"): TextHandler(markers=frozenset({"x"}))},
-        )
 
 
 def test_both_athena_date_formats_and_iso_load_in_one_file(dialect_session, tmp_path):

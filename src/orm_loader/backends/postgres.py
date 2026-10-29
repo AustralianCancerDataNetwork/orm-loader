@@ -109,6 +109,12 @@ class PostgresBackend(DatabaseBackend):
             bind_arguments=bind_arguments,
         )
 
+        for name in table_cls.sql_defaults():
+            session.execute(
+                sa.text(f'ALTER TABLE {staging_ref} ALTER COLUMN {preparer.quote_identifier(name)} DROP NOT NULL;'),
+                bind_arguments=bind_arguments,
+            )
+
         computed_cols = [c.name for c in table.columns if c.computed is not None]
         for col in computed_cols:
             session.execute(
@@ -143,7 +149,7 @@ class PostgresBackend(DatabaseBackend):
         ctx: "LoaderContext",
         batches: Iterable[pa.Table],
         columns: Sequence[str],
-    ) -> int:
+    ) -> None:
         """Stream the batches into the staging table with one COPY, as CSV written by Arrow.
 
         An unquoted empty field is NULL and a quoted one an empty string, so
@@ -151,23 +157,20 @@ class PostgresBackend(DatabaseBackend):
         any batch aborts the COPY.
         """
         connection = ctx.session.connection(bind_arguments={"mapper": ctx.tableclass})
-        raw_conn = connection.connection
-        if not hasattr(raw_conn, "cursor"):
-            raise RuntimeError("Expected DB-API connection for COPY")
+        cursor = connection.connection.cursor()
+        if not hasattr(cursor, "copy"):
+            cursor.close()
+            raise RuntimeError("The PostgreSQL sink needs a psycopg 3 connection, whose cursors provide copy()")
         table_ref = self._staging_reference(ctx, connection)
         column_list = ", ".join(self.identifier_preparer.quote(c) for c in columns)
         options = pacsv.WriteOptions(include_header=False, quoting_style="needed")
-        total = 0
-        cursor = raw_conn.cursor()
         try:
             with cursor.copy(f"COPY {table_ref} ({column_list}) FROM STDIN WITH (FORMAT csv)") as copy:
                 for table in batches:
                     buffer = io.BytesIO()
                     pacsv.write_csv(table, buffer, options)
                     copy.write(buffer.getvalue())
-                    total += table.num_rows
             ctx.session.flush()
-            return total
         except Exception:
             ctx.session.rollback()
             raise
@@ -271,7 +274,8 @@ class PostgresBackend(DatabaseBackend):
         self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
         staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
-        insertable_cols = self._insertable_column_names(table_cls)
+        staged = self._staged_columns(table_cls, staging)
+        insertable_cols = list(staged)
 
         def _upsert(select_: Any) -> sa.Insert:
             # sa.insert() has no .on_conflict_do_nothing()
@@ -281,7 +285,7 @@ class PostgresBackend(DatabaseBackend):
                 .on_conflict_do_nothing(index_elements=pk_cols)
             )
 
-        non_paginated_select = sa.select(*(staging.c[c] for c in insertable_cols))
+        non_paginated_select = sa.select(*staged.values())
 
         for batch_range in self._paginate_batches(table_cls, staging, session, merge_batch_size):
             select_ = non_paginated_select if batch_range is None else non_paginated_select.where(batch_range)
@@ -306,8 +310,9 @@ class PostgresBackend(DatabaseBackend):
         self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
         staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
-        insertable_cols = self._insertable_column_names(table_cls)
-        non_paginated_select = sa.select(*(staging.c[c] for c in insertable_cols))
+        staged = self._staged_columns(table_cls, staging)
+        insertable_cols = list(staged)
+        non_paginated_select = sa.select(*staged.values())
 
         def _insert(select_: Any) -> sa.Insert:
             return sa.insert(target).from_select(insertable_cols, select_)

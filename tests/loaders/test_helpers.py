@@ -1,11 +1,8 @@
-from pathlib import Path
-
 import pytest
 
 from orm_loader.loaders.readers.detection import (
     infer_delim,
     infer_encoding,
-    infer_quote_mode,
     resolve_quote_mode,
 )
 
@@ -33,78 +30,36 @@ def test_infer_encoding_utf8(tmp_path):
     assert enc.lower() in {"utf-8", "ascii"}
 
 
-def test_infer_quote_mode_unquoted_tsv_returns_csv(tmp_path):
-    # No quotes anywhere: both modes identical, csv is the safe default
-    p = tmp_path / "x.csv"
-    p.write_text("id\tname\tvalue\n1\tAlice\t10\n2\tBob\t20\n")
-    assert infer_quote_mode(p, delimiter="\t") == "csv"
-
-
-def test_infer_quote_mode_rfc4180_quoted_field_returns_csv(tmp_path):
-    # Athena-style: quoted concept_name at the varchar(255) boundary,
-    # no embedded delimiter — the column-count tie-break must favour csv
-    p = tmp_path / "x.csv"
-    long_name = "A" * 255
-    p.write_text(f'id\tname\n1\t"{long_name}"\n2\tnormal\n')
-    assert infer_quote_mode(p, delimiter="\t") == "csv"
-
-
-def test_infer_quote_mode_embedded_delimiter_in_quoted_field_returns_csv(tmp_path):
-    # Quoted field contains the delimiter: csv mode keeps column count consistent,
-    # literal mode splits on the embedded tab and produces ragged rows
-    p = tmp_path / "x.csv"
-    p.write_text('id\tname\tval\n1\t"foo\tbar"\t99\n2\tbaz\t0\n')
-    assert infer_quote_mode(p, delimiter="\t") == "csv"
-
-
-def test_infer_quote_mode_unbalanced_quote_returns_literal(tmp_path):
-    # Unbalanced leading quote breaks CSV parsing: literal mode produces
-    # consistent 2-column rows while csv mode does not
-    p = tmp_path / "x.csv"
-    p.write_text('id\tname\n1\t"open\n2\t"open\n3\t"open\n')
-    assert infer_quote_mode(p, delimiter="\t") == "literal"
-
-
 # ---------------------------------------------------------------------------
 # resolve_quote_mode
 # ---------------------------------------------------------------------------
 
 def test_resolve_quote_mode_explicit_csv_passthrough():
     # Explicit modes are returned unchanged and never read the file
-    assert resolve_quote_mode("csv", Path("does-not-exist.csv"), ",") == "csv"
+    assert resolve_quote_mode("csv", ",") == "csv"
 
 
 def test_resolve_quote_mode_explicit_literal_passthrough():
-    assert resolve_quote_mode("literal", Path("does-not-exist.csv"), "\t") == "literal"
+    assert resolve_quote_mode("literal", "\t") == "literal"
 
 
 def test_resolve_quote_mode_by_delimiter_tab_is_literal():
     # Tab-delimited input never embeds the delimiter in a field, so any
     # double-quote is literal data — derived from the delimiter, no file scan
-    assert resolve_quote_mode("by_delimiter", Path("does-not-exist.tsv"), "\t") == "literal"
+    assert resolve_quote_mode("by_delimiter", "\t") == "literal"
 
 
 def test_resolve_quote_mode_by_delimiter_comma_is_csv():
     # Comma-delimited input must wrap fields containing the delimiter in quotes,
     # so quoting is meaningful
-    assert resolve_quote_mode("by_delimiter", Path("does-not-exist.csv"), ",") == "csv"
+    assert resolve_quote_mode("by_delimiter", ",") == "csv"
 
 
-def test_resolve_quote_mode_auto_delegates_to_infer(tmp_path):
-    # "auto" defers to the content sniff: an unbalanced leading quote is only
-    # consistent under literal parsing
-    p = tmp_path / "x.csv"
-    p.write_text('id\tname\n1\t"open\n2\t"open\n3\t"open\n')
-    assert resolve_quote_mode("auto", p, delimiter="\t") == "literal"
-
-
-def test_resolve_quote_mode_auto_clean_file_returns_csv(tmp_path):
-    # No quotes anywhere: the sniff falls back to the csv default
-    p = tmp_path / "x.csv"
-    p.write_text("id\tname\n1\tAlice\n2\tBob\n")
-    assert resolve_quote_mode("auto", p, delimiter="\t") == "csv"
-
-
-def test_resolve_quote_mode_unknown_raises(tmp_path):
+def test_resolve_quote_mode_auto_is_not_a_mode():
     with pytest.raises(ValueError, match="Unknown quote_mode"):
-        resolve_quote_mode("bogus", tmp_path / "x.csv", ",")
+        resolve_quote_mode("auto", "\t")
+
+
+def test_resolve_quote_mode_unknown_raises():
+    with pytest.raises(ValueError, match="Unknown quote_mode"):
+        resolve_quote_mode("bogus", ",")

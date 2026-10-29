@@ -312,6 +312,7 @@ class FileLoadableTableInterface(ORMTableBase):
             nulls=ctx.policy.nulls,
             quote_mode=ctx.quote_mode,
             chunksize=ctx.chunksize,
+            skip_malformed=ctx.policy.errors.on_error == "reject_row",
         )
 
     @classmethod
@@ -325,7 +326,7 @@ class FileLoadableTableInterface(ORMTableBase):
         dedupe: bool = False,
         chunksize: int | None = None,
         merge_strategy: str = "replace",
-        quote_mode: str = "auto",
+        quote_mode: str = "by_delimiter",
         index_strategy: str = "auto",
         merge_batch_size: int | None = None,
         staging_schema_tag: str | None = None,
@@ -370,7 +371,7 @@ class FileLoadableTableInterface(ORMTableBase):
         quote_mode
             How double quotes in delimited text are read: ``"csv"`` (field
             quoting), ``"literal"`` (kept as data), ``"by_delimiter"``
-            (literal for tab-delimited files) or ``"auto"`` (sample the file).
+            (literal for tab-delimited files, field quoting otherwise).
         index_strategy
             Index handling strategy during merge. Use ``"auto"`` to let
             the backend choose a sensible default.
@@ -463,13 +464,13 @@ class FileLoadableTableInterface(ORMTableBase):
             report=report or LoadReport(),
         )
 
-        # Load to staging (Indices are already excluded via updated create_staging_table)
-        logger.info(f"Table `{cls.__tablename__}`: Loading data into staging table")
-        total = cls.load_staging(loader_context, reader or cls._select_reader(loader_context))
-
-        # Merge staging to target (Wrapped in our index dropper!)
-        logger.info(f"Table `{cls.__tablename__}`: Merging staging data into target table")
         try:
+            # Load to staging (Indices are already excluded via updated create_staging_table)
+            logger.info(f"Table `{cls.__tablename__}`: Loading data into staging table")
+            total = cls.load_staging(loader_context, reader or cls._select_reader(loader_context))
+
+            # Merge staging to target (Wrapped in our index dropper!)
+            logger.info(f"Table `{cls.__tablename__}`: Merging staging data into target table")
             with cls.manage_indices(session, index_strategy=index_strategy, staging_schema_tag=staging_schema_tag):
                 cls.merge_from_staging(
                     session,

@@ -10,7 +10,8 @@
 
 - Values are interpreted by column type, as described in [Conversion](conversion.md).
 - With the default policy an unreadable value or a missing required value raises and nothing is loaded.
-- With `ErrorPolicy(on_error="reject_row")` those rows are written to `<rejects_dir>/<file name>.rejects.csv` and the rest load. `rejects_dir` defaults to a `rejects` directory inside the input file's directory. `LoadReport` accounts for every row read.
+- With `ErrorPolicy(on_error="reject_row")` those rows, and delimited lines with the wrong number of fields, are written to `<rejects_dir>/<file name>.rejects.csv` and the rest load. A malformed line has no row number, and its text is in the reason. `rejects_dir` defaults to a `rejects` directory inside the input file's directory, and the file of an earlier load is removed. `LoadReport` accounts for every row read, checked against the rows counted in the staging table.
+- A column of a table that has a default which SQL can apply (a server default or a scalar Python default) and is not nullable takes it when the value is empty or the column is not in the file. A column with a callable default stays required.
 - With `normalise=False` raw text is passed to the staging table unchanged.
 
 ---

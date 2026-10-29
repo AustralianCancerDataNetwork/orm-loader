@@ -1,4 +1,4 @@
-from .loader import LoadReport, LoaderContext, stage_file
+from .loader import LoaderContext, LoadReport, stage_file
 from .readers import DelimitedTextReader, FileReader, ParquetReader, open_reader
 
 __all__ = [

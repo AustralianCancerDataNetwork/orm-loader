@@ -6,6 +6,31 @@ class ValidationError(Exception):
     """Raised when schema or specification validation fails."""
 
 
+class PolicyError(IngestError):
+    """Raised when the conversion policy cannot handle a column.
+
+    Parameters
+    ----------
+    table_name
+        Table the column belongs to.
+    column_name
+        The column.
+    column_type
+        Name of the column type that has no handler.
+    """
+
+    def __init__(self, *, table_name: str | None, column_name: str | None, column_type: str) -> None:
+        self.table_name = table_name
+        self.column_name = column_name
+        self.column_type = column_type
+        target = ".".join(part for part in (table_name, column_name) if part) or "column"
+        super().__init__(
+            f"{target}: no handler for column type {column_type}. Register one in "
+            f"ConversionPolicy(handlers=...) or ConversionPolicy(columns=...), "
+            f"or PassthroughHandler() to load the values unchanged."
+        )
+
+
 class ConversionError(IngestError):
     """Raised when values cannot be read as their column type.
 

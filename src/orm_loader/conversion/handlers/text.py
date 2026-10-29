@@ -24,14 +24,9 @@ class TextHandler(ConvertingHandler):
     ----------
     strip
         Surrounding whitespace is removed from stored text.
-    markers
-        Exact, case-sensitive values treated as missing, ignoring surrounding
-        whitespace. Replaces ``NullPolicy.text_markers`` for the columns this
-        handler serves; None uses the policy markers.
     """
 
     strip: bool = True
-    markers: frozenset[str] | None = None
 
     def arrow_type(self, sa_type: TypeEngine[Any]) -> pa.DataType:
         return pa.string()
@@ -40,7 +35,7 @@ class TextHandler(ConvertingHandler):
         return trimmed if self.strip else raw
 
     def missing(self, trimmed: pa.Array, nulls: NullPolicy) -> pa.Array:
-        return nulls.text_missing(trimmed, self.markers)
+        return nulls.text_missing(trimmed)
 
     def parse(self, cleaned: pa.Array, sa_type: TypeEngine[Any]) -> Interpretation:
         return Interpretation(cleaned, no_failures(len(cleaned)))
@@ -50,3 +45,12 @@ class TextHandler(ConvertingHandler):
         if not length:
             return None
         return pc.fill_null(pc.greater(pc.utf8_length(values), length), False)
+
+
+@dataclass(frozen=True)
+class EnumHandler(TextHandler):
+    """Keeps text verbatim and rejects values that are not a label the column stores."""
+
+    def check(self, values: pa.Array, sa_type: TypeEngine[Any]) -> pa.Array | None:
+        known = pc.is_in(values, value_set=pa.array(sa_type.enums, pa.string()))
+        return pc.and_(pc.is_valid(values), pc.invert(known))

@@ -45,7 +45,7 @@ def _stored(session, staging):
 def test_typed_values_and_nulls_are_stored_across_more_batches_than_a_commit_interval(dialect_session, tmp_path):
     backend, ctx, staging = _sink(dialect_session, tmp_path)
     batches = [_batch(i, f"row {i}" if i % 2 else None) for i in range(1, 13)]
-    assert backend.insert_batches(ctx, batches, COLUMNS) == 12
+    backend.insert_batches(ctx, batches, COLUMNS)
     stored = _stored(dialect_session, staging)
     assert [r.demo_id for r in stored] == list(range(1, 13))
     assert stored[0].demo_label == "row 1" and stored[1].demo_label is None
@@ -62,7 +62,7 @@ def test_rows_keep_the_order_they_were_written_in(dialect_session, tmp_path):
 
 def test_no_batches_write_nothing(dialect_session, tmp_path):
     backend, ctx, staging = _sink(dialect_session, tmp_path)
-    assert backend.insert_batches(ctx, [], COLUMNS) == 0
+    backend.insert_batches(ctx, [], COLUMNS)
     assert _stored(dialect_session, staging) == []
 
 

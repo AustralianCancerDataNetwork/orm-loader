@@ -350,6 +350,23 @@ class DatabaseBackend(ABC):
         """
         return [c.name for c in table_cls.__table__.columns if c.computed is None]
 
+    def _staged_columns(
+        self,
+        table_cls: Type["FileTableProtocol"],
+        staging: sa.Table,
+    ) -> dict[str, sa.ColumnElement[Any]]:
+        """
+        Return the staging value of each insertable column by column name.
+
+        A null in a non-nullable column takes the column's SQL default, so an
+        empty value and an absent column mean the default.
+        """
+        defaults = table_cls.sql_defaults()
+        return {
+            name: sa.func.coalesce(staging.c[name], defaults[name]) if name in defaults else staging.c[name]
+            for name in self._insertable_column_names(table_cls)
+        }
+
     def deferred_fk_constraints(
         self,
         table_cls: Type["FileTableProtocol"],
@@ -551,7 +568,7 @@ class DatabaseBackend(ABC):
         ctx: "LoaderContext",
         batches: Iterable[pa.Table],
         columns: Sequence[str],
-    ) -> int:
+    ) -> None:
         """
         Write typed batches into the load's staging table.
 
@@ -565,11 +582,6 @@ class DatabaseBackend(ABC):
             Typed tables, one per batch.
         columns
             Names of the columns the batches carry.
-
-        Returns
-        -------
-        int
-            Number of rows written.
 
         Notes
         -----
@@ -601,6 +613,11 @@ class DatabaseBackend(ABC):
         translate = connection.get_execution_options().get("schema_translate_map") or {}
         schema = translate.get(staging.schema, staging.schema)
         return qualified(connection, staging.name, physical_schema=schema)
+
+    def count_staging(self, ctx: "LoaderContext") -> int:
+        """Return the number of rows in the load's staging table."""
+        count = sa.select(sa.func.count()).select_from(ctx.staging_table)
+        return ctx.session.execute(count, bind_arguments={"mapper": ctx.tableclass}).scalar_one()
 
     def deduplicate_staging(
         self,
@@ -635,10 +652,9 @@ class DatabaseBackend(ABC):
             .label("position"),
         ).subquery()
         duplicates = sa.select(ranked.c.row_key).where(ranked.c.position > 1)
-        count = sa.select(sa.func.count()).select_from(staging)
-        before = ctx.session.execute(count, bind_arguments=arguments).scalar_one()
+        before = self.count_staging(ctx)
         ctx.session.execute(sa.delete(staging).where(row_key.in_(duplicates)), bind_arguments=arguments)
-        after = ctx.session.execute(count, bind_arguments=arguments).scalar_one()
+        after = self.count_staging(ctx)
         return DedupeResult(tuple(key_columns), before, before - after)
 
     @staticmethod

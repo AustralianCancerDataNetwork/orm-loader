@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import pyarrow as pa
+import pyarrow.compute as pc
 from sqlalchemy.types import TypeEngine
 
 from orm_loader.conversion import ConversionPolicy
@@ -23,7 +24,7 @@ def interpret(
     arr = values if isinstance(values, (pa.Array, pa.ChunkedArray)) else pa.array(values)
     handler = policy.for_column(sa_type, table_name, column_name)
     out, invalid = handler.interpret(arr, sa_type, policy.nulls)
-    return out.to_pylist(), invalid.to_pylist()
+    return pc.if_else(invalid, pa.scalar(None, out.type), out).to_pylist(), invalid.to_pylist()
 
 
 def read(raw: Any, sa_type: TypeEngine[Any], policy: ConversionPolicy | None = None, **column: Any) -> Any:

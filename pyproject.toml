@@ -91,9 +91,13 @@ addopts = "-ra -m 'not db_dialect'"
 reportMissingTypeStubs = false
 
 # Temporary ty override until #43 picks it up in a follow-up
-# with pyarrow-stubs
+# with pyarrow-stubs, which type the compute functions too narrowly
 [[tool.ty.overrides]]
 include = ["src/orm_loader/conversion/**", "src/orm_loader/loaders/processor.py", "src/orm_loader/loaders/readers/**"]
 
 [tool.ty.overrides.rules]
 unresolved-attribute = "ignore"
+invalid-argument-type = "ignore"
+invalid-return-type = "ignore"
+invalid-assignment = "ignore"
+no-matching-overload = "ignore"

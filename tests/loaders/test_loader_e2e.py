@@ -485,6 +485,7 @@ def test_embedded_newline_in_field_is_preserved(sqlite_session, sqlite_engine, t
         sqlite_session,
         csv,
         dedupe=False,
+        quote_mode="csv",
     )
     sqlite_session.commit()
 
@@ -510,6 +511,7 @@ def test_embedded_tab_in_field(sqlite_session, sqlite_engine, tmp_path):
         sqlite_session,
         csv,
         dedupe=False,
+        quote_mode="csv",
     )
     sqlite_session.commit()
 

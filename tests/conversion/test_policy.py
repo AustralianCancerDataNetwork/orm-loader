@@ -8,6 +8,7 @@ from orm_loader.conversion import (
     ConvertingHandler,
     DateHandler,
     DateTimeHandler,
+    EnumHandler,
     ErrorPolicy,
     FloatHandler,
     IntegerHandler,
@@ -17,6 +18,7 @@ from orm_loader.conversion import (
     PassthroughHandler,
     TextHandler,
 )
+from orm_loader.helpers import PolicyError
 from tests.support import interpret, read, unreadable
 
 
@@ -29,7 +31,7 @@ class _Money(sa.Numeric):
     [
         (sa.String(), TextHandler),
         (sa.Text(), TextHandler),
-        (sa.Enum("a", "b"), TextHandler),
+        (sa.Enum("a", "b"), EnumHandler),
         (sa.Integer(), IntegerHandler),
         (sa.BigInteger(), IntegerHandler),
         (sa.Float(), FloatHandler),
@@ -39,16 +41,30 @@ class _Money(sa.Numeric):
         (sa.Date(), DateHandler),
         (sa.DateTime(), DateTimeHandler),
         (sa.TIMESTAMP(), DateTimeHandler),
-        (sa.LargeBinary(), PassthroughHandler),
     ],
 )
 def test_the_most_specific_type_class_selects_the_handler(sa_type, handler):
     assert type(ConversionPolicy().for_column(sa_type)) is handler
 
 
-def test_a_type_without_a_handler_is_returned_unchanged():
+class _Wrapped(sa.TypeDecorator):
+    impl = sa.Integer
+    cache_ok = True
+
+
+def test_a_type_without_a_handler_is_an_error_naming_the_column():
+    with pytest.raises(PolicyError, match="t.c: no handler for column type LargeBinary"):
+        ConversionPolicy().for_column(sa.LargeBinary(), "t", "c")
+
+
+def test_passthrough_is_an_explicit_choice_for_a_column():
+    policy = ConversionPolicy(columns={("t", "c"): PassthroughHandler()})
     raw = pa.array([b"a", None])
-    assert interpret(raw, sa.LargeBinary())[0] == [b"a", None]
+    assert interpret(raw, sa.LargeBinary(), policy, table_name="t", column_name="c")[0] == [b"a", None]
+
+
+def test_a_type_decorator_is_handled_as_the_type_it_stores():
+    assert type(ConversionPolicy().for_column(_Wrapped())) is IntegerHandler
 
 
 class _Hex(ConvertingHandler):
@@ -90,13 +106,10 @@ def test_column_handlers_win_over_type_handlers():
     assert read("7", sa.String(), policy, table_name="t", column_name="other") == "7"
 
 
-def test_text_markers_in_a_text_handler_replace_the_policy_markers():
-    policy = ConversionPolicy(
-        nulls=NullPolicy(text_markers=frozenset({"NULL"})),
-        text=TextHandler(markers=frozenset({"-"})),
-    )
-    assert read("-", sa.String(), policy) is None
-    assert read("NULL", sa.String(), policy) == "NULL"
+def test_the_handler_and_column_mappings_cannot_be_changed_afterwards():
+    policy = ConversionPolicy(columns={("t", "c"): IntegerHandler()})
+    with pytest.raises(TypeError):
+        policy.columns[("t", "d")] = IntegerHandler()  # type: ignore[index]
 
 
 def test_unknown_error_mode_is_rejected():

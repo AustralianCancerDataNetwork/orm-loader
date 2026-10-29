@@ -13,7 +13,7 @@ import pyarrow.compute as pc
 import pyarrow.csv as pv
 
 from ..conversion import ConversionPolicy
-from ..conversion.values import no_failures
+from ..conversion.values import no_failures, underlying_type
 from ..helpers import ConversionError, IngestError, RejectLimitError, RequiredValueError
 
 if TYPE_CHECKING:
@@ -74,7 +74,8 @@ class BatchProcessor:
 
     A batch with an unreadable value or a missing required value either
     raises or has those rows written to the rejects file, depending on
-    ``ErrorPolicy.on_error``.
+    ``ErrorPolicy.on_error``. A rejects file left by an earlier load is
+    removed.
 
     Parameters
     ----------
@@ -90,6 +91,9 @@ class BatchProcessor:
         File that rejected rows are written to.
     normalise
         Whether to interpret values. When false, batches pass through.
+    skipped
+        Lines the reader left out as malformed, each with the reason. They
+        are written to the rejects file and count as rows read and rejected.
     """
 
     def __init__(
@@ -100,28 +104,32 @@ class BatchProcessor:
         report: LoadReport,
         rejects_path: Path,
         normalise: bool = True,
+        skipped: list[str] | None = None,
     ) -> None:
         self.columns = columns
+        self.skipped = skipped if skipped is not None else []
         self.policy = policy
         self.report = report
         self.normalise = normalise
         self.table_name = tableclass.__tablename__
-        self.model_columns = tableclass.model_columns()
-        self.handlers = {
-            name: policy.for_column(self.model_columns[name].type, self.table_name, name) for name in columns
-        }
+        model_columns = tableclass.model_columns()
+        self.types = {name: underlying_type(model_columns[name].type) for name in columns}
+        self.handlers = {name: policy.for_column(self.types[name], self.table_name, name) for name in columns}
         self.required = [c for c in tableclass.required_columns() if c in columns]
         self.rejects = RejectsWriter(rejects_path)
         if policy.errors.on_error == "reject_row":
             self.rejects.check_writable()
+        rejects_path.unlink(missing_ok=True)
 
     def stream(self, batches: Iterable[pa.RecordBatch]) -> Iterator[pa.Table]:
         """Yield typed tables for the raw batches, closing the rejects file afterwards."""
         try:
             for raw in batches:
                 table = self.process(raw)
+                self._reject_skipped()
                 if table.num_rows:
                     yield table
+            self._reject_skipped()
         finally:
             self.rejects.close()
 
@@ -153,7 +161,7 @@ class BatchProcessor:
         if not self.normalise:
             return pa.Table.from_batches([raw])
         results = {
-            name: self.handlers[name].interpret(raw.column(name), self.model_columns[name].type, self.policy.nulls)
+            name: self.handlers[name].interpret(raw.column(name), self.types[name], self.policy.nulls)
             for name in self.columns
         }
         failures = self._failures(results)
@@ -168,7 +176,7 @@ class BatchProcessor:
         for name in self.columns:
             invalid = results[name].invalid
             if pc.any(invalid).as_py():
-                found[name] = (invalid, f"cannot be read as {self.handlers[name].expected(self.model_columns[name].type)}")
+                found[name] = (invalid, f"cannot be read as {self.handlers[name].expected(self.types[name])}")
         for name in self.required:
             missing = pc.and_(pc.is_null(results[name].values), pc.invert(results[name].invalid))
             if pc.any(missing).as_py():
@@ -202,7 +210,7 @@ class BatchProcessor:
         return ConversionError(
             table_name=self.table_name,
             column_name=name,
-            expected=self.handlers[name].expected(self.model_columns[name].type),
+            expected=self.handlers[name].expected(self.types[name]),
             count=count,
             samples=raw.filter(invalid).slice(0, 3).to_pylist(),
         )
@@ -248,6 +256,23 @@ class BatchProcessor:
         self._check_limit()
         keep = pc.invert(rejected)
         return pa.table({n: results[n].values for n in self.columns}).filter(keep)
+
+    def _reject_skipped(self) -> None:
+        """Write the lines the reader left out to the rejects file, without a row number."""
+        count = len(self.skipped)
+        if not count:
+            return
+        text, empty = pa.string(), pa.nulls(count, pa.string())
+        rows = pa.table(
+            {"row": pa.nulls(count, pa.int64()), "column": empty, "reason": pa.array(self.skipped, text)}
+            | {name: empty for name in self.columns}
+        )
+        self.skipped.clear()
+        self.rejects.write(rows)
+        self.report.rows_read += count
+        self.report.rows_rejected += count
+        self.report.rejects_path = self.rejects.path
+        self._check_limit()
 
     def _check_limit(self) -> None:
         limit = self.policy.errors.max_rejects

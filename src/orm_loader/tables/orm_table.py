@@ -141,8 +141,7 @@ class ORMTableBase:
 
         A column is considered required if it is:
         - non-nullable
-        - has no Python-side default
-        - has no server-side default
+        - has no default that SQL can apply (see ``sql_defaults``)
         - not an autoincrementing column (the database assigns its value;
           it's never expected in inbound data at all)
 
@@ -155,14 +154,40 @@ class ORMTableBase:
             A set of required column names.
         """
         mapper = cls.mapper_for()
+        defaults = cls.sql_defaults()
         return {
             c.key
             for c in mapper.columns
-            if not c.nullable
-            and not c.default
-            and not c.server_default
-            and not _resolves_to_autoincrement(c)
+            if not c.nullable and c.key not in defaults and not _resolves_to_autoincrement(c)
         }
+
+    @classmethod
+    def sql_defaults(cls) -> dict[str, sa.ColumnElement[Any]]:
+        """
+        Return the default of each non-nullable column as a SQL expression.
+
+        A server default given as text is cast to the column type, one given
+        as a SQL expression is used as written, and a scalar Python default
+        is a literal. A callable or context-sensitive default has no SQL
+        form, so its column is not listed.
+
+        Returns
+        -------
+        dict[str, sqlalchemy.ColumnElement]
+            A mapping of column name to the expression that supplies its default.
+        """
+        defaults: dict[str, sa.ColumnElement[Any]] = {}
+        for c in cls.mapper_for().columns:
+            if c.nullable:
+                continue
+            server_default = getattr(c.server_default, "arg", None)
+            if isinstance(server_default, str):
+                defaults[c.name] = sa.cast(sa.literal(server_default), c.type)
+            elif server_default is not None:
+                defaults[c.name] = server_default
+            elif c.default is not None and c.default.is_scalar:
+                defaults[c.name] = sa.literal(c.default.arg, c.type)  # ty: ignore[unresolved-attribute]
+        return defaults
 
     @classmethod
     def max_id(cls, session: so.Session) -> int:

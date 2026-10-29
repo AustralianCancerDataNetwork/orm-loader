@@ -10,10 +10,10 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable
-from itertools import chain
 from dataclasses import dataclass, field
+from itertools import chain
 from pathlib import Path
-from typing import TYPE_CHECKING, Type
+from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
 import sqlalchemy.orm as so
@@ -42,8 +42,9 @@ class LoadReport:
     rows_loaded
         Rows written to the staging table.
     rows_rejected
-        Rows dropped because a value was unreadable or a required value was
-        missing, with ``ErrorPolicy.on_error`` set to ``"reject_row"``.
+        Rows dropped because a value was unreadable, a required value was
+        missing or a line was malformed, with ``ErrorPolicy.on_error`` set to
+        ``"reject_row"``.
     dedupe
         Result of deduplicating the staging table, if it was requested.
     rejects_path
@@ -92,7 +93,7 @@ class LoaderContext:
         Whether the staging table keeps only the first row for each primary key.
     quote_mode
         Quoting mode of the default reader for delimited text: ``"csv"``,
-        ``"literal"``, ``"by_delimiter"`` or ``"auto"``.
+        ``"literal"`` or ``"by_delimiter"``.
     staging_schema_tag
         schema_translate_map tag the staging table lives in, passed to
         resolve_backend() so every backend resolution within this load
@@ -106,7 +107,7 @@ class LoaderContext:
         Row accounting, filled in as the load runs.
     """
 
-    tableclass: Type["FileTableProtocol"]
+    tableclass: type[FileTableProtocol]
     session: so.Session
     path: Path
     staging_table: sa.Table
@@ -114,14 +115,14 @@ class LoaderContext:
     chunksize: int | None = None
     normalise: bool = True
     dedupe: bool = True
-    quote_mode: str = "auto"
+    quote_mode: str = "by_delimiter"
     staging_schema_tag: str | None = None
     policy: ConversionPolicy = field(default_factory=ConversionPolicy)
     rejects_dir: Path | None = None
     report: LoadReport = field(default_factory=LoadReport)
 
 
-def _require_columns_present(tableclass: Type["FileTableProtocol"], present_columns: Iterable[str]) -> None:
+def _require_columns_present(tableclass: type[FileTableProtocol], present_columns: Iterable[str]) -> None:
     """Raise before staging if a required column is entirely absent from the file.
 
     Partial-column loads are not supported, so every merge strategy
@@ -183,9 +184,12 @@ def stage_file(ctx: LoaderContext, reader: FileReader) -> int:
     table_name = ctx.tableclass.__tablename__
     batches = reader.batches()
     first = None if reader.empty else next(batches, None)
-    if first is None:
+    if first is None and not reader.skipped:
         logger.info("File %s has no data rows; skipping load for %s", ctx.path.name, table_name)
         return 0
+    ignored = [name for name in reader.file_columns if name not in reader.columns]
+    if ignored:
+        logger.warning("File %s has columns that %s does not have, which are ignored: %s", ctx.path.name, table_name, ignored)
     if ctx.normalise:
         _require_columns_present(ctx.tableclass, reader.columns)
     rejects_dir = ctx.rejects_dir or ctx.path.parent / "rejects"
@@ -196,9 +200,11 @@ def stage_file(ctx: LoaderContext, reader: FileReader) -> int:
         ctx.report,
         rejects_dir / f"{ctx.path.stem}.rejects.csv",
         ctx.normalise,
+        reader.skipped,
     )
     backend = resolve_backend(ctx.session, staging_schema_tag=ctx.staging_schema_tag, mapper=ctx.tableclass)
-    total = backend.insert_batches(ctx, processor.stream(chain([first], batches)), reader.columns)
+    backend.insert_batches(ctx, processor.stream(chain([] if first is None else [first], batches)), reader.columns)
+    total = backend.count_staging(ctx)
     keys = [c for c in ctx.tableclass.pk_names() if c in reader.columns]
     if ctx.dedupe and keys:
         ctx.report.dedupe = backend.deduplicate_staging(ctx, keys)

@@ -10,7 +10,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 from sqlalchemy.types import TypeEngine
 
-from ..values import NULL_STRING, Interpretation, cast_each, safe_cast
+from ..values import NULL_STRING, Interpretation, no_failures, safe_cast
 from .base import ConvertingHandler
 
 DateShape = Callable[[pa.Array], tuple[pa.Array, pa.Array]]
@@ -31,7 +31,7 @@ class DateFormats:
     MONTHS
         Lowercase month abbreviations used by ``dd-mon-yyyy``.
     SHAPES
-        Shape function by format name.
+        Shape function by format name; the one place a format is registered.
     """
 
     DEFAULT: ClassVar[tuple[str, ...]] = ("yyyymmdd", "dd-mon-yyyy", "yyyy-mm-dd")
@@ -69,21 +69,23 @@ class DateFormats:
         cut = pc.utf8_slice_codeunits
         return ok, pc.binary_join_element_wise(cut(values, 6, 10), cut(values, 0, 2), cut(values, 3, 5), "-")
 
+    SHAPES: ClassVar[dict[str, DateShape]] = {
+        "yyyymmdd": yyyymmdd,
+        "yyyy-mm-dd": yyyy_mm_dd,
+        "dd-mon-yyyy": dd_mon_yyyy,
+        "dd/mm/yyyy": dd_mm_yyyy,
+        "mm/dd/yyyy": mm_dd_yyyy,
+    }
+
     @classmethod
     def shape(cls, name: str) -> DateShape:
         """Return the shape function for a format name."""
-        return {
-            "yyyymmdd": cls.yyyymmdd,
-            "yyyy-mm-dd": cls.yyyy_mm_dd,
-            "dd-mon-yyyy": cls.dd_mon_yyyy,
-            "dd/mm/yyyy": cls.dd_mm_yyyy,
-            "mm/dd/yyyy": cls.mm_dd_yyyy,
-        }[name]
+        return cls.SHAPES[name]
 
     @classmethod
     def names(cls) -> tuple[str, ...]:
         """Return every supported format name."""
-        return ("yyyymmdd", "yyyy-mm-dd", "dd-mon-yyyy", "dd/mm/yyyy", "mm/dd/yyyy")
+        return tuple(cls.SHAPES)
 
 
 def parse_dates(values: pa.Array, formats: tuple[str, ...]) -> tuple[pa.Array, pa.Array]:
@@ -107,7 +109,7 @@ def parse_dates(values: pa.Array, formats: tuple[str, ...]) -> tuple[pa.Array, p
         boolean array that is true where a value is invalid.
     """
     iso = pa.nulls(len(values), pa.string())
-    matched = pa.array([False] * len(values), pa.bool_())
+    matched = no_failures(len(values))
     for name in formats:
         ok, candidate = DateFormats.shape(name)(values)
         ok = pc.and_(pc.fill_null(ok, False), pc.is_valid(candidate))
@@ -115,11 +117,8 @@ def parse_dates(values: pa.Array, formats: tuple[str, ...]) -> tuple[pa.Array, p
         iso = pc.if_else(ok, candidate, iso)
         matched = pc.or_(matched, ok)
     invalid = pc.and_(pc.is_valid(values), pc.invert(matched))
-    try:
-        return pc.cast(iso, pa.date32()), invalid
-    except pa.ArrowInvalid:
-        dates, calendar_failed = cast_each(iso, pa.date32())
-        return dates, pc.or_(invalid, calendar_failed)
+    dates, calendar_failed = safe_cast(iso, pa.date32())
+    return dates, pc.or_(invalid, calendar_failed)
 
 
 @dataclass(frozen=True)
@@ -154,6 +153,9 @@ class DateHandler(ConvertingHandler):
     def parse(self, cleaned: pa.Array, sa_type: TypeEngine[Any]) -> Interpretation:
         return Interpretation(*self.parser(cleaned, self.formats))
 
+    def check(self, values: pa.Array, sa_type: TypeEngine[Any]) -> pa.Array | None:
+        return pc.fill_null(pc.less(pc.year(values), 1), False)
+
 
 @dataclass(frozen=True)
 class DateTimeHandler(DateHandler):
@@ -161,22 +163,34 @@ class DateTimeHandler(DateHandler):
 
     A timestamp has date and time separated by ``T`` or a space, with
     optional seconds and up to six fractional digits. A date-only value
-    becomes midnight.
+    becomes midnight. The column type decides about time zones: a
+    ``DateTime(timezone=True)`` column requires an offset (``Z`` or
+    ``+hh:mm``) and stores UTC, and a column without a time zone rejects
+    an offset. A date-only value is not read for a time zone column.
     """
 
     distinct: ClassVar[bool] = False
 
-    ISO: ClassVar[str] = r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d{1,6})?)?$"
+    _STAMP = r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d{1,6})?)?"
+    NAIVE: ClassVar[str] = _STAMP + "$"
+    AWARE: ClassVar[str] = _STAMP + r"(Z|[+-]\d{2}:\d{2})$"
 
     def arrow_type(self, sa_type: TypeEngine[Any]) -> pa.DataType:
-        return pa.timestamp("us")
+        return pa.timestamp("us", "UTC" if getattr(sa_type, "timezone", False) else None)
+
+    def expected(self, sa_type: TypeEngine[Any]) -> str:
+        return "DateTime with an offset (Z or +hh:mm)" if getattr(sa_type, "timezone", False) else "DateTime without an offset"
 
     def parse(self, cleaned: pa.Array, sa_type: TypeEngine[Any]) -> Interpretation:
-        is_iso = pc.fill_null(pc.match_substring_regex(cleaned, self.ISO), False)
-        stamps, stamp_failed = safe_cast(pc.if_else(is_iso, cleaned, NULL_STRING), pa.timestamp("us"))
+        target = self.arrow_type(sa_type)
+        aware = target.tz is not None
+        is_iso = pc.fill_null(pc.match_substring_regex(cleaned, self.AWARE if aware else self.NAIVE), False)
+        stamps, stamp_failed = safe_cast(pc.if_else(is_iso, cleaned, NULL_STRING), target)
+        if aware:
+            return Interpretation(stamps, pc.or_(stamp_failed, pc.and_(pc.is_valid(cleaned), pc.invert(is_iso))))
         rest = pc.dictionary_encode(pc.if_else(is_iso, NULL_STRING, cleaned))
         dates, invalid = self.parser(rest.dictionary, self.formats)
         dates = pc.take(dates, rest.indices)
         invalid = pc.fill_null(pc.take(invalid, rest.indices), False)
-        values = pc.coalesce(stamps, pc.cast(dates, pa.timestamp("us")))
+        values = pc.coalesce(stamps, pc.cast(dates, target))
         return Interpretation(values, pc.or_(invalid, stamp_failed))
