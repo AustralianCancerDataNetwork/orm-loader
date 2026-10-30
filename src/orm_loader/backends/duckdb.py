@@ -1,30 +1,28 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
-from typing import TYPE_CHECKING, Any, Type, cast
+from collections.abc import Iterable, Iterator, Sequence
+from typing import TYPE_CHECKING, Any, ClassVar, Type, cast
 
+import pyarrow as pa
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 from oa_configurator import (
-    ResolvedCDMDatabase,
-    Role,
     UnenforcedForeignKey,
-    is_ephemeral_url,
     physical_schema_of,
-    qualified,
     unenforced_foreign_keys,
 )
-from sqlalchemy.schema import CreateSequence, DropSequence, DropTable
 from sqlalchemy.sql.compiler import IdentifierPreparer
 
-from ..helpers.engines import dispose_engines
-from .base import BackendCapabilities, DatabaseBackend, DeferredForeignKeyViolationError, Dialect
+from .base import DatabaseBackend, DeferredForeignKeyViolationError, Dialect
 
 if TYPE_CHECKING:
-    from ..tables.typing import CSVTableProtocol
+    from ..loaders.loader import LoaderContext
+    from ..tables.typing import FileTableProtocol
 
 
 class DuckDBBackend(DatabaseBackend):
+    supports_replace_with_kept_indexes = False
+
     @staticmethod
     def staging_name_for_table(tablename: str) -> str:
         return f"_staging_{tablename}"
@@ -43,15 +41,9 @@ class DuckDBBackend(DatabaseBackend):
 
         return duckdb_sqlalchemy.Dialect().identifier_preparer
 
-    @property
-    def capabilities(self) -> BackendCapabilities:
-        return BackendCapabilities(
-            supports_fast_load=False,
-            supports_unlogged_staging=False,
-            supports_fk_toggle=False,
-            supports_materialized_views=False,
-            supports_replace_with_kept_indexes=False,
-        )
+    # Batches per commit of the staging table. DuckDB keeps uncommitted rows in memory, so this bounds
+    # the memory of a load.
+    STAGING_COMMIT_EVERY: ClassVar[int] = 5
 
     def _unenforced_constraints(
         self, tables: tuple[sa.Table, ...]
@@ -71,7 +63,7 @@ class DuckDBBackend(DatabaseBackend):
         if self.resolved is None:
             raise ValueError(
                 "DuckDBBackend needs resolved=<ResolvedDatabase> to classify foreign-key "
-                "enforcement. Pass it to load_csv(...) or resolve_backend(...)."
+                "enforcement. Pass it to load_file(...) or resolve_backend(...)."
             )
         return unenforced_foreign_keys(
             tables, resolved=self.resolved, physical_schemas=self.physical_schemas
@@ -79,7 +71,7 @@ class DuckDBBackend(DatabaseBackend):
 
     def deferred_fk_constraints(
         self,
-        table_cls: Type["CSVTableProtocol"],
+        table_cls: Type["FileTableProtocol"],
     ) -> tuple[sa.ForeignKeyConstraint, ...]:
         """FK constraints on *table_cls* this backend's database will not enforce:
         - omitted (cross-database/cross-schema), or
@@ -93,7 +85,7 @@ class DuckDBBackend(DatabaseBackend):
         unenforced = {entry.constraint for entry in self._unenforced_constraints(tuple(metadata.tables.values()))}
         return tuple(fk for fk in own_fks if fk in unenforced)
 
-    def validate_deferred_fks(self, table_cls: Type["CSVTableProtocol"], session: so.Session) -> None:
+    def validate_deferred_fks(self, table_cls: Type["FileTableProtocol"], session: so.Session) -> None:
         """Validate every deferred FK on table_cls, including a cross-database one.
 
         A cross-schema or cyclic deferred FK points to a table in the same
@@ -111,69 +103,18 @@ class DuckDBBackend(DatabaseBackend):
             if entry.constraint not in own_fks:
                 continue
             if entry.reason == "cross_database":
-                self._validate_cross_database_fk(entry.constraint, session)
+                self._validate_cross_database_fk(entry.constraint, session, DeferredForeignKeyViolationError)
             else:
-                self._validate_one_deferred_fk(entry.constraint, session)
+                self._validate_one_fk(entry.constraint, session, DeferredForeignKeyViolationError)
 
-    def _validate_cross_database_fk(self, fk: sa.ForeignKeyConstraint, session: so.Session) -> None:
-        """Anti-join fk across two connections by comparing both sides in Python.
+    def validate_foreign_keys(self, table_cls: Type["FileTableProtocol"], session: so.Session) -> None:
+        """Raise if any row in *table_cls* references a row that does not exist.
 
-        Pulls fk's distinct non-null local values from *session*'s own
-        connection, then opens the referred table's own connection (via
-        self.resolved) to check which of them actually exist there. One
-        bulk query per side instead of one query spanning both.
-
-        Raises
-        ------
-        TypeError
-            self.resolved is not a ResolvedCDMDatabase: a cross-database FK
-            can only arise when PRIMARY/VOCAB are split across connections,
-            which only a CDM-aware resolved can describe.
-        ValueError
-            The remote role's connection is ephemeral (DuckDB ``:memory:``):
-            a freshly built engine would get its own, empty database rather
-            than the one already holding the remote data.
-        DeferredForeignKeyViolationError
-            A local value has no match on the referred connection.
+        DuckDB enforces the foreign keys it creates, so only the ones it
+        never enforces need an anti-join, which is
+        :meth:`validate_deferred_fks`.
         """
-        if not isinstance(self.resolved, ResolvedCDMDatabase):
-            raise TypeError(
-                f"{fk.name} was classified cross_database, which requires split PRIMARY/VOCAB "
-                f"connections, but self.resolved is {type(self.resolved).__name__}, not "
-                "ResolvedCDMDatabase."
-            )
-        local_cols = list(fk.columns)
-        remote_cols = [element.column for element in fk.elements]
-        not_null = sa.and_(*(col.isnot(None) for col in local_cols))
-        local_values = session.execute(sa.select(*local_cols).where(not_null).distinct()).all()
-        if not local_values:
-            return
-
-        remote_tag = remote_cols[0].table.schema
-        remote_role = Role.VOCAB if remote_tag == Role.VOCAB.value else Role.PRIMARY
-        remote_connection = self.resolved.connection_for_role(remote_role)
-        if is_ephemeral_url(remote_connection.safe_url):
-            raise ValueError(
-                f"{fk.name} crosses to {remote_connection.name!r}, an ephemeral connection "
-                "(DuckDB ':memory:'): a freshly built engine would see an empty, disconnected "
-                "database instead of the data already loaded there. Cross-database FK "
-                "validation needs a real, file-backed or server-backed remote connection."
-            )
-        primary_engine, vocab_engine = self.resolved.create_engines(register_claims=False)
-        try:
-            remote_engine = vocab_engine if remote_tag == Role.VOCAB.value else primary_engine
-            with remote_engine.connect() as remote_conn:
-                if len(remote_cols) == 1:
-                    condition = remote_cols[0].in_(value for (value,) in local_values)
-                else:
-                    condition = sa.tuple_(*remote_cols).in_(tuple(value) for value in local_values)
-                existing = {tuple(row) for row in remote_conn.execute(sa.select(*remote_cols).where(condition))}
-        finally:
-            dispose_engines(primary_engine, vocab_engine)
-
-        missing = [tuple(value) for value in local_values if tuple(value) not in existing]
-        if missing:
-            raise DeferredForeignKeyViolationError(fk, missing[:5])
+        self.validate_deferred_fks(table_cls, session)
 
     def _tables_referencing(self, target: sa.Table) -> set[sa.Table]:
         """Other tables with an enforced FK pointing at target.
@@ -206,99 +147,16 @@ class DuckDBBackend(DatabaseBackend):
             for other in self._tables_referencing(target)
         )
 
-    def _staging_rownum_sequence_ref(self, tablename: str) -> str:
-        """Fully schema-qualified, quoted name of tablename's staging _rownum sequence.
-
-        DuckDB can't ALTER TABLE ADD a GENERATED ALWAYS AS IDENTITY column
-        after creation, so pagination uses a sequence-backed DEFAULT
-        instead for a stable, monotonic key.
-        """
-        seq_name = f"{self.staging_name_for_table(tablename)}_rownum_seq"
-        return qualified(self.identifier_preparer, seq_name, physical_schema=self.staging_schema)
-
-    def create_staging_table(
-        self,
-        table_cls: type["CSVTableProtocol"],
-        session: so.Session,
-    ) -> None:
-        bind_arguments = {"mapper": table_cls}
-        staging_name = self.staging_name_for_table(table_cls.__tablename__)
-        staging_ref = self.qualified_staging_name(table_cls.__tablename__)
-        seq_ref = self._staging_rownum_sequence_ref(table_cls.__tablename__)
-        sequence = sa.Sequence(f"{staging_name}_rownum_seq", schema=self.staging_schema)
-
-        session.execute(
-            DropTable(sa.Table(staging_name, sa.MetaData(), schema=self.staging_schema), if_exists=True),
-            bind_arguments=bind_arguments,
-        )
-        session.execute(DropSequence(sequence, if_exists=True), bind_arguments=bind_arguments)
-
-        metadata = sa.MetaData()
-        staging_columns = [
-            sa.Column(col.name, col.type, nullable=True)
-            for col in table_cls.__table__.columns
-        ]
-        staging_table = sa.Table(staging_name, metadata, *staging_columns, schema=self.staging_schema)
-        metadata.create_all(
-            bind=session.connection(bind_arguments=bind_arguments), tables=[staging_table]
-        )
-
-        session.execute(CreateSequence(sequence), bind_arguments=bind_arguments)
-        # ALTER TABLE ADD COLUMN has no Core DDL construct, so this stays raw.
-        session.execute(
-            sa.text(f"ALTER TABLE {staging_ref} ADD COLUMN _rownum BIGINT DEFAULT nextval('{seq_ref}');"),
-            bind_arguments=bind_arguments,
-        )
-        session.commit()
-
-    def drop_staging_table(
-        self,
-        table_cls: type["CSVTableProtocol"],
-        session: so.Session,
-    ) -> None:
-        bind_arguments = {"mapper": table_cls}
-        staging_name = self.staging_name_for_table(table_cls.__tablename__)
-        session.execute(
-            DropTable(sa.Table(staging_name, sa.MetaData(), schema=self.staging_schema), if_exists=True),
-            bind_arguments=bind_arguments,
-        )
-        session.execute(
-            DropSequence(
-                sa.Sequence(f"{staging_name}_rownum_seq", schema=self.staging_schema), if_exists=True
-            ),
-            bind_arguments=bind_arguments,
-        )
-
-    @staticmethod
-    def _normalize_fk_check_state(previous_state: str | int) -> str | int:
-        raise NotImplementedError(
-            "DuckDB has no foreign-key-toggle mechanism; there is no state to normalize."
-        )
-
-    def disable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int:
-        raise NotImplementedError(
-            "DuckDB has no foreign-key-toggle mechanism (no PRAGMA/SET equivalent exists)."
-        )
-
-    def enable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int:
-        raise NotImplementedError(
-            "DuckDB has no foreign-key-toggle mechanism (no PRAGMA/SET equivalent exists)."
-        )
-
-    def restore_fk_check(
-        self,
-        session: so.Session,
-        previous_state: str | int,
-        *,
-        mapper: Any | None = None,
-    ) -> None:
-        raise NotImplementedError(
-            "DuckDB has no foreign-key-toggle mechanism (no PRAGMA/SET equivalent exists)."
-        )
+    def _staging_table(self, table_cls: type["FileTableProtocol"], columns: Sequence[sa.Column[Any]]) -> sa.Table:
+        """Number the rows with a sequence, which DuckDB creates and drops with the table."""
+        name = self.staging_name_for_table(table_cls.__tablename__)
+        sequence = sa.Sequence(f"{name}_rownum_seq", schema=self.staging_schema)
+        row_key = sa.Column("_rownum", sa.BigInteger, sequence, server_default=sequence.next_value())
+        return sa.Table(name, sa.MetaData(), *columns, row_key, schema=self.staging_schema)
 
     def _paginate_batches(
         self,
-        table_cls: type["CSVTableProtocol"],
+        table_cls: type["FileTableProtocol"],
         staging: sa.Table,
         session: so.Session,
         merge_batch_size: int | None,
@@ -318,7 +176,7 @@ class DuckDBBackend(DatabaseBackend):
 
     def _self_referential_batches(
         self,
-        table_cls: type["CSVTableProtocol"],
+        table_cls: type["FileTableProtocol"],
         staging: sa.Table,
         session: so.Session,
         merge_batch_size: int | None,
@@ -383,9 +241,40 @@ class DuckDBBackend(DatabaseBackend):
         """
         return True
 
+    def insert_batches(
+        self,
+        ctx: "LoaderContext",
+        staging: sa.Table,
+        batches: Iterable[pa.Table],
+        columns: Sequence[str],
+    ) -> None:
+        """Insert the batches into the staging table straight from Arrow.
+
+        Notes
+        -----
+        Each batch is registered as a temporary view over the Arrow memory and
+        copied with ``INSERT ... SELECT``, which is DuckDB's fastest bulk path.
+        The staging table is committed every ``STAGING_COMMIT_EVERY`` batches,
+        because DuckDB keeps uncommitted rows in memory and one transaction
+        would hold the whole file. The commit also ends the caller's open
+        transaction.
+        """
+        batch = sa.table("_orm_loader_batch", *(sa.column(c) for c in columns))
+        insert = staging.insert().from_select(list(columns), sa.select(*batch.c))
+        bind_arguments = {"mapper": ctx.tableclass}
+        for index, table in enumerate(batches, start=1):
+            native = ctx.session.connection(bind_arguments=bind_arguments).connection
+            native.register("_orm_loader_batch", table)
+            try:
+                ctx.session.execute(insert, bind_arguments=bind_arguments)
+            finally:
+                native.unregister("_orm_loader_batch")
+            if index % self.STAGING_COMMIT_EVERY == 0:
+                ctx.session.commit()
+
     def check_replace_feasible(
         self,
-        table_cls: type["CSVTableProtocol"],
+        table_cls: type["FileTableProtocol"],
         pk_cols: list[str],
         session: so.Session,
     ) -> None:
@@ -423,9 +312,10 @@ class DuckDBBackend(DatabaseBackend):
 
     def merge_replace(
         self,
-        table_cls: type["CSVTableProtocol"],
+        table_cls: type["FileTableProtocol"],
         session: so.Session,
         pk_cols: list[str],
+        staging: sa.Table,
         *,
         merge_batch_size: int | None = None,
         validate_deferred_fks: bool = True,
@@ -434,8 +324,8 @@ class DuckDBBackend(DatabaseBackend):
 
         DuckDB can't delete a still-referenced row, so replace is an UPDATE
         rather than delete-then-reinsert. Requires index_strategy to have
-        dropped indexes first; capabilities.supports_replace_with_kept_indexes
-        is False for this reason.
+        dropped indexes first; supports_replace_with_kept_indexes is False
+        for this reason.
 
         A self-referential FK can point an existing row at one this load
         hasn't inserted yet. Doing replace then insert as separate phases
@@ -452,8 +342,7 @@ class DuckDBBackend(DatabaseBackend):
         self._validate_merge_batch_size(merge_batch_size)
         self.check_replace_feasible(table_cls, pk_cols, session)
         target = table_cls.__table__
-        staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
-        update_cols = [c for c in self._insertable_column_names(table_cls) if c not in pk_cols]
+        update_cols = [c for c in self._insertable_column_names(table_cls, staging) if c not in pk_cols]
         pk_join = sa.and_(*(target.c[c] == staging.c[c] for c in pk_cols))
 
         def _batch_keys(extra: sa.ColumnElement[bool] | None = None) -> sa.Select[Any]:
@@ -474,12 +363,7 @@ class DuckDBBackend(DatabaseBackend):
             session.execute(stmt)
 
         def _drop_matched_from_staging(extra: sa.ColumnElement[bool] | None = None) -> None:
-            matched = sa.select(*(target.c[c] for c in pk_cols)).where(pk_join)
-            if len(pk_cols) == 1:
-                condition: sa.ColumnElement[bool] = staging.c[pk_cols[0]].in_(matched)
-            else:
-                condition = sa.tuple_(*(staging.c[c] for c in pk_cols)).in_(matched)
-            stmt = sa.delete(staging).where(condition)
+            stmt = sa.delete(staging).where(sa.exists().where(pk_join))
             if extra is not None:
                 stmt = stmt.where(extra)
             session.execute(stmt)
@@ -491,7 +375,7 @@ class DuckDBBackend(DatabaseBackend):
 
         self_referential_fks = self._self_referential_deferred_fks(table_cls)
         if self_referential_fks:
-            insertable_cols = self._insertable_column_names(table_cls)
+            insertable_cols = self._insertable_column_names(table_cls, staging)
             non_paginated_select = sa.select(*(staging.c[c] for c in insertable_cols))
 
             def _insert(select_: Any) -> sa.Insert:
@@ -524,9 +408,10 @@ class DuckDBBackend(DatabaseBackend):
 
     def merge_upsert(
         self,
-        table_cls: type["CSVTableProtocol"],
+        table_cls: type["FileTableProtocol"],
         session: so.Session,
         pk_cols: list[str],
+        staging: sa.Table,
         *,
         merge_batch_size: int | None = None,
         validate_deferred_fks: bool = True,
@@ -535,8 +420,7 @@ class DuckDBBackend(DatabaseBackend):
 
         self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
-        staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
-        insertable_cols = self._insertable_column_names(table_cls)
+        insertable_cols = self._insertable_column_names(table_cls, staging)
 
         def _upsert(select_: Any) -> sa.Insert:
             return (
@@ -561,16 +445,16 @@ class DuckDBBackend(DatabaseBackend):
 
     def merge_insert(
         self,
-        table_cls: type["CSVTableProtocol"],
+        table_cls: type["FileTableProtocol"],
         session: so.Session,
+        staging: sa.Table,
         *,
         merge_batch_size: int | None = None,
         validate_deferred_fks: bool = True,
     ) -> None:
         self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
-        staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
-        insertable_cols = self._insertable_column_names(table_cls)
+        insertable_cols = self._insertable_column_names(table_cls, staging)
         non_paginated_select = sa.select(*(staging.c[c] for c in insertable_cols))
 
         def _insert(select_: Any) -> sa.Insert:

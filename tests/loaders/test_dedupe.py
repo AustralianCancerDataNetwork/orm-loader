@@ -1,21 +1,20 @@
-import pyarrow as pa
-from typing import cast, Type
-from oa_configurator import Role
-from orm_loader.loaders.loading_helpers import arrow_drop_duplicates
+from typing import Type, cast
+
 import pandas as pd
 import sqlalchemy as sa
 import sqlalchemy.orm as so
+from oa_configurator import Role
 from sqlalchemy.orm import DeclarativeBase
-from orm_loader.tables.loadable_table import CSVLoadableTableInterface
-from orm_loader.tables.typing import CSVTableProtocol
-from orm_loader.loaders.loader_interface import PandasLoader
+
+from orm_loader.tables.loadable_table import FileLoadableTableInterface
+from orm_loader.tables.typing import FileTableProtocol
 
 
 class Base(DeclarativeBase):
     pass
 
 
-class DedupTable(Base, CSVLoadableTableInterface):
+class DedupTable(Base, FileLoadableTableInterface):
     __tablename__ = "dedup_table"
     __table_args__ = {"schema": Role.PRIMARY.value}
 
@@ -23,19 +22,7 @@ class DedupTable(Base, CSVLoadableTableInterface):
     value: so.Mapped[str] = so.mapped_column(sa.String, nullable=False)
 
 
-_DedupTable = cast(Type[CSVTableProtocol], DedupTable)
-
-
-def test_arrow_drop_duplicates_simple():
-    table = pa.table({
-        "id": [1, 1, 2],
-        "x":  ["a", "a", "b"],
-    })
-
-    deduped = arrow_drop_duplicates(table, ["id"])
-    assert deduped.num_rows == 2
-    assert deduped["id"].to_pylist() == [1, 2]
-
+_DedupTable = cast(Type[FileTableProtocol], DedupTable)
 
 
 def test_internal_deduplication(sqlite_session, sqlite_engine, tmp_path):
@@ -50,10 +37,9 @@ def test_internal_deduplication(sqlite_session, sqlite_engine, tmp_path):
         ]
     ).to_csv(csv, index=False)
 
-    inserted = _DedupTable.load_csv(
+    inserted = _DedupTable.load_file(
         sqlite_session,
         csv,
-        loader=PandasLoader(),
         dedupe=True,
     )
     sqlite_session.commit()

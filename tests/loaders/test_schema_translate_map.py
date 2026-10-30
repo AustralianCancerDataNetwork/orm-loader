@@ -1,4 +1,4 @@
-"""End-to-end proof that load_csv() respects schema_translate_map with no
+"""End-to-end proof that load_file() respects schema_translate_map with no
 caller-side workaround. This is the actual regression test for the bug this
 whole plan exists to fix, distinct from the backend unit tests in
 tests/backends/, which exercise the merge methods directly but never against
@@ -23,13 +23,12 @@ import sqlalchemy as sa
 from oa_configurator import Role as SchemaRole
 
 from orm_loader.backends import STAGING_SCHEMA
-from orm_loader.loaders.loader_interface import PandasLoader
 
 from tests.conftest import schema_scoped_session
 from tests.models import SimpleTable, VocabSchemaTable
 
 
-def test_load_csv_respects_non_default_schema_end_to_end(pg_db, tmp_path):
+def test_load_file_respects_non_default_schema_end_to_end(pg_db, tmp_path):
     with schema_scoped_session(pg_db, SimpleTable.__table__, prefix="loader_primary") as (scoped, session):
         schema = scoped.schemas[SchemaRole.PRIMARY]
         csv_path = tmp_path / "test_table.csv"
@@ -37,8 +36,8 @@ def test_load_csv_respects_non_default_schema_end_to_end(pg_db, tmp_path):
             [{"id": 1, "name": "alpha"}, {"id": 2, "name": "beta"}, {"id": 3, "name": "gamma"}]
         ).to_csv(csv_path, index=False, sep="\t")
 
-        inserted = SimpleTable.load_csv(
-            session, csv_path, dedupe=False, loader=PandasLoader(), staging_schema_tag=STAGING_SCHEMA
+        inserted = SimpleTable.load_file(
+            session, csv_path, dedupe=False, staging_schema_tag=STAGING_SCHEMA
         )
         session.commit()
 
@@ -58,20 +57,19 @@ def test_load_csv_respects_non_default_schema_end_to_end(pg_db, tmp_path):
 
 
 def test_replace_merge_respects_non_default_schema_end_to_end(pg_db, tmp_path):
-    """A second load_csv() call with merge_strategy="replace" against the
+    """A second load_file() call with merge_strategy="replace" against the
     same non-default schema. Proves the merge path itself, not just the
-    initial insert-if-empty fast path, qualifies correctly."""
+    initial insert, qualifies correctly."""
     with schema_scoped_session(pg_db, SimpleTable.__table__, prefix="loader_replace") as (scoped, session):
         schema = scoped.schemas[SchemaRole.PRIMARY]
 
         def _write_and_load(rows: list[dict], path_name: str) -> int:
             path = tmp_path / path_name
             pd.DataFrame(rows).to_csv(path, index=False, sep="\t")
-            return SimpleTable.load_csv(
+            return SimpleTable.load_file(
                 session,
                 path,
                 dedupe=False,
-                loader=PandasLoader(),
                 merge_strategy="replace",
                 staging_schema_tag=STAGING_SCHEMA,
             )
@@ -88,7 +86,7 @@ def test_replace_merge_respects_non_default_schema_end_to_end(pg_db, tmp_path):
         assert rows == [(1, "alpha-updated"), (2, "beta")]
 
 
-def test_load_csv_respects_non_primary_schema_tag_end_to_end(pg_db, tmp_path):
+def test_load_file_respects_non_primary_schema_tag_end_to_end(pg_db, tmp_path):
     """Checks that the schema tag is correctly derived from the table's own
     schema (table.schema) for a non-primary tag."""
     with schema_scoped_session(
@@ -101,8 +99,8 @@ def test_load_csv_respects_non_primary_schema_tag_end_to_end(pg_db, tmp_path):
             csv_path, index=False, sep="\t"
         )
 
-        inserted = VocabSchemaTable.load_csv(
-            session, csv_path, dedupe=False, loader=PandasLoader(), staging_schema_tag=STAGING_SCHEMA
+        inserted = VocabSchemaTable.load_file(
+            session, csv_path, dedupe=False, staging_schema_tag=STAGING_SCHEMA
         )
         session.commit()
 

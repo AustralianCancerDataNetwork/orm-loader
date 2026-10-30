@@ -1,4 +1,4 @@
-from typing import Protocol, ClassVar, runtime_checkable, TYPE_CHECKING, Optional, Type, Dict, Any, Unpack, TypedDict
+from typing import Protocol, ClassVar, runtime_checkable, TYPE_CHECKING, Optional, Dict, Any, Unpack, TypedDict
 import sqlalchemy.orm as so
 import sqlalchemy as sa
 from collections.abc import Mapping
@@ -7,7 +7,9 @@ from contextlib import AbstractContextManager
 if TYPE_CHECKING:
     from oa_configurator import ResolvedDatabase
 
-    from ..loaders import LoaderContext, LoaderInterface
+    from ..backends.base import DatabaseBackend
+    from ..conversion import ConversionPolicy
+    from ..loaders import FileReader, LoadReport
 
 class ToDictKwargs(TypedDict, total=False):
     include_nulls: bool
@@ -50,56 +52,49 @@ class ORMTableProtocol(Protocol):
     @classmethod
     def required_columns(cls) -> set[str]: ...
 
+    @classmethod
+
+    @classmethod
+    def column_defaults(cls) -> dict[str, Any]: ...
+
 @runtime_checkable
-class CSVTableProtocol(ORMTableProtocol, Protocol):
+class FileTableProtocol(ORMTableProtocol, Protocol):
     """
-    Structural protocol for ORM tables that support CSV-based ingestion.
+    Structural protocol for ORM tables that load from files.
 
     This protocol captures the expected interface for tables that can
-    participate in staged, file-based loading workflows using CSV input.
+    participate in staged, file-based loading workflows.
 
     It defines the contract for:
     - staging table management
-    - loader selection
-    - CSV ingestion and merging semantics
+    - reader selection
+    - file ingestion and merging semantics
 
     No assumptions are made about the underlying database or schema.
     """
 
     @classmethod
-    def _select_loader(cls, path: Path) -> "LoaderInterface": ...
-
-    @classmethod
-    def create_staging_table(cls, session: so.Session, *, staging_schema_tag: str | None = None) -> None: ...
-
-    @classmethod
-    def load_staging(cls: Type["CSVTableProtocol"], loader: "LoaderInterface", loader_context: "LoaderContext") -> int: ...
-
-    @classmethod
-    def load_csv(
+    def load_file(
         cls,
         session: so.Session,
         path: Path,
         *,
-        loader: Optional["LoaderInterface"] = None,
+        reader: Optional["FileReader"] = None,
         normalise: bool = True,
         dedupe: bool = False,
         chunksize: int | None = None,
         merge_strategy: str = "replace",
-        quote_mode: str = "csv",
+        quote_mode: str | None = None,
         index_strategy: str = "auto",
         merge_batch_size: int | None = None,
         staging_schema_tag: str | None = None,
         validate_deferred_fks: bool = True,
         resolved: Optional["ResolvedDatabase"] = None,
         physical_schemas: Optional[Mapping[str, str | None]] = None,
+        policy: Optional["ConversionPolicy"] = None,
+        rejects_dir: Optional[Path] = None,
+        report: Optional["LoadReport"] = None,
     ) -> int: ...
-
-    @classmethod
-    def orm_staging_load(cls, loader: "LoaderInterface", loader_context: "LoaderContext") -> int: ...
-
-    @classmethod
-    def get_staging_table(cls, session: so.Session, *, staging_schema_tag: str | None = None) -> sa.Table: ...
 
     @classmethod
     def merge_from_staging(
@@ -107,22 +102,31 @@ class CSVTableProtocol(ORMTableProtocol, Protocol):
         session: so.Session,
         merge_strategy: str = "replace",
         *,
+        backend: "DatabaseBackend",
+        staging: sa.Table,
         merge_batch_size: int | None = None,
-        staging_schema_tag: str | None = None,
         validate_deferred_fks: bool = True,
+    ) -> None: ...
+
+    @classmethod
+    def validate_foreign_keys(
+        cls,
+        session: so.Session,
+        *,
+        staging_schema_tag: str | None = None,
         resolved: Optional["ResolvedDatabase"] = None,
         physical_schemas: Optional[Mapping[str, str | None]] = None,
     ) -> None: ...
 
     @classmethod
-    def drop_staging_table(cls, session: so.Session, *, staging_schema_tag: str | None = None) -> None: ...
-
-    @classmethod
     def _target_has_rows(cls, session: so.Session) -> bool: ...
 
     @classmethod
+    def _restore_indices(cls, session: so.Session, indices: list[sa.Index]) -> list[str]: ...
+
+    @classmethod
     def manage_indices(
-        cls, session: so.Session, index_strategy: str = "auto", *, staging_schema_tag: str | None = None
+        cls, session: so.Session, index_strategy: str = "auto", *, backend: "DatabaseBackend"
     ) -> AbstractContextManager[None]:
         ...
     

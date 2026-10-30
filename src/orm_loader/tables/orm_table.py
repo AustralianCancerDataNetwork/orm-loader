@@ -1,32 +1,14 @@
+import logging
+from typing import Any
+
 import sqlalchemy as sa
 import sqlalchemy.orm as so
-from sqlalchemy.exc import NoInspectionAvailable, StatementError
-from typing import Any
-import logging
+from sqlalchemy.exc import NoInspectionAvailable
+
 from .allocators import IdAllocator
-from ..helpers import normalise_null
 
 logger = logging.getLogger(__name__)
 
-
-def _resolves_to_autoincrement(c: sa.Column) -> bool:
-    """Whether a column will actually autoincrement, resolving SQLAlchemy's
-    own default ``autoincrement="auto"`` sentinel the same way SQLAlchemy
-    itself does at DDL-emission time.
-
-    SQLAlchemy restricts real autoincrement behaviour to a single-column 
-    integer primary key (or an explicit ``autoincrement=True``). 
-    Treating every `"auto"` column as autoincrementing would wrongly 
-    exclude genuinely-required string PKs from `required_columns()`.
-    """
-    if c.autoincrement is False:
-        return False
-    if c.autoincrement is True:
-        return True
-    if not c.primary_key:
-        return False
-    pk_columns = list(c.table.primary_key.columns)
-    return len(pk_columns) == 1 and pk_columns[0] is c and isinstance(c.type, sa.Integer)
 
 """
 ORMTableBase
@@ -123,46 +105,6 @@ class ORMTableBase:
         return [c.key for c in cls.pk_columns() if c.key is not None]
 
     @classmethod
-    def pk_values(cls, obj: Any) -> dict[str, Any]:
-        """
-        Extract primary key values from an ORM instance.
-
-        Parameters
-        ----------
-        obj
-            An ORM-mapped instance of this class.
-
-        Returns
-        -------
-        dict[str, Any]
-            A dictionary mapping primary key column names to values.
-        """
-        return {c.key: getattr(obj, c.key) for c in cls.pk_columns() if c.key is not None}
-    
-    @classmethod
-    def pk_tuple(cls, obj: Any) -> tuple[Any, ...]:
-        """
-        Extract primary key values from an ORM instance as a tuple.
-
-        Values are returned in mapper-defined primary key order.
-
-        Parameters
-        ----------
-        obj
-            An ORM-mapped instance of this class.
-
-        Returns
-        -------
-        tuple
-            A tuple of primary key values.
-        """
-        return tuple(
-            getattr(obj, c.key)
-            for c in cls.pk_columns()
-            if c.key is not None
-        )
-
-    @classmethod
     def model_columns(cls) -> dict[str, sa.ColumnElement[Any]]:
         """
         Return all mapped columns for the table.
@@ -182,10 +124,7 @@ class ORMTableBase:
 
         A column is considered required if it is:
         - non-nullable
-        - has no Python-side default
-        - has no server-side default
-        - not an autoincrementing column (the database assigns its value;
-          it's never expected in inbound data at all)
+        - has no default that can be supplied (see ``column_defaults``)
 
         This method is intended for ingestion-time validation and does
         not attempt to enforce schema semantics beyond insert viability.
@@ -195,15 +134,37 @@ class ORMTableBase:
         set[str]
             A set of required column names.
         """
-        mapper = cls.mapper_for()
+        defaults = cls.column_defaults()
         return {
             c.key
-            for c in mapper.columns
-            if not c.nullable
-            and not c.default
-            and not c.server_default
-            and not _resolves_to_autoincrement(c)
+            for c in cls.mapper_for().columns
+            if not c.nullable and c.key not in defaults
         }
+
+    @classmethod
+    def column_defaults(cls) -> dict[str, Any]:
+        """
+        Return the default of each column that has one that can be supplied.
+
+        A server default given as text and a scalar Python default are
+        returned as the value itself. A server default given as a SQL
+        expression is returned as that expression, for the database to
+        evaluate. A callable or context-sensitive default cannot be supplied
+        for a whole file, so its column is not listed.
+
+        Returns
+        -------
+        dict[str, Any]
+            A mapping of column name to the value, or SQL expression, of its default.
+        """
+        defaults: dict[str, Any] = {}
+        for c in cls.mapper_for().columns:
+            server_default = getattr(c.server_default, "arg", None)
+            if server_default is not None:
+                defaults[c.name] = server_default
+            elif c.default is not None and c.default.is_scalar:
+                defaults[c.name] = c.default.arg  # ty: ignore[unresolved-attribute]
+        return defaults
 
     @classmethod
     def max_id(cls, session: so.Session) -> int:
@@ -260,85 +221,3 @@ class ORMTableBase:
         return IdAllocator(cls.max_id(session))
 
 
-    @classmethod
-    def clean_kwargs(
-        cls,
-        data: dict[str, Any],
-        *,
-        drop_nulls: bool = True,
-        strict: bool = False,
-    ) -> dict[str, Any]:
-        """
-        Normalise inbound constructor kwargs:
-        - nan / NaT / 'nan' / '' -> None
-        - optionally drop nulls
-        - optionally validate required columns
-        """
-        cols = cls.model_columns()
-
-        cleaned: dict[str, Any] = {}
-        for k, v in data.items():
-            if k not in cols:
-                continue  # ignore unknown keys safely
-
-            v2 = normalise_null(v)
-
-            if v2 is None and drop_nulls:
-                continue
-
-            cleaned[k] = v2
-
-        if strict:
-            missing = cls.required_columns() - cleaned.keys()
-            if missing:
-                raise ValueError(
-                    f"Missing required fields for {cls.__name__}: {sorted(missing)}"
-                )
-
-        return cleaned
-
-
-    @classmethod
-    def from_dict(
-        cls,
-        data: dict[str, Any],
-        *,
-        drop_nulls: bool = True,
-        strict: bool = False,
-        debug: bool = False,
-    ):
-        cleaned = cls.clean_kwargs(
-            data,
-            drop_nulls=drop_nulls,
-            strict=strict,
-        )
-
-        try:
-            return cls(**cleaned)
-
-        except TypeError as e:
-            # bad keyword, missing arg, etc
-            unknown_keys = set(data.keys()) - set(cls.model_columns().keys())
-            msg = (
-                f"Failed to construct {cls.__name__} from dict.\n"
-                f"Error: {e}\n"
-                f"Known columns: {sorted(cls.model_columns().keys())}\n"
-                f"Unknown keys: {sorted(unknown_keys)}\n"
-                f"Cleaned kwargs: {cleaned}"
-            )
-            raise TypeError(msg) from e
-
-        except StatementError as e:
-            # SQLAlchemy type coercion / bind errors
-            msg = (
-                f"SQLAlchemy failed to bind values for {cls.__name__}.\n"
-                f"Cleaned kwargs: {cleaned}\n"
-            )
-            raise ValueError(msg) from e
-
-        except Exception as e:
-            msg = (
-                f"Unexpected error constructing {cls.__name__}.\n"
-                f"Cleaned kwargs: {cleaned}\n"
-            )
-            raise RuntimeError(msg) from e

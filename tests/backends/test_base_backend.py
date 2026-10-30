@@ -10,18 +10,16 @@ from typing import TYPE_CHECKING, Sequence, Type, cast, Any
 import pytest
 import sqlalchemy as sa
 import sqlalchemy.orm as so
-from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.engine import Engine
 
 from orm_loader.backends import (
-    BackendCapabilities,
     DatabaseBackend,
     Dialect,
     resolve_backend,
 )
 
 if TYPE_CHECKING:
-    from orm_loader.loaders.data_classes import LoaderContext
-    from orm_loader.tables.typing import CSVTableProtocol
+    from orm_loader.tables.typing import FileTableProtocol
 
 
 class _BlockPsycopg(importlib.abc.MetaPathFinder):
@@ -40,6 +38,13 @@ class FakeBackend(DatabaseBackend):
     def __init__(self) -> None:
         self.calls: list[tuple[str, object]] = []
 
+    def insert_batches(self, ctx, staging, batches, columns) -> int:
+        total = 0
+        for table in batches:
+            ctx.session.execute(staging.insert(), table.to_pylist())
+            total += table.num_rows
+        return total
+
     @property
     def name(self) -> str:
         return "fake"
@@ -54,30 +59,23 @@ class FakeBackend(DatabaseBackend):
 
         return sqlite.dialect().identifier_preparer
 
-    @property
-    def capabilities(self) -> BackendCapabilities:
-        return BackendCapabilities(
-            supports_fast_load=True,
-            supports_fk_toggle=True,
-        )
-
     @staticmethod
     def staging_name_for_table(tablename: str) -> str:
         return f"_staging_{tablename}"
 
     def create_staging_table(
-        self, _table_cls: Type[CSVTableProtocol], _session: so.Session
+        self, _table_cls: Type[FileTableProtocol], _session: so.Session
     ) -> None:
         return None
 
     def drop_staging_table(
-        self, _table_cls: Type[CSVTableProtocol], _session: so.Session
+        self, _table_cls: Type[FileTableProtocol], _session: so.Session
     ) -> None:
         return None
 
     def merge_replace(
         self,
-        _table_cls: Type[CSVTableProtocol],
+        _table_cls: Type[FileTableProtocol],
         _session: so.Session,
         _target_name: str,
         _pk_cols: list[str],
@@ -88,7 +86,7 @@ class FakeBackend(DatabaseBackend):
 
     def merge_upsert(
         self,
-        _table_cls: Type[CSVTableProtocol],
+        _table_cls: Type[FileTableProtocol],
         _session: so.Session,
         _target_name: str,
         _pk_cols: list[str],
@@ -99,7 +97,7 @@ class FakeBackend(DatabaseBackend):
 
     def merge_insert(
         self,
-        _table_cls: Type[CSVTableProtocol],
+        _table_cls: Type[FileTableProtocol],
         _session: so.Session,
         _target_name: str,
         *,
@@ -108,7 +106,7 @@ class FakeBackend(DatabaseBackend):
         return None
 
     def _pagination_column(
-        self, _table_cls: Type[CSVTableProtocol], _staging: sa.Table
+        self, _table_cls: Type[FileTableProtocol], _staging: sa.Table
     ) -> sa.ColumnElement[int]:
         return sa.literal_column("rowid")
 
@@ -116,43 +114,14 @@ class FakeBackend(DatabaseBackend):
     def _commits_between_pagination_batches(self) -> bool:
         return True
 
-    @staticmethod
-    def _normalize_fk_check_state(previous_state: str | int) -> str | int:
-        return previous_state
-
-    def disable_fk_check(self, session: so.Session) -> str | int:
+    def disable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int | None:
         self.calls.append(("disable_fk_check", session))
         return "enabled"
 
-    def enable_fk_check(self, session: so.Session) -> str | int:
-        self.calls.append(("enable_fk_check", session))
-        return "disabled"
-
-    def restore_fk_check(self, session: so.Session, previous_state: str | int) -> None:
+    def restore_fk_check(
+        self, session: so.Session, previous_state: str | int, *, mapper: Any | None = None
+    ) -> None:
         self.calls.append(("restore_fk_check", previous_state))
-
-    def create_materialized_view(
-        self,
-        bind: Engine | Connection,
-        name: str,
-        selectable: sa.sql.Select[Any],
-        *,
-        schema: str | None = None,
-        with_data: bool = True,
-        if_not_exists: bool = True,
-    ) -> None:
-        return None
-
-    def refresh_materialized_view(
-        self,
-        bind: Engine | Connection,
-        name: str,
-        *,
-        schema: str | None = None,
-        concurrently: bool = False,
-        declared_indexes: tuple = (),
-    ) -> None:
-        return None
 
 
 class _ComputedTable:
@@ -165,16 +134,7 @@ class _ComputedTable:
     )
 
 
-_ComputedTableCls = cast("Type[CSVTableProtocol]", _ComputedTable)
-
-
-def test_backend_capabilities_defaults():
-    caps = BackendCapabilities()
-
-    assert caps.supports_fast_load is False
-    assert caps.supports_unlogged_staging is False
-    assert caps.supports_fk_toggle is False
-    assert caps.supports_materialized_views is False
+_ComputedTableCls = cast("Type[FileTableProtocol]", _ComputedTable)
 
 
 def test_database_backend_is_abstract():
@@ -187,36 +147,9 @@ def test_fake_backend_can_implement_contract():
 
     assert backend.name == "fake"
     assert backend.dialect == Dialect.SQLITE
-    assert backend.capabilities.supports_fast_load is True
-    assert backend.capabilities.supports_fk_toggle is True
-    assert backend.supports_dialect(Dialect.SQLITE) is True
-    assert backend.supports_dialect(Dialect.POSTGRESQL) is False
+    assert backend.supports_replace_with_kept_indexes is True
     assert backend.resolve_index_strategy("auto") == "drop_rebuild"
     assert backend.resolve_index_strategy("keep") == "keep"
-    assert backend.load_staging_fast(cast("LoaderContext", None)) is None
-
-    with backend.merge_context(cast("Type[CSVTableProtocol]", None), cast(so.Session, None)):
-        pass
-
-
-def test_require_capability_passes_for_supported_feature():
-    backend = FakeBackend()
-
-    backend._require_capability("supports_fast_load", "fast loading")
-
-
-def test_require_capability_raises_for_unsupported_feature():
-    backend = FakeBackend()
-
-    with pytest.raises(NotImplementedError, match="does not support materialized views"):
-        backend._require_capability("supports_materialized_views", "materialized views")
-
-
-def test_require_capability_raises_for_unknown_flag():
-    backend = FakeBackend()
-
-    with pytest.raises(AttributeError, match="Unknown backend capability"):
-        backend._require_capability("not_a_capability", "something")
 
 
 def test_resolve_index_strategy_raises_for_invalid_value():
@@ -232,10 +165,10 @@ def test_insertable_column_names_exclude_computed_columns():
     assert backend._insertable_column_names(_ComputedTableCls) == ["id", "name"]
 
 
-def test_bulk_load_context_toggles_fk_and_restores(sqlite_session):
+def test_relaxed_foreign_keys_toggles_fk_and_restores(sqlite_session):
     backend = FakeBackend()
 
-    with backend.bulk_load_context(sqlite_session):
+    with backend.relaxed_foreign_keys(sqlite_session):
         pass
 
     assert backend.calls == [
@@ -244,33 +177,24 @@ def test_bulk_load_context_toggles_fk_and_restores(sqlite_session):
     ]
 
 
-def test_bulk_load_context_without_fk_toggle(sqlite_session):
-    backend = FakeBackend()
+def test_relaxed_foreign_keys_leaves_keys_enforced_when_backend_cannot_toggle(sqlite_session):
+    class NoFKBackend(FakeBackend):
+        def disable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int | None:
+            return super(FakeBackend, self).disable_fk_check(session, mapper=mapper)
 
-    with backend.bulk_load_context(sqlite_session, disable_fk=False):
+    backend = NoFKBackend()
+
+    with backend.relaxed_foreign_keys(sqlite_session):
         pass
 
     assert backend.calls == []
 
 
-def test_bulk_load_context_raises_when_capability_missing(sqlite_session):
-    class NoFKBackend(FakeBackend):
-        @property
-        def capabilities(self) -> BackendCapabilities:
-            return BackendCapabilities()
-
-    backend = NoFKBackend()
-
-    with pytest.raises(NotImplementedError, match="does not support foreign key toggling"):
-        with backend.bulk_load_context(sqlite_session):
-            pass
-
-
-def test_bulk_load_context_rolls_back_and_restores(sqlite_session):
+def test_relaxed_foreign_keys_rolls_back_and_restores(sqlite_session):
     backend = FakeBackend()
 
     with pytest.raises(RuntimeError, match="boom"):
-        with backend.bulk_load_context(sqlite_session):
+        with backend.relaxed_foreign_keys(sqlite_session):
             raise RuntimeError("boom")
 
     assert backend.calls == [
@@ -283,7 +207,6 @@ def test_backends_package_exports():
     import orm_loader.backends as backends
 
     assert backends.DatabaseBackend is DatabaseBackend
-    assert backends.BackendCapabilities is BackendCapabilities
     assert backends.Dialect is Dialect
     assert backends.resolve_backend is resolve_backend
 
@@ -309,56 +232,6 @@ def test_resolve_backend_raises_for_unknown_dialect():
 
     with pytest.raises(NotImplementedError, match="Unsupported SQLAlchemy dialect"):
         resolve_backend(cast(Engine, _Unknown()))
-
-
-def test_unsupported_fake_backend_inherits_default_materialized_view_guards():
-    backend = FakeBackend()
-
-    with pytest.raises(NotImplementedError, match="does not support materialized views"):
-        backend.drop_materialized_view(cast(Engine, None), "mv_test")
-
-    with pytest.raises(NotImplementedError, match="does not support materialized views"):
-        backend.create_materialized_view_index(cast(Engine, None), "mv_test", cast(Any, None))
-
-
-def test_capable_backend_inheriting_default_materialized_view_methods_fails_loudly():
-    class CapableBackend(FakeBackend):
-        create_materialized_view = DatabaseBackend.create_materialized_view
-        refresh_materialized_view = DatabaseBackend.refresh_materialized_view
-
-        @property
-        def capabilities(self) -> BackendCapabilities:
-            return BackendCapabilities(
-                supports_fast_load=True,
-                supports_fk_toggle=True,
-                supports_materialized_views=True,
-            )
-
-    backend = CapableBackend()
-
-    with pytest.raises(NotImplementedError, match="has not implemented drop_materialized_view"):
-        backend.drop_materialized_view(cast(Engine, None), "mv_test")
-
-    with pytest.raises(
-        NotImplementedError,
-        match="has not implemented create_materialized_view",
-    ):
-        backend.create_materialized_view(
-            cast(Engine, None), "mv_test", cast(Any, None)
-        )
-
-    with pytest.raises(
-        NotImplementedError,
-        match="has not implemented refresh_materialized_view",
-    ):
-        backend.refresh_materialized_view(cast(Engine, None), "mv_test")
-
-    with pytest.raises(
-        NotImplementedError,
-        match="has not implemented create_materialized_view_index",
-    ):
-        backend.create_materialized_view_index(cast(Engine, None), "mv_test", cast(Any, None))
-
 
 def test_backends_import_does_not_require_psycopg():
     blocker = _BlockPsycopg()

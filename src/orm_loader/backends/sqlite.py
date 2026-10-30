@@ -1,32 +1,27 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping, Sequence
 import logging
-import sqlite3
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import pyarrow as pa
+import pyarrow.compute as pc
 import sqlalchemy as sa
 import sqlalchemy.orm as so
-from sqlalchemy import event, text
+from sqlalchemy import text
 from sqlalchemy.dialects import sqlite as sqlite_dialect
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.schema import DropTable
 from sqlalchemy.sql.compiler import IdentifierPreparer
 
-from .base import BackendCapabilities, DatabaseBackend, Dialect
+from .base import DatabaseBackend, Dialect
 
 if TYPE_CHECKING:
     from oa_configurator import ResolvedDatabase
-    from sqlalchemy.engine import Connection, Engine
 
-    from ..tables.typing import CSVTableProtocol
+    from ..loaders.loader import LoaderContext
+    from ..tables.typing import FileTableProtocol
 
 
 logger = logging.getLogger(__name__)
-VALID_SQLITE_JOURNAL_MODES = frozenset(
-    {"DELETE", "TRUNCATE", "PERSIST", "MEMORY", "WAL", "OFF"}
-)
 
 
 class SQLiteBackend(DatabaseBackend):
@@ -41,9 +36,6 @@ class SQLiteBackend(DatabaseBackend):
         staging_schema: str | None = None,
         resolved: ResolvedDatabase | None = None,
         physical_schemas: Mapping[str, str | None] | None = None,
-        busy_timeout_ms: int = 60000,
-        journal_mode: str = "WAL",
-        defer_foreign_keys: bool = True,
     ) -> None:
         if staging_schema is not None:
             raise ValueError(
@@ -56,19 +48,6 @@ class SQLiteBackend(DatabaseBackend):
             resolved=resolved,
             physical_schemas=physical_schemas,
         )
-        self.busy_timeout_ms = busy_timeout_ms
-        self.journal_mode = self._validate_journal_mode(journal_mode)
-        self.defer_foreign_keys = defer_foreign_keys
-
-    @staticmethod
-    def _validate_journal_mode(journal_mode: str) -> str:
-        normalised = journal_mode.strip().upper()
-        if normalised not in VALID_SQLITE_JOURNAL_MODES:
-            raise ValueError(
-                "Unsupported SQLite journal_mode "
-                f"{journal_mode!r}. Expected one of: {sorted(VALID_SQLITE_JOURNAL_MODES)}"
-            )
-        return normalised
 
     @staticmethod
     def _normalize_fk_check_state(previous_state: str | int) -> str:
@@ -101,68 +80,73 @@ class SQLiteBackend(DatabaseBackend):
         return sqlite_dialect.dialect().identifier_preparer
 
     @property
-    def capabilities(self) -> BackendCapabilities:
-        return BackendCapabilities(
-            supports_fast_load=False,
-            supports_unlogged_staging=False,
-            supports_fk_toggle=True,
-            supports_materialized_views=False,
-            supports_replace_with_kept_indexes=True,
-        )
-
-    @property
     def default_index_strategy(self) -> str:
         return "keep"
 
-    def create_staging_table(
+    def insert_batches(
         self,
-        table_cls: type["CSVTableProtocol"],
-        session: so.Session,
+        ctx: "LoaderContext",
+        staging: sa.Table,
+        batches: Iterable[pa.Table],
+        columns: Sequence[str],
     ) -> None:
-        staging_name = self.staging_name_for_table(table_cls.__tablename__)
-        session.execute(
-            DropTable(sa.Table(staging_name, sa.MetaData()), if_exists=True),
-            bind_arguments={"mapper": table_cls},
-        )
+        """Insert the batches with one native ``executemany`` per batch.
 
-        metadata = sa.MetaData()
-        staging_columns = [
-            sa.Column(col.name, col.type, nullable=True)
-            for col in table_cls.__table__.columns
-        ]
-        staging_table = sa.Table(
-            staging_name, metadata, *staging_columns, schema=table_cls.__table__.schema
+        The statement goes straight to the DB-API without per-value bind
+        processing, so the connection's schema translation is applied here.
+        Dates, timestamps and decimals are passed as the text SQLAlchemy
+        itself stores for them.
+        """
+        connection = ctx.session.connection(bind_arguments={"mapper": ctx.tableclass})
+        preparer = connection.dialect.identifier_preparer
+        table_ref = self._staging_reference(staging, connection)
+        sql = (
+            f"INSERT INTO {table_ref} ({', '.join(preparer.quote(c) for c in columns)}) "
+            f"VALUES ({', '.join('?' for _ in columns)})"
         )
-        metadata.create_all(
-            bind=session.connection(bind_arguments={"mapper": table_cls}), tables=[staging_table]
-        )
-        session.commit()
+        for table in batches:
+            values = [self._storable(table[name]) for name in columns]
+            connection.exec_driver_sql(sql, list(zip(*values)))
 
-    def drop_staging_table(
+    @staticmethod
+    def _storable(column: pa.ChunkedArray) -> list[Any]:
+        """Return a column as Python values SQLite can bind."""
+        kind = column.type
+        if pa.types.is_date(kind) or pa.types.is_timestamp(kind) or pa.types.is_decimal(kind):
+            column = pc.cast(column, pa.string())
+        return column.to_pylist()
+
+    def evaluate_default(
         self,
-        table_cls: type["CSVTableProtocol"],
         session: so.Session,
-    ) -> None:
-        staging_name = self.staging_name_for_table(table_cls.__tablename__)
-        session.execute(
-            DropTable(sa.Table(staging_name, sa.MetaData()), if_exists=True),
-            bind_arguments={"mapper": table_cls},
-        )
+        table_cls: type["FileTableProtocol"],
+        expression: sa.ColumnElement[Any],
+        column_type: Any,
+    ) -> Any:
+        """Evaluate without a cast: SQLite casts a date to the integer of its year."""
+        return session.execute(sa.select(expression), bind_arguments={"mapper": table_cls}).scalar_one()
 
-    def disable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int:
+    def disable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int | None:
+        """Turn ``PRAGMA foreign_keys`` off and return its previous value.
+
+        SQLite ignores the pragma inside an open transaction, so the state is
+        read back and a pragma that did not take effect raises.
+
+        Raises
+        ------
+        RuntimeError
+            The connection kept enforcing foreign keys.
+        """
         execute_options = {"bind_arguments": {"mapper": mapper}} if mapper is not None else {}
         previous_state = session.execute(text("PRAGMA foreign_keys"), **execute_options).scalar()
+        if not isinstance(previous_state, int):
+            raise RuntimeError("Expected SQLite FK state to be an int")
         session.execute(text("PRAGMA foreign_keys = OFF"), **execute_options)
-        if not isinstance(previous_state, int):
-            raise RuntimeError("Expected SQLite FK state to be an int")
-        return previous_state
-
-    def enable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int:
-        execute_options = {"bind_arguments": {"mapper": mapper}} if mapper is not None else {}
-        previous_state = session.execute(text("PRAGMA foreign_keys"), **execute_options).scalar()
-        session.execute(text("PRAGMA foreign_keys = ON"), **execute_options)
-        if not isinstance(previous_state, int):
-            raise RuntimeError("Expected SQLite FK state to be an int")
+        if session.execute(text("PRAGMA foreign_keys"), **execute_options).scalar():
+            raise RuntimeError(
+                "SQLite ignored PRAGMA foreign_keys = OFF because the connection is inside a transaction. "
+                "Commit the session's pending writes before loading."
+            )
         return previous_state
 
     def restore_fk_check(
@@ -177,13 +161,13 @@ class SQLiteBackend(DatabaseBackend):
         session.execute(text(f"PRAGMA foreign_keys = {safe_state}"), **execute_options)
 
     def _pagination_column(
-        self, table_cls: type["CSVTableProtocol"], staging: sa.Table
+        self, table_cls: type["FileTableProtocol"], staging: sa.Table
     ) -> sa.ColumnElement[int]:
         """SQLite's implicit rowid is already gapless and indexed."""
         return sa.literal_column("rowid")
 
     def _ensure_pagination_index(
-        self, table_cls: type["CSVTableProtocol"], staging: sa.Table, session: so.Session
+        self, table_cls: type["FileTableProtocol"], staging: sa.Table, session: so.Session
     ) -> None:
         """No-op: rowid needs no index, and the staging table has no _rownum column."""
         return
@@ -198,9 +182,10 @@ class SQLiteBackend(DatabaseBackend):
 
     def merge_replace(
         self,
-        table_cls: type["CSVTableProtocol"],
+        table_cls: type["FileTableProtocol"],
         session: so.Session,
         pk_cols: list[str],
+        staging: sa.Table,
         *,
         merge_batch_size: int | None = None,
         validate_deferred_fks: bool = True,
@@ -215,7 +200,6 @@ class SQLiteBackend(DatabaseBackend):
         """
         self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
-        staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
 
         # SQLite's DELETE has no USING, so staging keys go in a subquery. IN
         # rather than a correlated EXISTS, which rescans the unindexed staging
@@ -235,17 +219,17 @@ class SQLiteBackend(DatabaseBackend):
 
     def merge_upsert(
         self,
-        table_cls: type["CSVTableProtocol"],
+        table_cls: type["FileTableProtocol"],
         session: so.Session,
         pk_cols: list[str],
+        staging: sa.Table,
         *,
         merge_batch_size: int | None = None,
         validate_deferred_fks: bool = True,
     ) -> None:
         self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
-        staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
-        insertable_cols = self._insertable_column_names(table_cls)
+        insertable_cols = self._insertable_column_names(table_cls, staging)
 
         def _upsert(select_: Any) -> sa.Insert:
             return (
@@ -263,16 +247,16 @@ class SQLiteBackend(DatabaseBackend):
 
     def merge_insert(
         self,
-        table_cls: type["CSVTableProtocol"],
+        table_cls: type["FileTableProtocol"],
         session: so.Session,
+        staging: sa.Table,
         *,
         merge_batch_size: int | None = None,
         validate_deferred_fks: bool = True,
     ) -> None:
         self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
-        staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
-        insertable_cols = self._insertable_column_names(table_cls)
+        insertable_cols = self._insertable_column_names(table_cls, staging)
         non_paginated_select = sa.select(*(staging.c[c] for c in insertable_cols))
 
         def _insert(select_: Any) -> sa.Insert:
@@ -281,59 +265,3 @@ class SQLiteBackend(DatabaseBackend):
         for batch_range in self._paginate_batches(table_cls, staging, session, merge_batch_size):
             select_ = non_paginated_select if batch_range is None else non_paginated_select.where(batch_range)
             session.execute(_insert(select_))
-
-    def configure_dbapi_connection(self, dbapi_connection:  sa.engine.interfaces.DBAPIConnection) -> None:
-        if dbapi_connection.__class__.__module__.startswith("sqlite3"):
-            cursor = dbapi_connection.cursor()
-            cursor.execute(f"PRAGMA busy_timeout = {self.busy_timeout_ms}")
-            cursor.execute(f"PRAGMA journal_mode = {self.journal_mode}")
-            cursor.execute("PRAGMA foreign_keys = ON;")
-            if self.defer_foreign_keys:
-                cursor.execute("PRAGMA defer_foreign_keys = ON;")
-            cursor.close()
-
-    def install_engine_hooks(self, engine: "Engine") -> None:
-        @event.listens_for(engine, "connect")
-        def _enable_sqlite_foreign_keys(
-            dbapi_connection: sa.engine.interfaces.DBAPIConnection, 
-            _connection_record: Any
-        ) -> None:
-            self.configure_dbapi_connection(dbapi_connection)
-
-    def explain_fk_error(
-        self,
-        session: so.Session,
-        exc: IntegrityError,
-        *,
-        mapper: Any | None = None,
-        raise_error: bool = True,
-    ) -> None:
-        bind: Engine | Connection = session.get_bind(mapper=mapper)
-        if bind.dialect.name != Dialect.SQLITE:
-            raise exc
-
-        with self._as_connection(bind) as conn:
-            rows = conn.execute(text("PRAGMA foreign_key_check")).fetchall()
-
-        if rows:
-            for row in rows:
-                logger.error(
-                    "FK violation: table=%s rowid=%s references=%s fk_index=%s",
-                    row[0], row[1], row[2], row[3]
-                )
-
-        if raise_error:
-            raise exc
-
-    def restore_journal_mode(self, db_path: Path) -> None:
-        timeout_s = max(self.busy_timeout_ms / 1000, 5)
-        try:
-            with sqlite3.connect(db_path.resolve(), timeout=timeout_s) as conn:
-                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-                conn.execute("PRAGMA journal_mode = DELETE")
-                conn.commit()
-        except sqlite3.OperationalError as exc:
-            raise RuntimeError(
-                "Failed to restore SQLite journal mode. "
-                "Close or dispose active SQLite connections before calling this helper."
-            ) from exc
