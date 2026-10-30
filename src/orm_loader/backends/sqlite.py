@@ -12,7 +12,7 @@ from sqlalchemy import text
 from sqlalchemy.dialects import sqlite as sqlite_dialect
 from sqlalchemy.sql.compiler import IdentifierPreparer
 
-from .base import BackendCapabilities, DatabaseBackend, Dialect
+from .base import DatabaseBackend, Dialect
 
 if TYPE_CHECKING:
     from oa_configurator import ResolvedDatabase
@@ -78,15 +78,6 @@ class SQLiteBackend(DatabaseBackend):
     @property
     def identifier_preparer(self) -> IdentifierPreparer:
         return sqlite_dialect.dialect().identifier_preparer
-
-    @property
-    def capabilities(self) -> BackendCapabilities:
-        return BackendCapabilities(
-            supports_unlogged_staging=False,
-            supports_fk_toggle=True,
-            supports_materialized_views=False,
-            supports_replace_with_kept_indexes=True,
-        )
 
     @property
     def default_index_strategy(self) -> str:

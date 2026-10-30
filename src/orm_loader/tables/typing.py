@@ -1,4 +1,4 @@
-from typing import Protocol, ClassVar, runtime_checkable, TYPE_CHECKING, Optional, Type, Dict, Any, Unpack, TypedDict
+from typing import Protocol, ClassVar, runtime_checkable, TYPE_CHECKING, Optional, Dict, Any, Unpack, TypedDict
 import sqlalchemy.orm as so
 import sqlalchemy as sa
 from collections.abc import Mapping
@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     from oa_configurator import ResolvedDatabase
 
     from ..conversion import ConversionPolicy
-    from ..loaders import FileReader, LoadReport, LoaderContext
+    from ..loaders import FileReader, LoadReport
 
 class ToDictKwargs(TypedDict, total=False):
     include_nulls: bool
@@ -73,14 +73,6 @@ class FileTableProtocol(ORMTableProtocol, Protocol):
     """
 
     @classmethod
-    def create_staging_table(
-        cls, session: so.Session, *, staging_schema_tag: str | None = None
-    ) -> None: ...
-
-    @classmethod
-    def load_staging(cls: Type["FileTableProtocol"], loader_context: "LoaderContext", reader: "FileReader") -> int: ...
-
-    @classmethod
     def load_file(
         cls,
         session: so.Session,
@@ -118,9 +110,6 @@ class FileTableProtocol(ORMTableProtocol, Protocol):
         resolved: Optional["ResolvedDatabase"] = None,
         physical_schemas: Optional[Mapping[str, str | None]] = None,
     ) -> None: ...
-
-    @classmethod
-    def drop_staging_table(cls, session: so.Session, *, staging_schema_tag: str | None = None) -> None: ...
 
     @classmethod
     def validate_foreign_keys(

@@ -82,10 +82,7 @@ def test_postgres_backend_identity_and_capabilities():
 
     assert backend.name == "postgres"
     assert backend.dialect == Dialect.POSTGRESQL
-    assert backend.supports_dialect(Dialect.POSTGRESQL) is True
-    assert backend.capabilities.supports_unlogged_staging is True
-    assert backend.capabilities.supports_fk_toggle is True
-    assert backend.capabilities.supports_materialized_views is True
+    assert backend.supports_replace_with_kept_indexes is True
 
 
 @pytest.mark.parametrize("merge_batch_size", [0, -1])
@@ -562,7 +559,7 @@ def _simple_rows(session) -> list[tuple[int, str]]:
 
 
 def test_staging_table_has_the_target_columns_and_an_identity_row_number(pg_session):
-    SimpleTable.create_staging_table(pg_session, staging_schema_tag=STAGING_SCHEMA)
+    resolve_backend(pg_session, staging_schema_tag=STAGING_SCHEMA, mapper=SimpleTable).create_staging_table(SimpleTable, pg_session)
     staging_name = resolve_backend(pg_session).staging_name_for_table(SimpleTable.__tablename__)
     cols = pg_session.execute(sa.text(
         "SELECT column_name, data_type FROM information_schema.columns"

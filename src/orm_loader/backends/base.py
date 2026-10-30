@@ -5,8 +5,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Generator, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
-from functools import wraps
-from typing import TYPE_CHECKING, Any, Callable, ClassVar, ParamSpec, Type, TypeVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Type
 
 import pyarrow as pa
 import sqlalchemy as sa
@@ -27,7 +26,6 @@ from sqlalchemy.sql.compiler import IdentifierPreparer
 
 if TYPE_CHECKING:
     from ..loaders.loader import LoaderContext
-    from ..mappers.materialised_view_contracts import MaterializedViewIndex
     from ..tables.typing import FileTableProtocol
 
 logger = logging.getLogger(__name__)
@@ -55,21 +53,6 @@ class DedupeResult:
     def rows_after(self) -> int:
         """Rows left in the staging table."""
         return self.rows_before - self.rows_removed
-
-
-@dataclass(frozen=True)
-class BackendCapabilities:
-    """
-    Capability flags exposed by a database backend.
-
-    These defaults are intentionally conservative. Concrete backends should
-    opt into capabilities explicitly.
-    """
-
-    supports_unlogged_staging: bool = False
-    supports_fk_toggle: bool = False
-    supports_materialized_views: bool = False
-    supports_replace_with_kept_indexes: bool = False
 
 
 class ForeignKeyViolationError(RuntimeError):
@@ -130,41 +113,20 @@ def staging_schema_claim(physical_schema: str | None = None, *, reserved: bool =
     )
 
 
-P = ParamSpec("P")
-R = TypeVar("R")
-
-
-def requires_capability(
-    capability_name: str,
-    feature_name: str,
-) -> Callable[[Callable[P, R]], Callable[P, R]]:
-    """Guard a concrete backend method with a capability requirement.
-
-    Subclass overrides must apply this decorator themselves; Python does not
-    automatically retain decorators when a method is overridden.
-    """
-
-    def decorator(method: Callable[P, R]) -> Callable[P, R]:
-        @wraps(method)
-        def guarded(*args: P.args, **kwargs: P.kwargs) -> R:
-            # ParamSpec keeps the complete method signature, but type checkers
-            # cannot infer that args[0] is the backend instance here.
-            self = cast("DatabaseBackend", args[0])
-            self._require_capability(capability_name, feature_name)
-            return method(*args, **kwargs)
-
-        return guarded
-
-    return decorator
-
-
 class DatabaseBackend(ABC):
     """
     Abstract base class for database-specific loader behavior.
 
     This class defines the stable contract for future backend implementations
     without changing existing loader orchestration yet.
+
+    Attributes
+    ----------
+    supports_replace_with_kept_indexes
+        Whether a replace merge works while the target's indexes are kept.
     """
+
+    supports_replace_with_kept_indexes: ClassVar[bool] = True
 
     def __init__(
         self,
@@ -259,15 +221,6 @@ class DatabaseBackend(ABC):
         """The dialect-specific identifier preparer used to quote/escape SQL identifiers."""
 
     @property
-    @abstractmethod
-    def capabilities(self) -> BackendCapabilities:
-        """Capability flags supported by this backend."""
-
-    def supports_dialect(self, dialect: Dialect) -> bool:
-        """Return ``True`` when the backend handles the given dialect."""
-        return self.dialect == dialect
-
-    @property
     def default_index_strategy(self) -> str:
         """Default index strategy used when callers request ``auto``."""
         return "drop_rebuild"
@@ -285,19 +238,6 @@ class DatabaseBackend(ABC):
             return self.default_index_strategy
         return index_strategy
 
-    def _require_capability(self, capability_name: str, feature_name: str) -> None:
-        """
-        Raise a clear error when a backend capability is not supported.
-        """
-        if not hasattr(self.capabilities, capability_name):
-            raise AttributeError(
-                f"Unknown backend capability {capability_name!r} on {type(self.capabilities).__name__}"
-            )
-        if not getattr(self.capabilities, capability_name):
-            raise NotImplementedError(
-                f"Backend '{self.name}' does not support {feature_name}"
-            )
-        
     @contextmanager
     def _as_connection(
         self,
@@ -948,90 +888,3 @@ class DatabaseBackend(ABC):
                 self.restore_fk_check(session, previous_state, mapper=mapper)
                 logger.info(f"{scope}Foreign key checks restored.")
 
-    @requires_capability("supports_materialized_views", "materialized views")
-    def create_materialized_view(
-        self,
-        bind: "Engine | Connection",
-        name: str,
-        selectable: sa.sql.Select[Any],
-        *,
-        schema: str | None = None,
-        with_data: bool = True,
-        if_not_exists: bool = True,
-    ) -> None:
-        """Create a materialized view for the supplied selectable.
-
-        *schema* is the view's already-resolved physical schema (or None for
-        the connection's own default); callers resolve which
-        schema_translate_map key to use before calling.
-        """
-        raise NotImplementedError(
-            f"Backend '{self.name}' has not implemented create_materialized_view()"
-        )
-
-    @requires_capability("supports_materialized_views", "materialized views")
-    def refresh_materialized_view(
-        self,
-        bind: "Engine | Connection",
-        name: str,
-        *,
-        schema: str | None = None,
-        concurrently: bool = False,
-        declared_indexes: tuple["MaterializedViewIndex", ...] = (),
-    ) -> None:
-        """Refresh a materialized view.
-
-        *schema* is the view's already-resolved physical schema, matching
-        ``create_materialized_view``.
-
-        ``declared_indexes`` lets supporting backends validate a concurrent
-        refresh request without defining a second catalog-based eligibility
-        rule. Other backends may ignore it.
-        """
-        raise NotImplementedError(
-            f"Backend '{self.name}' has not implemented refresh_materialized_view()"
-        )
-
-    @requires_capability("supports_materialized_views", "materialized views")
-    def drop_materialized_view(
-        self,
-        bind: "Engine | Connection",
-        name: str,
-        *,
-        schema: str | None = None,
-        if_exists: bool = True,
-        cascade: bool = False,
-    ) -> None:
-        """Drop a materialized view.
-
-        *schema* is the view's already-resolved physical schema, matching
-        ``create_materialized_view``. This is deliberately non-abstract: the
-        default implementation requires the capability flag and then raises
-        ``NotImplementedError``. Older third-party backend subclasses need
-        no override to receive a clear error when they do not support this
-        operation.
-        """
-        raise NotImplementedError(
-            f"Backend '{self.name}' has not implemented drop_materialized_view()"
-        )
-
-    @requires_capability("supports_materialized_views", "materialized views")
-    def create_materialized_view_index(
-        self,
-        bind: "Engine | Connection",
-        name: str,
-        index: "MaterializedViewIndex",
-        *,
-        schema: str | None = None,
-        if_not_exists: bool = True,
-    ) -> None:
-        """Create an index on a materialized view.
-
-        *schema* is the view's already-resolved physical schema, matching
-        ``create_materialized_view``. This is deliberately non-abstract for
-        the same compatibility reason as :meth:`drop_materialized_view`.
-        """
-        raise NotImplementedError(
-            f"Backend '{self.name}' has not implemented "
-            "create_materialized_view_index()"
-        )

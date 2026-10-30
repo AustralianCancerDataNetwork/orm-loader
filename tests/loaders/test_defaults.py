@@ -109,7 +109,7 @@ def test_a_key_in_the_file_is_loaded_and_may_not_be_blank(dialect_session, tmp_p
         _keyed(dialect_session, tmp_path, "keyed_id,keyed_name\n,a\n")
 
 
-def test_an_expression_default_is_evaluated_for_each_batch_that_needs_it(dialect_session, tmp_path, monkeypatch):
+def test_an_expression_default_is_evaluated_once_for_the_load(dialect_session, tmp_path, monkeypatch):
     from orm_loader.backends import resolve_backend
     from orm_loader.loaders import DelimitedTextReader
 
@@ -130,7 +130,7 @@ def test_an_expression_default_is_evaluated_for_each_batch_that_needs_it(dialect
     table.load_file(dialect_session, path, staging_schema_tag=tag, reader=reader)
     batches = len(list(DelimitedTextReader(path, DemoDefaultKinds.model_columns(), block_size=64 << 10).batches()))
     now_calls = [c for c in calls if isinstance(c, sa.sql.functions.FunctionElement)]
-    assert batches > 1 and len(now_calls) == batches
+    assert batches > 1 and len(now_calls) == 1
 
 
 def test_a_default_the_handler_cannot_read_is_an_error_naming_the_column(dialect_session, tmp_path):

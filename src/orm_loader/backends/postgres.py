@@ -16,13 +16,14 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.sql.compiler import IdentifierPreparer
 
+from ..mappers.materialised_view_mixin import MaterializedViewBackend
 from ..mappers.materialised_view_errors import (
     ConcurrentRefreshNotEligibleError,
     MaterializationError,
     MaterializationFailure,
     MaterializationOperation,
 )
-from .base import BackendCapabilities, DatabaseBackend, requires_capability
+from .base import DatabaseBackend
 
 if TYPE_CHECKING:
     from oa_configurator import ResolvedDatabase
@@ -35,7 +36,7 @@ if TYPE_CHECKING:
 _VALID_PG_REPLICATION_ROLES = frozenset({"origin", "local", "replica"})
 
 
-class PostgresBackend(DatabaseBackend):
+class PostgresBackend(DatabaseBackend, MaterializedViewBackend):
     def __init__(
         self,
         *,
@@ -66,28 +67,6 @@ class PostgresBackend(DatabaseBackend):
     @property
     def identifier_preparer(self) -> IdentifierPreparer:
         return postgresql.dialect().identifier_preparer
-
-    @property
-    def capabilities(self) -> BackendCapabilities:
-        return BackendCapabilities(
-            supports_unlogged_staging=True,
-            supports_fk_toggle=True,
-            supports_materialized_views=True,
-            supports_replace_with_kept_indexes=True,
-        )
-
-    def evaluate_default(
-        self,
-        session: so.Session,
-        table_cls: type["FileTableProtocol"],
-        expression: sa.ColumnElement[Any],
-        column_type: Any,
-    ) -> Any:
-        """Evaluate on a separate connection, because the session's is busy with the COPY."""
-        bind = session.get_bind(mapper=table_cls)
-        engine = bind.engine if isinstance(bind, sa.Connection) else bind
-        with engine.connect() as connection:
-            return connection.execute(sa.select(sa.cast(expression, column_type))).scalar_one()
 
     def _staging_table(self, table_cls: type["FileTableProtocol"], columns: Sequence[sa.Column[Any]]) -> sa.Table:
         """Unlogged, with an identity column, which paginates the merge in O(N log N) without an index."""
@@ -269,7 +248,6 @@ class PostgresBackend(DatabaseBackend):
                 table_cls, session, batch_range, validate_deferred_fks=validate_deferred_fks
             )
 
-    @requires_capability("supports_materialized_views", "materialized views")
     def create_materialized_view(
         self,
         bind: Engine | Connection,
@@ -303,7 +281,6 @@ class PostgresBackend(DatabaseBackend):
                     )
                 ) from error
 
-    @requires_capability("supports_materialized_views", "materialized views")
     def refresh_materialized_view(
         self,
         bind: Engine | Connection,
@@ -344,7 +321,6 @@ class PostgresBackend(DatabaseBackend):
                     )
                 ) from error
 
-    @requires_capability("supports_materialized_views", "materialized views")
     def drop_materialized_view(
         self,
         bind: Engine | Connection,
@@ -374,7 +350,6 @@ class PostgresBackend(DatabaseBackend):
                     )
                 ) from error
 
-    @requires_capability("supports_materialized_views", "materialized views")
     def create_materialized_view_index(
         self,
         bind: Engine | Connection,

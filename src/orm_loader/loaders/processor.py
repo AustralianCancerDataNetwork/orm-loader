@@ -105,7 +105,8 @@ class BatchProcessor:
         rows read and rejected.
     evaluate
         Function that returns the value of a SQL expression default as a
-        column of the given type stores it.
+        column of the given type stores it. It is called once for each such
+        default when the processor is built.
 
     Attributes
     ----------
@@ -117,8 +118,7 @@ class BatchProcessor:
     -----
     A missing value takes the column's default, and a column the file lacks
     is filled with it. The default is read by the column's handler like a
-    value from the file. A SQL expression default is evaluated for each batch
-    that needs it. A missing value left in a non-nullable column is a
+    value from the file. A missing value left in a non-nullable column is a
     required value that is missing.
     """
 
@@ -142,16 +142,16 @@ class BatchProcessor:
         self.normalise = normalise
         self.table_name = tableclass.__tablename__
         model_columns = tableclass.model_columns()
-        self.defaults = tableclass.column_defaults() if normalise else {}
-        self.out_columns = [*columns, *(name for name in self.defaults if name not in columns)]
+        defaults = tableclass.column_defaults() if normalise else {}
+        self.out_columns = [*columns, *(name for name in defaults if name not in columns)]
         self.types = {name: underlying_type(model_columns[name].type) for name in self.out_columns}
         self.handlers = (
             {name: policy.for_column(self.types[name], self.table_name, name) for name in self.out_columns}
             if normalise
             else {}
         )
+        self.defaults = {name: self._evaluated(name, default, evaluate) for name, default in defaults.items()}
         self.required = [name for name in self.out_columns if not model_columns[name].nullable]
-        self.evaluate = evaluate
         self._literals: dict[str, pa.Scalar] = {}
         self.rejects = RejectsWriter(rejects_path)
         if policy.errors.on_error == "reject_row":
@@ -222,12 +222,16 @@ class BatchProcessor:
                 filled = pc.if_else(missing, self._fill_value(name, default), values)
                 results[name] = Interpretation(filled, invalid)
 
+    def _evaluated(self, name: str, default: Any, evaluate: Callable[[Any, Any], Any] | None) -> Any:
+        """Return a literal default as it is and the value of a SQL expression default."""
+        if not isinstance(default, sa.ClauseElement):
+            return default
+        if evaluate is None:
+            raise PolicyError(table_name=self.table_name, column_name=name, column_type="SQL expression default")
+        return evaluate(default, self.types[name])
+
     def _fill_value(self, name: str, default: Any) -> pa.Scalar:
-        """Return the scalar that fills a column: a literal is read once, an expression is evaluated for each batch."""
-        if isinstance(default, sa.ClauseElement):
-            if self.evaluate is None:
-                raise PolicyError(table_name=self.table_name, column_name=name, column_type="SQL expression default")
-            return self._read_default(name, self.evaluate(default, self.types[name]))
+        """Return the scalar that fills a column, read through the column's handler once."""
         if name not in self._literals:
             self._literals[name] = self._read_default(name, default)
         return self._literals[name]

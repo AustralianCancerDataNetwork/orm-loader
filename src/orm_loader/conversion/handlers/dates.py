@@ -1,9 +1,10 @@
-"""Handlers for date and timestamp columns, with the date formats and the default date parser."""
+"""Handlers for date and timestamp columns, with the date formats and the date parser."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any, ClassVar
 
 import pyarrow as pa
@@ -14,7 +15,6 @@ from ..values import NULL_STRING, Interpretation, no_failures, safe_cast
 from .base import ConvertingHandler
 
 DateShape = Callable[[pa.Array], tuple[pa.Array, pa.Array]]
-DateParser = Callable[[pa.Array, tuple[str, ...]], tuple[pa.Array, pa.Array]]
 
 
 class DateFormats:
@@ -31,7 +31,7 @@ class DateFormats:
     MONTHS
         Lowercase month abbreviations used by ``dd-mon-yyyy``.
     SHAPES
-        Shape function by format name; the one place a format is registered.
+        Read-only shape function by format name.
     """
 
     DEFAULT: ClassVar[tuple[str, ...]] = ("yyyymmdd", "dd-mon-yyyy", "yyyy-mm-dd")
@@ -69,23 +69,15 @@ class DateFormats:
         cut = pc.utf8_slice_codeunits
         return ok, pc.binary_join_element_wise(cut(values, 6, 10), cut(values, 0, 2), cut(values, 3, 5), "-")
 
-    SHAPES: ClassVar[dict[str, DateShape]] = {
-        "yyyymmdd": yyyymmdd,
-        "yyyy-mm-dd": yyyy_mm_dd,
-        "dd-mon-yyyy": dd_mon_yyyy,
-        "dd/mm/yyyy": dd_mm_yyyy,
-        "mm/dd/yyyy": mm_dd_yyyy,
-    }
-
-    @classmethod
-    def shape(cls, name: str) -> DateShape:
-        """Return the shape function for a format name."""
-        return cls.SHAPES[name]
-
-    @classmethod
-    def names(cls) -> tuple[str, ...]:
-        """Return every supported format name."""
-        return tuple(cls.SHAPES)
+    SHAPES: ClassVar[Mapping[str, DateShape]] = MappingProxyType(
+        {
+            "yyyymmdd": yyyymmdd,
+            "yyyy-mm-dd": yyyy_mm_dd,
+            "dd-mon-yyyy": dd_mon_yyyy,
+            "dd/mm/yyyy": dd_mm_yyyy,
+            "mm/dd/yyyy": mm_dd_yyyy,
+        }
+    )
 
 
 def parse_dates(values: pa.Array, formats: tuple[str, ...]) -> tuple[pa.Array, pa.Array]:
@@ -100,7 +92,7 @@ def parse_dates(values: pa.Array, formats: tuple[str, ...]) -> tuple[pa.Array, p
     values
         String array with missing values already set to null.
     formats
-        Ordered names from ``DateFormats.names()``.
+        Ordered keys of ``DateFormats.SHAPES``.
 
     Returns
     -------
@@ -111,7 +103,7 @@ def parse_dates(values: pa.Array, formats: tuple[str, ...]) -> tuple[pa.Array, p
     iso = pa.nulls(len(values), pa.string())
     matched = no_failures(len(values))
     for name in formats:
-        ok, candidate = DateFormats.shape(name)(values)
+        ok, candidate = DateFormats.SHAPES[name](values)
         ok = pc.and_(pc.fill_null(ok, False), pc.is_valid(candidate))
         ok = pc.and_(ok, pc.invert(matched))
         iso = pc.if_else(ok, candidate, iso)
@@ -132,26 +124,23 @@ class DateHandler(ConvertingHandler):
     Attributes
     ----------
     formats
-        Ordered names from ``DateFormats.names()``.
-    parser
-        Replaceable function with the signature of ``parse_dates``.
+        Ordered keys of ``DateFormats.SHAPES``.
     """
 
     distinct: ClassVar[bool] = True
 
     formats: tuple[str, ...] = DateFormats.DEFAULT
-    parser: DateParser = parse_dates
 
     def __post_init__(self) -> None:
-        unknown = [name for name in self.formats if name not in DateFormats.names()]
+        unknown = [name for name in self.formats if name not in DateFormats.SHAPES]
         if unknown:
-            raise ValueError(f"Unknown date formats {unknown}; choose from {sorted(DateFormats.names())}")
+            raise ValueError(f"Unknown date formats {unknown}; choose from {sorted(DateFormats.SHAPES)}")
 
     def arrow_type(self, sa_type: TypeEngine[Any]) -> pa.DataType:
         return pa.date32()
 
     def parse(self, cleaned: pa.Array, sa_type: TypeEngine[Any]) -> Interpretation:
-        return Interpretation(*self.parser(cleaned, self.formats))
+        return Interpretation(*parse_dates(cleaned, self.formats))
 
     def check(self, values: pa.Array, sa_type: TypeEngine[Any]) -> pa.Array | None:
         return pc.fill_null(pc.less(pc.year(values), 1), False)
@@ -200,7 +189,7 @@ class DateTimeHandler(DateHandler):
         if aware:
             return Interpretation(stamps, pc.or_(stamp_failed, pc.and_(pc.is_valid(cleaned), pc.invert(is_iso))))
         rest = pc.dictionary_encode(pc.if_else(is_iso, NULL_STRING, cleaned))
-        dates, invalid = self.parser(rest.dictionary, self.formats)
+        dates, invalid = parse_dates(rest.dictionary, self.formats)
         dates = pc.take(dates, rest.indices)
         invalid = pc.fill_null(pc.take(invalid, rest.indices), False)
         values = pc.coalesce(stamps, pc.cast(dates, target))

@@ -10,10 +10,9 @@ from typing import TYPE_CHECKING, Sequence, Type, cast, Any
 import pytest
 import sqlalchemy as sa
 import sqlalchemy.orm as so
-from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.engine import Engine
 
 from orm_loader.backends import (
-    BackendCapabilities,
     DatabaseBackend,
     Dialect,
     resolve_backend,
@@ -59,12 +58,6 @@ class FakeBackend(DatabaseBackend):
         from sqlalchemy.dialects import sqlite
 
         return sqlite.dialect().identifier_preparer
-
-    @property
-    def capabilities(self) -> BackendCapabilities:
-        return BackendCapabilities(
-            supports_fk_toggle=True,
-        )
 
     @staticmethod
     def staging_name_for_table(tablename: str) -> str:
@@ -130,29 +123,6 @@ class FakeBackend(DatabaseBackend):
     ) -> None:
         self.calls.append(("restore_fk_check", previous_state))
 
-    def create_materialized_view(
-        self,
-        bind: Engine | Connection,
-        name: str,
-        selectable: sa.sql.Select[Any],
-        *,
-        schema: str | None = None,
-        with_data: bool = True,
-        if_not_exists: bool = True,
-    ) -> None:
-        return None
-
-    def refresh_materialized_view(
-        self,
-        bind: Engine | Connection,
-        name: str,
-        *,
-        schema: str | None = None,
-        concurrently: bool = False,
-        declared_indexes: tuple = (),
-    ) -> None:
-        return None
-
 
 class _ComputedTable:
     __table__ = sa.Table(
@@ -167,14 +137,6 @@ class _ComputedTable:
 _ComputedTableCls = cast("Type[FileTableProtocol]", _ComputedTable)
 
 
-def test_backend_capabilities_defaults():
-    caps = BackendCapabilities()
-
-    assert caps.supports_unlogged_staging is False
-    assert caps.supports_fk_toggle is False
-    assert caps.supports_materialized_views is False
-
-
 def test_database_backend_is_abstract():
     with pytest.raises(TypeError):
         DatabaseBackend() # type: ignore
@@ -185,31 +147,9 @@ def test_fake_backend_can_implement_contract():
 
     assert backend.name == "fake"
     assert backend.dialect == Dialect.SQLITE
-    assert backend.capabilities.supports_fk_toggle is True
-    assert backend.supports_dialect(Dialect.SQLITE) is True
-    assert backend.supports_dialect(Dialect.POSTGRESQL) is False
+    assert backend.supports_replace_with_kept_indexes is True
     assert backend.resolve_index_strategy("auto") == "drop_rebuild"
     assert backend.resolve_index_strategy("keep") == "keep"
-
-
-def test_require_capability_passes_for_supported_feature():
-    backend = FakeBackend()
-
-    backend._require_capability("supports_fk_toggle", "foreign key toggling")
-
-
-def test_require_capability_raises_for_unsupported_feature():
-    backend = FakeBackend()
-
-    with pytest.raises(NotImplementedError, match="does not support materialized views"):
-        backend._require_capability("supports_materialized_views", "materialized views")
-
-
-def test_require_capability_raises_for_unknown_flag():
-    backend = FakeBackend()
-
-    with pytest.raises(AttributeError, match="Unknown backend capability"):
-        backend._require_capability("not_a_capability", "something")
 
 
 def test_resolve_index_strategy_raises_for_invalid_value():
@@ -267,7 +207,6 @@ def test_backends_package_exports():
     import orm_loader.backends as backends
 
     assert backends.DatabaseBackend is DatabaseBackend
-    assert backends.BackendCapabilities is BackendCapabilities
     assert backends.Dialect is Dialect
     assert backends.resolve_backend is resolve_backend
 
@@ -293,55 +232,6 @@ def test_resolve_backend_raises_for_unknown_dialect():
 
     with pytest.raises(NotImplementedError, match="Unsupported SQLAlchemy dialect"):
         resolve_backend(cast(Engine, _Unknown()))
-
-
-def test_unsupported_fake_backend_inherits_default_materialized_view_guards():
-    backend = FakeBackend()
-
-    with pytest.raises(NotImplementedError, match="does not support materialized views"):
-        backend.drop_materialized_view(cast(Engine, None), "mv_test")
-
-    with pytest.raises(NotImplementedError, match="does not support materialized views"):
-        backend.create_materialized_view_index(cast(Engine, None), "mv_test", cast(Any, None))
-
-
-def test_capable_backend_inheriting_default_materialized_view_methods_fails_loudly():
-    class CapableBackend(FakeBackend):
-        create_materialized_view = DatabaseBackend.create_materialized_view
-        refresh_materialized_view = DatabaseBackend.refresh_materialized_view
-
-        @property
-        def capabilities(self) -> BackendCapabilities:
-            return BackendCapabilities(
-                supports_fk_toggle=True,
-                supports_materialized_views=True,
-            )
-
-    backend = CapableBackend()
-
-    with pytest.raises(NotImplementedError, match="has not implemented drop_materialized_view"):
-        backend.drop_materialized_view(cast(Engine, None), "mv_test")
-
-    with pytest.raises(
-        NotImplementedError,
-        match="has not implemented create_materialized_view",
-    ):
-        backend.create_materialized_view(
-            cast(Engine, None), "mv_test", cast(Any, None)
-        )
-
-    with pytest.raises(
-        NotImplementedError,
-        match="has not implemented refresh_materialized_view",
-    ):
-        backend.refresh_materialized_view(cast(Engine, None), "mv_test")
-
-    with pytest.raises(
-        NotImplementedError,
-        match="has not implemented create_materialized_view_index",
-    ):
-        backend.create_materialized_view_index(cast(Engine, None), "mv_test", cast(Any, None))
-
 
 def test_backends_import_does_not_require_psycopg():
     blocker = _BlockPsycopg()

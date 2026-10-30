@@ -46,5 +46,4 @@ def test_file_table_protocol_conformance():
     assert isinstance(P, FileTableProtocol)  
     # Required class-level API
     assert callable(P.load_file)
-    assert callable(P.create_staging_table)
     assert callable(P.merge_from_staging)

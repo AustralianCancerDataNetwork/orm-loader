@@ -60,39 +60,6 @@ class FileLoadableTableInterface(ORMTableBase):
     __abstract__ = True
 
     @classmethod
-    def create_staging_table(
-        cls: Type[FileTableProtocol],
-        session: so.Session,
-        *,
-        staging_schema_tag: str | None = None,
-    ):
-        """
-        Create a fresh staging table for ingestion.
-
-        Any existing staging table with the same name is dropped first.
-        The staging table has the target's columns with their types and
-        nullability.
-
-        Parameters
-        ----------
-        session
-            An active SQLAlchemy session bound to an engine.
-        staging_schema_tag
-            schema_translate_map tag the staging table should be created
-            under. ``None`` means no schema qualification (backend-default
-            behavior).
-        Raises
-        ------
-        RuntimeError
-            If the session is not bound to an engine.
-        NotImplementedError
-            If the database dialect is unsupported.
-        """
-        _require_bind(session, cls)
-        backend = resolve_backend(session, staging_schema_tag=staging_schema_tag, mapper=cls)
-        backend.create_staging_table(cls, session)
-
-    @classmethod
     @contextmanager
     def manage_indices(
         cls: Type['FileTableProtocol'],
@@ -280,33 +247,6 @@ class FileLoadableTableInterface(ORMTableBase):
         )
 
     @classmethod
-    def load_staging(
-        cls: Type[FileTableProtocol],
-        loader_context: LoaderContext,
-        reader: FileReader,
-    ) -> int:
-        """
-        Create the staging table and load the file into it.
-
-        Parameters
-        ----------
-        loader_context
-            Context object containing session, path, and load options.
-        reader
-            Reader that yields the file as Arrow batches.
-
-        Returns
-        -------
-        int
-            Number of rows loaded into the staging table.
-        """
-        session, tag = loader_context.session, loader_context.staging_schema_tag
-        _require_bind(session, cls)
-        cls.create_staging_table(session, staging_schema_tag=tag)
-        staging = cls.get_staging_table(session, staging_schema_tag=tag)
-        return stage_file(loader_context, reader, staging)
-
-    @classmethod
     def load_file(
         cls: Type[FileTableProtocol],
         session: so.Session,
@@ -417,6 +357,7 @@ class FileLoadableTableInterface(ORMTableBase):
                 f"File name '{path.name}' does not match table '{cls.__tablename__}'"
             )
 
+        _require_bind(session, cls)
         if reader is not None and (chunksize is not None or quote_mode is not None):
             raise ValueError("chunksize and quote_mode configure the default reader; set them on the reader passed as `reader`")
         policy = policy or ConversionPolicy()
@@ -437,12 +378,14 @@ class FileLoadableTableInterface(ORMTableBase):
             resolved=resolved,
             physical_schemas=physical_schemas,
         )
-        if merge_strategy == "replace":
-            if backend.resolve_index_strategy(index_strategy) == "keep":
-                backend._require_capability(
-                    "supports_replace_with_kept_indexes",
-                    "merge_strategy='replace' with index_strategy='keep'",
-                )
+        if (
+            merge_strategy == "replace"
+            and not backend.supports_replace_with_kept_indexes
+            and backend.resolve_index_strategy(index_strategy) == "keep"
+        ):
+            raise NotImplementedError(
+                f"Backend '{backend.name}' does not support merge_strategy='replace' with index_strategy='keep'"
+            )
 
         loader_context = LoaderContext(
             tableclass=cls,
@@ -460,7 +403,9 @@ class FileLoadableTableInterface(ORMTableBase):
             # SQLite cannot switch foreign key checks inside a transaction, so relax before staging writes.
             with backend.relaxed_foreign_keys(session, mapper=cls, no_autoflush=False):
                 logger.info(f"Table `{cls.__tablename__}`: Loading data into staging table")
-                total = cls.load_staging(loader_context, reader)
+                backend.create_staging_table(cls, session)
+                staging = cls.get_staging_table(session, staging_schema_tag=staging_schema_tag)
+                total = stage_file(loader_context, reader, staging)
 
                 logger.info(f"Table `{cls.__tablename__}`: Merging staging data into target table")
                 with cls.manage_indices(session, index_strategy=index_strategy, staging_schema_tag=staging_schema_tag):
@@ -477,7 +422,7 @@ class FileLoadableTableInterface(ORMTableBase):
                         logger.info(f"Table `{cls.__tablename__}`: Validating deferred foreign keys.")
                         backend.validate_deferred_fks(cls, session)
         finally:
-            cls.drop_staging_table(session, staging_schema_tag=staging_schema_tag)
+            backend.drop_staging_table(cls, session)
 
         logger.info(f"Table `{cls.__tablename__}`: Successfully finished ingestion. Total rows: {total}")
         return total
@@ -634,24 +579,3 @@ class FileLoadableTableInterface(ORMTableBase):
             )
         else:
             raise ValueError(f"Unknown merge strategy '{merge_strategy}'")
-    
-    @classmethod
-    def drop_staging_table(
-        cls: Type[FileTableProtocol],
-        session: so.Session,
-        *,
-        staging_schema_tag: str | None = None,
-    ):
-        """
-        Drop the staging table if it exists.
-
-        Parameters
-        ----------
-        session
-            An active SQLAlchemy session bound to an engine.
-        staging_schema_tag
-            schema_translate_map tag the staging table lives in. ``None``
-            means no schema qualification (backend-default behavior).
-        """
-        backend = resolve_backend(session, staging_schema_tag=staging_schema_tag, mapper=cls)
-        backend.drop_staging_table(cls, session)

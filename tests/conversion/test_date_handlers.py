@@ -49,18 +49,6 @@ def test_unknown_date_format_name_is_rejected():
         DateHandler(formats=("yyyy/dd/mm",))
 
 
-def test_date_parser_is_replaceable():
-    calls = []
-
-    def parser(values, formats):
-        calls.append(len(values))
-        return pa.array([date(2000, 1, 1)] * len(values), pa.date32()), pa.array([False] * len(values))
-
-    values, _ = interpret(["a", "a", "b"], sa.Date(), ConversionPolicy(date=DateHandler(parser=parser)))
-    assert values == [date(2000, 1, 1)] * 3
-    assert calls == [2]
-
-
 def test_dictionary_encoded_dates_parse_the_same():
     column = pc.dictionary_encode(pa.array(["20200229", None, "", "20200301", "20200229"]))
     assert interpret(column, sa.Date())[0] == [
@@ -131,7 +119,7 @@ def test_arrow_strptime_still_rolls_impossible_dates_over():
 def test_default_formats_are_mutually_distinguishable():
     probes = ["20200229", "29-FEB-2020", "2020-02-29"]
     for name in DateFormats.DEFAULT:
-        matches = [bool(DateFormats.shape(name)(pa.array([p]))[0][0].as_py()) for p in probes]
+        matches = [bool(DateFormats.SHAPES[name](pa.array([p]))[0][0].as_py()) for p in probes]
         assert sum(matches) == 1
 
 

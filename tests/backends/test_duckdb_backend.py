@@ -9,6 +9,7 @@ import sqlalchemy as sa
 import sqlalchemy.orm as so
 from oa_configurator import CDMDatabaseConfig, ConnectionConfig, Resolver, StackConfig
 
+from orm_loader.mappers import MaterializedViewBackend
 from orm_loader.backends import Dialect, DuckDBBackend, staging_schema_claim
 from orm_loader.backends.base import DeferredForeignKeyViolationError
 from orm_loader.helpers.bootstrap import create_tables
@@ -159,11 +160,7 @@ def test_duckdb_backend_identity_and_capabilities():
 
     assert backend.name == "duckdb"
     assert backend.dialect == Dialect.DUCKDB
-    assert backend.supports_dialect(Dialect.DUCKDB) is True
-    assert backend.capabilities.supports_unlogged_staging is False
-    assert backend.capabilities.supports_fk_toggle is False
-    assert backend.capabilities.supports_materialized_views is False
-    assert backend.capabilities.supports_replace_with_kept_indexes is False
+    assert backend.supports_replace_with_kept_indexes is False
     assert backend.resolve_index_strategy("auto") == "drop_rebuild"
 
 
@@ -283,19 +280,8 @@ def test_relaxed_foreign_keys_on_duckdb_does_not_log_toggling(duckdb_session, ca
     assert "foreign key" not in caplog.text.lower()
 
 
-@pytest.mark.duckdb
-@pytest.mark.db_dialect
-def test_duckdb_backend_materialized_view_methods_raise(duckdb_session):
-    backend = DuckDBBackend()
-    selectable = sa.select(sa.literal(1).label("n"))
-    engine = duckdb_session.get_bind()
-
-    with pytest.raises(NotImplementedError, match="does not support materialized views"):
-        backend.create_materialized_view(engine, "mv_test", selectable)
-    with pytest.raises(NotImplementedError, match="does not support materialized views"):
-        backend.refresh_materialized_view(engine, "mv_test")
-    with pytest.raises(NotImplementedError, match="does not support materialized views"):
-        backend.drop_materialized_view(engine, "mv_test")
+def test_duckdb_backend_has_no_materialized_views():
+    assert not isinstance(DuckDBBackend(), MaterializedViewBackend)
 
 
 @pytest.mark.duckdb

@@ -12,6 +12,7 @@ import pyarrow.parquet as pq
 import pytest
 import sqlalchemy as sa
 
+from orm_loader.backends import resolve_backend
 from orm_loader.backends import STAGING_SCHEMA
 from orm_loader.conversion import ConversionPolicy, ErrorPolicy
 from orm_loader.helpers import ConversionError, RequiredValueError
@@ -46,7 +47,7 @@ def _write(tmp_path: Path, table, fmt: str, rows: list[tuple], header: list[str]
 
 def _stage(session, table, path: Path, reader=None, **context):
     tag = None if session.get_bind().dialect.name == "sqlite" else STAGING_SCHEMA
-    table.create_staging_table(session, staging_schema_tag=tag)
+    resolve_backend(session, staging_schema_tag=tag, mapper=table).create_staging_table(table, session)
     staging = table.get_staging_table(session, staging_schema_tag=tag)
     ctx = LoaderContext(tableclass=table, session=session, path=path, staging_schema_tag=tag, **context)
     loaded = stage_file(ctx, reader or open_reader(path, table.model_columns(), nulls=ctx.policy.nulls), staging)

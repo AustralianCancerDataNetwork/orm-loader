@@ -70,12 +70,10 @@ The handler for a column is the first match of: the entry in `ConversionPolicy.c
 | `FloatHandler` | `Float` | Decimal or exponent form; `Infinity` and values that overflow to infinity are errors | none |
 | `NumericHandler` | `Numeric` | Decimal form, converted to the declared precision and scale without rounding; a precision without a scale has scale 0 and a column without a precision reads as `decimal128(38, 18)` | none |
 | `BooleanHandler` | `Boolean` | `true`, `t`, `yes`, `y`, `1`, `on` and their opposites | `true_words`, `false_words` |
-| `DateHandler` | `Date` | One of `formats`, validated against the calendar; year 0 is an error | `formats`, `parser` |
-| `DateTimeHandler` | `DateTime` | ISO date and time, or a date in one of `formats`; see time zones below | `formats`, `parser` |
+| `DateHandler` | `Date` | One of `formats`, validated against the calendar; year 0 is an error | `formats` |
+| `DateTimeHandler` | `DateTime` | ISO date and time, or a date in one of `formats`; see time zones below | `formats` |
 
 Dates default to `yyyymmdd`, `dd-mon-yyyy` and `yyyy-mm-dd`. Ambiguous forms such as `02/01/2020` are never guessed; declare `DateHandler(formats=("dd/mm/yyyy",))` or `("mm/dd/yyyy",)`. A timestamp column reads date-only values with its own `formats`.
-
-`DateHandler(parser=...)` replaces the date parser with a function that has the signature of `parse_dates`.
 
 ### Time zones
 

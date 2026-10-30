@@ -11,6 +11,7 @@ from oa_configurator import Role
 from oa_configurator.testing import scoped_test_schema
 from orm_loader.mappers.materialised_view_contracts import MaterializedViewIndex
 from orm_loader.mappers.materialised_view_mixin import (
+    MaterializedViewBackend,
     MaterializedViewMixin,
     refresh_all_mvs,
     resolve_mv_refresh_order,
@@ -96,7 +97,7 @@ def test_refresh_mv_concurrently_against_postgres(pg_db) -> None:
             _IndexedPgMv.refresh_mv(conn, concurrently=True)
 
 
-class _FakeBackend:
+class _FakeBackend(MaterializedViewBackend):
     """Capture lifecycle calls without touching a real database."""
 
     def __init__(self) -> None:
@@ -417,3 +418,12 @@ def test_refresh_all_mvs_refreshes_in_dependency_order(fake_backend: _FakeBacken
 
     refreshed_names = [call[1][1] for call in fake_backend.calls]
     assert refreshed_names == ["mv_a", "mv_b"]
+
+
+def test_a_backend_without_materialized_views_is_refused(bind):
+    with pytest.raises(NotImplementedError, match="Backend 'sqlite' does not support materialized views"):
+        _NoIndexMv.create_mv(bind)
+    with pytest.raises(NotImplementedError, match="does not support materialized views"):
+        _NoIndexMv.refresh_mv(bind)
+    with pytest.raises(NotImplementedError, match="does not support materialized views"):
+        _NoIndexMv.drop_mv(bind)

@@ -8,6 +8,7 @@ import sqlalchemy.orm as so
 from sqlalchemy.dialects import sqlite as sqlite_dialect
 
 from orm_loader.backends import Dialect, SQLiteBackend
+from orm_loader.mappers import MaterializedViewBackend
 from tests.models import ComputedColumnTable, ReferencingChildTable, SimpleTable
 
 if TYPE_CHECKING:
@@ -51,10 +52,7 @@ def test_sqlite_backend_identity_and_capabilities():
 
     assert backend.name == "sqlite"
     assert backend.dialect == Dialect.SQLITE
-    assert backend.supports_dialect(Dialect.SQLITE) is True
-    assert backend.capabilities.supports_unlogged_staging is False
-    assert backend.capabilities.supports_fk_toggle is True
-    assert backend.capabilities.supports_materialized_views is False
+    assert backend.supports_replace_with_kept_indexes is True
     assert backend.resolve_index_strategy("auto") == "keep"
 
 
@@ -145,40 +143,8 @@ def test_sqlite_backend_normalize_fk_check_state():
         raise AssertionError("Expected ValueError for unrecognised string")
 
 
-def test_sqlite_backend_materialized_view_methods_raise(sqlite_engine):
-    backend = SQLiteBackend()
-    selectable = sa.select(sa.literal(1).label("n"))
-
-    try:
-        backend.create_materialized_view(sqlite_engine, "mv_test", selectable)
-    except NotImplementedError as exc:
-        assert "does not support materialized views" in str(exc)
-    else:
-        raise AssertionError("Expected create_materialized_view() to raise NotImplementedError")
-
-    try:
-        backend.refresh_materialized_view(sqlite_engine, "mv_test")
-    except NotImplementedError as exc:
-        assert "does not support materialized views" in str(exc)
-    else:
-        raise AssertionError("Expected refresh_materialized_view() to raise NotImplementedError")
-
-
-def test_sqlite_backend_drop_materialized_view_raises(sqlite_engine):
-    backend = SQLiteBackend()
-
-    with pytest.raises(NotImplementedError, match="does not support materialized views"):
-        backend.drop_materialized_view(sqlite_engine, "mv_test")
-
-
-def test_sqlite_backend_create_materialized_view_index_raises(sqlite_engine):
-    from orm_loader.mappers.materialised_view_contracts import MaterializedViewIndex
-
-    backend = SQLiteBackend()
-    index = MaterializedViewIndex(name="mv_test_uq", columns=("id",), unique=True)
-
-    with pytest.raises(NotImplementedError, match="does not support materialized views"):
-        backend.create_materialized_view_index(sqlite_engine, "mv_test", index)
+def test_sqlite_backend_has_no_materialized_views():
+    assert not isinstance(SQLiteBackend(), MaterializedViewBackend)
 
 
 def test_sqlite_backend_disable_fk_raises_when_pragma_returns_non_int():

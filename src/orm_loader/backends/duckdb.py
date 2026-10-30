@@ -13,7 +13,7 @@ from oa_configurator import (
 )
 from sqlalchemy.sql.compiler import IdentifierPreparer
 
-from .base import BackendCapabilities, DatabaseBackend, DeferredForeignKeyViolationError, Dialect
+from .base import DatabaseBackend, DeferredForeignKeyViolationError, Dialect
 
 if TYPE_CHECKING:
     from ..loaders.loader import LoaderContext
@@ -21,6 +21,8 @@ if TYPE_CHECKING:
 
 
 class DuckDBBackend(DatabaseBackend):
+    supports_replace_with_kept_indexes = False
+
     @staticmethod
     def staging_name_for_table(tablename: str) -> str:
         return f"_staging_{tablename}"
@@ -42,15 +44,6 @@ class DuckDBBackend(DatabaseBackend):
     # Batches per commit of the staging table. DuckDB keeps uncommitted rows in memory, so this bounds
     # the memory of a load.
     STAGING_COMMIT_EVERY: ClassVar[int] = 5
-
-    @property
-    def capabilities(self) -> BackendCapabilities:
-        return BackendCapabilities(
-            supports_unlogged_staging=False,
-            supports_fk_toggle=False,
-            supports_materialized_views=False,
-            supports_replace_with_kept_indexes=False,
-        )
 
     def _unenforced_constraints(
         self, tables: tuple[sa.Table, ...]
@@ -330,8 +323,8 @@ class DuckDBBackend(DatabaseBackend):
 
         DuckDB can't delete a still-referenced row, so replace is an UPDATE
         rather than delete-then-reinsert. Requires index_strategy to have
-        dropped indexes first; capabilities.supports_replace_with_kept_indexes
-        is False for this reason.
+        dropped indexes first; supports_replace_with_kept_indexes is False
+        for this reason.
 
         A self-referential FK can point an existing row at one this load
         hasn't inserted yet. Doing replace then insert as separate phases
