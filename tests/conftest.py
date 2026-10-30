@@ -80,6 +80,7 @@ def duckdb_session(duckdb_db):
     creates the staging schema and Base.metadata, then returns duckdb_db.session."""
     conn = duckdb_db.connection
     Base.metadata.create_all(conn)
+    conn.commit()
     return duckdb_db.session
 
 

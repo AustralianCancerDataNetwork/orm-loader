@@ -121,17 +121,9 @@ class FakeBackend(DatabaseBackend):
     def _commits_between_pagination_batches(self) -> bool:
         return True
 
-    @staticmethod
-    def _normalize_fk_check_state(previous_state: str | int) -> str | int:
-        return previous_state
-
-    def disable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int:
+    def disable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int | None:
         self.calls.append(("disable_fk_check", session))
         return "enabled"
-
-    def enable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int:
-        self.calls.append(("enable_fk_check", session))
-        return "disabled"
 
     def restore_fk_check(
         self, session: so.Session, previous_state: str | int, *, mapper: Any | None = None
@@ -247,9 +239,8 @@ def test_relaxed_foreign_keys_toggles_fk_and_restores(sqlite_session):
 
 def test_relaxed_foreign_keys_leaves_keys_enforced_when_backend_cannot_toggle(sqlite_session):
     class NoFKBackend(FakeBackend):
-        @property
-        def capabilities(self) -> BackendCapabilities:
-            return BackendCapabilities()
+        def disable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int | None:
+            return super(FakeBackend, self).disable_fk_check(session, mapper=mapper)
 
     backend = NoFKBackend()
 

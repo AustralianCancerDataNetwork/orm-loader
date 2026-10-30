@@ -6,7 +6,6 @@ from collections.abc import Generator, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import wraps
-from time import perf_counter
 from typing import TYPE_CHECKING, Any, Callable, ClassVar, ParamSpec, Type, TypeVar, cast
 
 import pyarrow as pa
@@ -717,24 +716,14 @@ class DatabaseBackend(ABC):
         after = self.count_staging(ctx, staging)
         return DedupeResult(tuple(key_columns), before, before - after)
 
-    @staticmethod
-    @abstractmethod
-    def _normalize_fk_check_state(previous_state: str | int) -> str | int:
-        """Validate and normalise a previously-returned FK state before interpolating into SQL.
+    def disable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int | None:
+        """Relax foreign key enforcement and return the state to restore.
 
-        Each backend accepts a different type (SQLite: int, Postgres: str) and must
-        implement this to guard restore_fk_check() against invalid or injected values.
+        The default relaxes nothing and returns ``None``, which is right for a
+        backend that enforces its keys regardless.
         """
+        return None
 
-    @abstractmethod
-    def disable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int:
-        """Disable FK checks and return the previous backend-specific state."""
-
-    @abstractmethod
-    def enable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int:
-        """Explicitly enable FK checks and return the previous backend-specific state."""
-
-    @abstractmethod
     def restore_fk_check(
         self,
         session: so.Session,
@@ -742,7 +731,7 @@ class DatabaseBackend(ABC):
         *,
         mapper: Any | None = None,
     ) -> None:
-        """Restore FK checks to a previously returned backend-specific state."""
+        """Restore the state returned by :meth:`disable_fk_check`."""
 
     def check_replace_feasible(
         self,
@@ -926,9 +915,10 @@ class DatabaseBackend(ABC):
         """
         Relax foreign key checks for the block where the backend can, and restore them on exit.
 
-        A backend without ``supports_fk_toggle`` has nothing to relax, so its
-        constraints stay enforced and rows must be inserted parents first.
-        The session is rolled back when the block raises.
+        A backend that cannot relax its keys leaves them enforced, so rows
+        must be inserted parents first. The session is rolled back when the
+        block raises. A backend that cannot relax the keys it is able to
+        relax raises before the block starts, with the session untouched.
 
         Parameters
         ----------
@@ -941,29 +931,22 @@ class DatabaseBackend(ABC):
             Whether to suspend the session's autoflush inside the block.
         """
         scope = f"Table `{mapper.__tablename__}`: " if hasattr(mapper, "__tablename__") else ""
-        previous_fk_state: str | int | None = None
+        previous_state = self.disable_fk_check(session, mapper=mapper)
+        if previous_state is not None:
+            logger.info(f"{scope}Foreign key checks disabled.")
         try:
-            if self.capabilities.supports_fk_toggle:
-                started = perf_counter()
-                raw_state = self.disable_fk_check(session, mapper=mapper)
-                previous_fk_state = self._normalize_fk_check_state(raw_state)
-                logger.info(f"{scope}Foreign key checks disabled in {perf_counter() - started:.2f}s.")
-
             if no_autoflush:
                 with session.no_autoflush:
                     yield
             else:
                 yield
-
         except Exception:
             session.rollback()
             raise
-
         finally:
-            if previous_fk_state is not None:
-                started = perf_counter()
-                self.restore_fk_check(session, previous_fk_state, mapper=mapper)
-                logger.info(f"{scope}Foreign key checks restored in {perf_counter() - started:.2f}s.")
+            if previous_state is not None:
+                self.restore_fk_check(session, previous_state, mapper=mapper)
+                logger.info(f"{scope}Foreign key checks restored.")
 
     @requires_capability("supports_materialized_views", "materialized views")
     def create_materialized_view(

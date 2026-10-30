@@ -146,15 +146,14 @@ class FileLoadableTableInterface(ORMTableBase):
 
         merge_failed = False
         try:
-            with backend.relaxed_foreign_keys(session, mapper=cls, no_autoflush=False):
-                yield
-                logger.info(f"Table `{table_name}`: Committing merged rows.")
-                commit_started = perf_counter()
-                session.commit()
-                logger.info(
-                    f"Table `{table_name}`: Merge commit completed in "
-                    f"{_format_elapsed(perf_counter() - commit_started)}."
-                )
+            yield
+            logger.info(f"Table `{table_name}`: Committing merged rows.")
+            commit_started = perf_counter()
+            session.commit()
+            logger.info(
+                f"Table `{table_name}`: Merge commit completed in "
+                f"{_format_elapsed(perf_counter() - commit_started)}."
+            )
         except Exception as e:
             merge_failed = True
             session.rollback()
@@ -431,8 +430,14 @@ class FileLoadableTableInterface(ORMTableBase):
                 skip_malformed=policy.errors.on_error == "reject_row",
             )
 
+        backend = resolve_backend(
+            session,
+            staging_schema_tag=staging_schema_tag,
+            mapper=cls,
+            resolved=resolved,
+            physical_schemas=physical_schemas,
+        )
         if merge_strategy == "replace":
-            backend = resolve_backend(session, staging_schema_tag=staging_schema_tag, mapper=cls)
             if backend.resolve_index_strategy(index_strategy) == "keep":
                 backend._require_capability(
                     "supports_replace_with_kept_indexes",
@@ -452,32 +457,25 @@ class FileLoadableTableInterface(ORMTableBase):
         )
 
         try:
-            # Load to staging (Indices are already excluded via updated create_staging_table)
-            logger.info(f"Table `{cls.__tablename__}`: Loading data into staging table")
-            total = cls.load_staging(loader_context, reader)
+            # SQLite cannot switch foreign key checks inside a transaction, so relax before staging writes.
+            with backend.relaxed_foreign_keys(session, mapper=cls, no_autoflush=False):
+                logger.info(f"Table `{cls.__tablename__}`: Loading data into staging table")
+                total = cls.load_staging(loader_context, reader)
 
-            # Merge staging to target (Wrapped in our index dropper!)
-            logger.info(f"Table `{cls.__tablename__}`: Merging staging data into target table")
-            with cls.manage_indices(session, index_strategy=index_strategy, staging_schema_tag=staging_schema_tag):
-                cls.merge_from_staging(
-                    session,
-                    merge_strategy=merge_strategy,
-                    merge_batch_size=merge_batch_size,
-                    staging_schema_tag=staging_schema_tag,
-                    validate_deferred_fks=validate_deferred_fks,
-                    resolved=resolved,
-                    physical_schemas=physical_schemas,
-                )
-                if validate_deferred_fks:
-                    logger.info(f"Table `{cls.__tablename__}`: Validating deferred foreign keys.")
-                    backend = resolve_backend(
+                logger.info(f"Table `{cls.__tablename__}`: Merging staging data into target table")
+                with cls.manage_indices(session, index_strategy=index_strategy, staging_schema_tag=staging_schema_tag):
+                    cls.merge_from_staging(
                         session,
+                        merge_strategy=merge_strategy,
+                        merge_batch_size=merge_batch_size,
                         staging_schema_tag=staging_schema_tag,
-                        mapper=cls,
+                        validate_deferred_fks=validate_deferred_fks,
                         resolved=resolved,
                         physical_schemas=physical_schemas,
                     )
-                    backend.validate_deferred_fks(cls, session)
+                    if validate_deferred_fks:
+                        logger.info(f"Table `{cls.__tablename__}`: Validating deferred foreign keys.")
+                        backend.validate_deferred_fks(cls, session)
         finally:
             cls.drop_staging_table(session, staging_schema_tag=staging_schema_tag)
 

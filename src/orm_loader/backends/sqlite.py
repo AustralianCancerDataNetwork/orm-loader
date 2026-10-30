@@ -2,33 +2,26 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 import logging
-import sqlite3
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
 import pyarrow.compute as pc
 import sqlalchemy as sa
 import sqlalchemy.orm as so
-from sqlalchemy import event, text
+from sqlalchemy import text
 from sqlalchemy.dialects import sqlite as sqlite_dialect
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql.compiler import IdentifierPreparer
 
 from .base import BackendCapabilities, DatabaseBackend, Dialect
 
 if TYPE_CHECKING:
     from oa_configurator import ResolvedDatabase
-    from sqlalchemy.engine import Connection, Engine
 
     from ..loaders.loader import LoaderContext
     from ..tables.typing import FileTableProtocol
 
 
 logger = logging.getLogger(__name__)
-VALID_SQLITE_JOURNAL_MODES = frozenset(
-    {"DELETE", "TRUNCATE", "PERSIST", "MEMORY", "WAL", "OFF"}
-)
 
 
 class SQLiteBackend(DatabaseBackend):
@@ -43,9 +36,6 @@ class SQLiteBackend(DatabaseBackend):
         staging_schema: str | None = None,
         resolved: ResolvedDatabase | None = None,
         physical_schemas: Mapping[str, str | None] | None = None,
-        busy_timeout_ms: int = 60000,
-        journal_mode: str = "WAL",
-        defer_foreign_keys: bool = True,
     ) -> None:
         if staging_schema is not None:
             raise ValueError(
@@ -58,19 +48,6 @@ class SQLiteBackend(DatabaseBackend):
             resolved=resolved,
             physical_schemas=physical_schemas,
         )
-        self.busy_timeout_ms = busy_timeout_ms
-        self.journal_mode = self._validate_journal_mode(journal_mode)
-        self.defer_foreign_keys = defer_foreign_keys
-
-    @staticmethod
-    def _validate_journal_mode(journal_mode: str) -> str:
-        normalised = journal_mode.strip().upper()
-        if normalised not in VALID_SQLITE_JOURNAL_MODES:
-            raise ValueError(
-                "Unsupported SQLite journal_mode "
-                f"{journal_mode!r}. Expected one of: {sorted(VALID_SQLITE_JOURNAL_MODES)}"
-            )
-        return normalised
 
     @staticmethod
     def _normalize_fk_check_state(previous_state: str | int) -> str:
@@ -158,20 +135,27 @@ class SQLiteBackend(DatabaseBackend):
         """Evaluate without a cast: SQLite casts a date to the integer of its year."""
         return session.execute(sa.select(expression), bind_arguments={"mapper": table_cls}).scalar_one()
 
-    def disable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int:
-        execute_options = {"bind_arguments": {"mapper": mapper}} if mapper is not None else {}
-        previous_state = session.execute(text("PRAGMA foreign_keys"), **execute_options).scalar()
-        session.execute(text("PRAGMA foreign_keys = OFF"), **execute_options)
-        if not isinstance(previous_state, int):
-            raise RuntimeError("Expected SQLite FK state to be an int")
-        return previous_state
+    def disable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int | None:
+        """Turn ``PRAGMA foreign_keys`` off and return its previous value.
 
-    def enable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int:
+        SQLite ignores the pragma inside an open transaction, so the state is
+        read back and a pragma that did not take effect raises.
+
+        Raises
+        ------
+        RuntimeError
+            The connection kept enforcing foreign keys.
+        """
         execute_options = {"bind_arguments": {"mapper": mapper}} if mapper is not None else {}
         previous_state = session.execute(text("PRAGMA foreign_keys"), **execute_options).scalar()
-        session.execute(text("PRAGMA foreign_keys = ON"), **execute_options)
         if not isinstance(previous_state, int):
             raise RuntimeError("Expected SQLite FK state to be an int")
+        session.execute(text("PRAGMA foreign_keys = OFF"), **execute_options)
+        if session.execute(text("PRAGMA foreign_keys"), **execute_options).scalar():
+            raise RuntimeError(
+                "SQLite ignored PRAGMA foreign_keys = OFF because the connection is inside a transaction. "
+                "Commit the session's pending writes before loading."
+            )
         return previous_state
 
     def restore_fk_check(
@@ -290,59 +274,3 @@ class SQLiteBackend(DatabaseBackend):
         for batch_range in self._paginate_batches(table_cls, staging, session, merge_batch_size):
             select_ = non_paginated_select if batch_range is None else non_paginated_select.where(batch_range)
             session.execute(_insert(select_))
-
-    def configure_dbapi_connection(self, dbapi_connection:  sa.engine.interfaces.DBAPIConnection) -> None:
-        if dbapi_connection.__class__.__module__.startswith("sqlite3"):
-            cursor = dbapi_connection.cursor()
-            cursor.execute(f"PRAGMA busy_timeout = {self.busy_timeout_ms}")
-            cursor.execute(f"PRAGMA journal_mode = {self.journal_mode}")
-            cursor.execute("PRAGMA foreign_keys = ON;")
-            if self.defer_foreign_keys:
-                cursor.execute("PRAGMA defer_foreign_keys = ON;")
-            cursor.close()
-
-    def install_engine_hooks(self, engine: "Engine") -> None:
-        @event.listens_for(engine, "connect")
-        def _enable_sqlite_foreign_keys(
-            dbapi_connection: sa.engine.interfaces.DBAPIConnection, 
-            _connection_record: Any
-        ) -> None:
-            self.configure_dbapi_connection(dbapi_connection)
-
-    def explain_fk_error(
-        self,
-        session: so.Session,
-        exc: IntegrityError,
-        *,
-        mapper: Any | None = None,
-        raise_error: bool = True,
-    ) -> None:
-        bind: Engine | Connection = session.get_bind(mapper=mapper)
-        if bind.dialect.name != Dialect.SQLITE:
-            raise exc
-
-        with self._as_connection(bind) as conn:
-            rows = conn.execute(text("PRAGMA foreign_key_check")).fetchall()
-
-        if rows:
-            for row in rows:
-                logger.error(
-                    "FK violation: table=%s rowid=%s references=%s fk_index=%s",
-                    row[0], row[1], row[2], row[3]
-                )
-
-        if raise_error:
-            raise exc
-
-    def restore_journal_mode(self, db_path: Path) -> None:
-        timeout_s = max(self.busy_timeout_ms / 1000, 5)
-        try:
-            with sqlite3.connect(db_path.resolve(), timeout=timeout_s) as conn:
-                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-                conn.execute("PRAGMA journal_mode = DELETE")
-                conn.commit()
-        except sqlite3.OperationalError as exc:
-            raise RuntimeError(
-                "Failed to restore SQLite journal mode. "
-                "Close or dispose active SQLite connections before calling this helper."
-            ) from exc

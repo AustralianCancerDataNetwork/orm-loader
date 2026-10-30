@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import sqlite3
-from pathlib import Path
 from typing import TYPE_CHECKING, Type, cast
 
 import pytest
@@ -10,7 +8,7 @@ import sqlalchemy.orm as so
 from sqlalchemy.dialects import sqlite as sqlite_dialect
 
 from orm_loader.backends import Dialect, SQLiteBackend
-from tests.models import ComputedColumnTable
+from tests.models import ComputedColumnTable, ReferencingChildTable, SimpleTable
 
 if TYPE_CHECKING:
     from orm_loader.tables.typing import FileTableProtocol
@@ -20,9 +18,9 @@ _STAGING_TABLE = f"_staging_{_TARGET_TABLE}"
 
 
 class _FakeSession:
-    def __init__(self, scalar_result: int | str = 1) -> None:
+    def __init__(self, *scalar_results: int | str) -> None:
         self.statements: list[str] = []
-        self.scalar_result = scalar_result
+        self.scalar_results = list(scalar_results) or [1]
 
     def execute(self, statement, **kwargs):
         if hasattr(statement, "compile"):
@@ -38,7 +36,7 @@ class _FakeSession:
             def scalar(self):
                 return self._value
 
-        return _Result(self.scalar_result)
+        return _Result(self.scalar_results.pop(0) if len(self.scalar_results) > 1 else self.scalar_results[0])
 
 
 _ComputedTableCls = cast("Type[FileTableProtocol]", ComputedColumnTable)
@@ -58,7 +56,6 @@ def test_sqlite_backend_identity_and_capabilities():
     assert backend.capabilities.supports_fk_toggle is True
     assert backend.capabilities.supports_materialized_views is False
     assert backend.resolve_index_strategy("auto") == "keep"
-    assert backend.journal_mode == "WAL"
 
 
 @pytest.mark.parametrize("merge_batch_size", [0, -1])
@@ -87,30 +84,25 @@ def test_sqlite_backend_create_staging_table(sqlite_session, sqlite_engine):
     assert {c["name"]: c["nullable"] for c in cols} == {name: target[name] for name in ("id", "name")}
 
 
-def test_sqlite_backend_disable_fk_reads_then_sets():
+def test_sqlite_backend_disable_fk_reads_sets_then_reads_back():
     backend = SQLiteBackend()
-    sqlite_session = _FakeSession(scalar_result=1)
+    sqlite_session = _FakeSession(1, 0)
 
     previous = backend.disable_fk_check(_sess(sqlite_session))
 
     assert previous == 1
     assert sqlite_session.statements == [
-        "PRAGMA foreign_keys",       # read current state
-        "PRAGMA foreign_keys = OFF", # set to OFF
+        "PRAGMA foreign_keys",
+        "PRAGMA foreign_keys = OFF",
+        "PRAGMA foreign_keys",
     ]
 
 
-def test_sqlite_backend_enable_fk_reads_then_sets():
+def test_sqlite_backend_disable_fk_raises_when_the_pragma_is_ignored():
     backend = SQLiteBackend()
-    sqlite_session = _FakeSession(scalar_result=0)
 
-    previous = backend.enable_fk_check(_sess(sqlite_session))
-
-    assert previous == 0
-    assert sqlite_session.statements == [
-        "PRAGMA foreign_keys",      # read current state
-        "PRAGMA foreign_keys = ON", # set to ON
-    ]
+    with pytest.raises(RuntimeError, match="inside a transaction"):
+        backend.disable_fk_check(_sess(_FakeSession(1, 1)))
 
 
 def test_sqlite_backend_restore_fk_normalises_int_and_emits():
@@ -189,84 +181,12 @@ def test_sqlite_backend_create_materialized_view_index_raises(sqlite_engine):
         backend.create_materialized_view_index(sqlite_engine, "mv_test", index)
 
 
-def test_sqlite_backend_configures_bulk_load_pragmas(tmp_path: Path):
-    backend = SQLiteBackend()
-    db_path = tmp_path / "test.db"
-    sqlite_engine = sa.create_engine(f"sqlite:///{db_path}", future=True)
-    backend.install_engine_hooks(sqlite_engine)
-
-    with sqlite_engine.connect() as conn:
-        busy_timeout = conn.execute(sa.text("PRAGMA busy_timeout")).scalar_one()
-        journal_mode = conn.execute(sa.text("PRAGMA journal_mode")).scalar_one()
-        foreign_keys = conn.execute(sa.text("PRAGMA foreign_keys")).scalar_one()
-
-    assert busy_timeout == 60000
-    assert str(journal_mode).lower() == "wal"
-    assert foreign_keys == 1
-
-
-def test_sqlite_backend_restore_journal_mode(tmp_path: Path):
-    backend = SQLiteBackend()
-    db_path = tmp_path / "journal.db"
-    sqlite_engine = sa.create_engine(f"sqlite:///{db_path}", future=True)
-    backend.install_engine_hooks(sqlite_engine)
-
-    with sqlite_engine.begin() as conn:
-        conn.execute(sa.text("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)"))
-        conn.execute(sa.text("INSERT INTO t (name) VALUES ('x')"))
-
-    sqlite_engine.dispose()
-    backend.restore_journal_mode(db_path)
-
-    with sqlite3.connect(db_path.resolve()) as conn:
-        journal_mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
-
-    assert str(journal_mode).lower() == "delete"
-
-
-def test_install_engine_hooks_sets_bulk_load_pragmas(tmp_path: Path):
-    db_path = tmp_path / "attached.db"
-    sqlite_engine = sa.create_engine(f"sqlite:///{db_path}", future=True)
-
-    SQLiteBackend(busy_timeout_ms=45000).install_engine_hooks(sqlite_engine)
-
-    with sqlite_engine.connect() as conn:
-        busy_timeout = conn.execute(sa.text("PRAGMA busy_timeout")).scalar_one()
-        journal_mode = conn.execute(sa.text("PRAGMA journal_mode")).scalar_one()
-        foreign_keys = conn.execute(sa.text("PRAGMA foreign_keys")).scalar_one()
-
-    assert busy_timeout == 45000
-    assert str(journal_mode).lower() == "wal"
-    assert foreign_keys == 1
-
-
-def test_sqlite_backend_rejects_invalid_journal_mode():
-    try:
-        SQLiteBackend(journal_mode="wal; drop table x;")
-    except ValueError as exc:
-        assert "Unsupported SQLite journal_mode" in str(exc)
-    else:
-        raise AssertionError("Expected invalid journal_mode to raise ValueError")
-
-
 def test_sqlite_backend_disable_fk_raises_when_pragma_returns_non_int():
     backend = SQLiteBackend()
-    sqlite_session = _FakeSession(scalar_result="not_an_int")
+    sqlite_session = _FakeSession("not_an_int")
 
     try:
         backend.disable_fk_check(_sess(sqlite_session))
-    except RuntimeError as exc:
-        assert "Expected SQLite FK state to be an int" in str(exc)
-    else:
-        raise AssertionError("Expected RuntimeError when PRAGMA returns a non-int")
-
-
-def test_sqlite_backend_enable_fk_raises_when_pragma_returns_non_int():
-    backend = SQLiteBackend()
-    sqlite_session = _FakeSession(scalar_result="not_an_int")
-
-    try:
-        backend.enable_fk_check(_sess(sqlite_session))
     except RuntimeError as exc:
         assert "Expected SQLite FK state to be an int" in str(exc)
     else:
@@ -299,10 +219,46 @@ def test_sqlite_backend_fk_toggle_round_trip(sqlite_session):
     assert sqlite_session.execute(sa.text("PRAGMA foreign_keys")).scalar() == 1
 
 
-def test_a_merge_on_sqlite_logs_foreign_key_toggling(sqlite_session, caplog):
+def test_relaxed_foreign_keys_on_sqlite_logs_the_toggling(sqlite_session, caplog):
     with caplog.at_level("INFO", logger="orm_loader.backends.base"):
-        with ComputedColumnTable.manage_indices(sqlite_session):  # ty: ignore[invalid-argument-type]
+        with SQLiteBackend().relaxed_foreign_keys(sqlite_session):
             pass
 
     assert "Foreign key checks disabled" in caplog.text
     assert "Foreign key checks restored" in caplog.text
+
+
+@pytest.fixture
+def enforcing_session(sqlite_engine):
+    """A session whose connections come up with foreign key enforcement on."""
+    sa.event.listen(sqlite_engine, "connect", lambda conn, _: conn.execute("PRAGMA foreign_keys = ON"))
+    sqlite_engine.dispose()
+    with so.Session(sqlite_engine) as session:
+        yield session
+
+
+def _foreign_keys(session: so.Session) -> int:
+    return session.execute(sa.text("PRAGMA foreign_keys")).scalar_one()
+
+
+def test_a_load_relaxes_enforced_foreign_keys_and_restores_them(enforcing_session, tmp_path):
+    path = tmp_path / "referencing_child_table.csv"
+    path.write_text("id,parent_id\n1,1\n")
+    child = cast("Type[FileTableProtocol]", ReferencingChildTable)
+
+    assert child.load_file(enforcing_session, path, staging_schema_tag=None) == 1
+
+    assert _foreign_keys(enforcing_session) == 1
+
+
+def test_a_load_on_a_session_with_pending_writes_raises_and_keeps_them(enforcing_session, tmp_path):
+    enforcing_session.add(SimpleTable(id=1, name="pending"))
+    enforcing_session.flush()
+    path = tmp_path / f"{SimpleTable.__tablename__}.csv"
+    path.write_text("id,name\n2,a\n")
+    simple = cast("Type[FileTableProtocol]", SimpleTable)
+
+    with pytest.raises(RuntimeError, match="inside a transaction"):
+        simple.load_file(enforcing_session, path, staging_schema_tag=None)
+
+    assert enforcing_session.get(SimpleTable, 1) is not None

@@ -256,17 +256,11 @@ def test_duckdb_backend_rownum_populates_monotonically_on_insert(duckdb_session)
     assert rownums == [1, 2]
 
 
-def test_duckdb_backend_fk_toggle_methods_raise():
+def test_duckdb_backend_has_nothing_to_relax():
     backend = DuckDBBackend()
+    session = cast("so.Session", None)
 
-    with pytest.raises(NotImplementedError, match="no foreign-key-toggle mechanism"):
-        backend.disable_fk_check(cast("so.Session", None))
-    with pytest.raises(NotImplementedError, match="no foreign-key-toggle mechanism"):
-        backend.enable_fk_check(cast("so.Session", None))
-    with pytest.raises(NotImplementedError, match="no foreign-key-toggle mechanism"):
-        backend.restore_fk_check(cast("so.Session", None), "ON")
-    with pytest.raises(NotImplementedError, match="no state to normalize"):
-        DuckDBBackend._normalize_fk_check_state("ON")
+    assert backend.disable_fk_check(session) is None
 
 
 @pytest.mark.duckdb
@@ -281,9 +275,9 @@ def test_duckdb_backend_relaxed_foreign_keys_runs_without_toggling_fk(duckdb_ses
 
 @pytest.mark.duckdb
 @pytest.mark.db_dialect
-def test_a_merge_on_duckdb_does_not_log_foreign_key_toggling(duckdb_session, caplog):
+def test_relaxed_foreign_keys_on_duckdb_does_not_log_toggling(duckdb_session, caplog):
     with caplog.at_level("INFO", logger="orm_loader.backends.base"):
-        with ComputedColumnTable.manage_indices(duckdb_session):  # ty: ignore[invalid-argument-type]
+        with DuckDBBackend().relaxed_foreign_keys(duckdb_session):
             pass
 
     assert "foreign key" not in caplog.text.lower()

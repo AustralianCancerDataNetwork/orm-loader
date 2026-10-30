@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import sqlalchemy.event as sae
 from typing import TYPE_CHECKING, Type, cast
 
 import pytest
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 from sqlalchemy.dialects import postgresql
-from sqlalchemy.engine import Engine
 
 from oa_configurator import SCHEMA_TRANSLATE_MAP_KEY, Role, qualified
 from oa_configurator.testing import isolated_test_schema
@@ -129,16 +127,12 @@ def test_postgres_backend_fk_methods_emit_expected_sql():
     session = _FakeSession()
 
     previous = backend.disable_fk_check(_sess(session))
-    enabled = backend.enable_fk_check(_sess(session))
     backend.restore_fk_check(_sess(session), previous)
 
     assert previous == "origin"
-    assert enabled == "origin"
     assert session.statements == [
         "SHOW session_replication_role",
         "SET session_replication_role = 'replica'",
-        "SHOW session_replication_role",
-        "SET session_replication_role = 'origin'",
         "SET session_replication_role = 'origin'",
     ]
 
@@ -550,86 +544,6 @@ def test_postgres_backend_disable_fk_raises_when_show_returns_non_string():
         assert "Expected PostgreSQL FK state to be a string" in str(exc)
     else:
         raise AssertionError("Expected RuntimeError when SHOW returns a non-string")
-
-
-def test_postgres_backend_enable_fk_raises_when_show_returns_non_string():
-    backend = PostgresBackend()
-    session = _FakeSession(scalar_result=42)
-
-    try:
-        backend.enable_fk_check(_sess(session))
-    except RuntimeError as exc:
-        assert "Expected PostgreSQL FK state to be a string" in str(exc)
-    else:
-        raise AssertionError("Expected RuntimeError when SHOW returns a non-string")
-
-
-
-def test_postgres_backend_engine_with_replica_role_unregisters_listener(monkeypatch):
-    backend = PostgresBackend()
-    events: list[tuple[str, object, str]] = []
-    statements: list[str] = []
-
-    class _Result:
-        def scalar(self):
-            return "origin"
-
-    class _Conn:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_) -> None:
-            return None
-
-        def execution_options(self, **_):
-            return self
-
-        def get_isolation_level(self):
-            return "READ COMMITTED"
-
-        def rollback(self) -> None:
-            return None
-
-        def close(self) -> None:
-            return None
-
-        def execute(self, statement):
-            sql = str(statement.compile(dialect=postgresql.dialect()))
-            statements.append(sql)
-            return _Result()
-
-    class _Engine(Engine):
-        def __init__(self) -> None:
-            # only exists for autocommit_connection() to route it into its real Engine branch
-            pass
-
-        def connect(self):
-            events.append(("connect", self, "connect"))
-            return _Conn()
-
-    engine = _Engine()
-
-    def _listen(target, name, *_) -> None:
-        events.append(("listen", target, name))
-
-    def _remove(target, name, *_) -> None:
-        events.append(("remove", target, name))
-
-    monkeypatch.setattr(sae, "listen", _listen)
-    monkeypatch.setattr(sae, "remove", _remove)
-
-    with backend.engine_with_replica_role(cast(Engine, engine)):
-        pass
-
-    assert events == [
-        ("listen", engine, "connect"),
-        ("remove", engine, "connect"),
-        ("connect", engine, "connect"),
-    ]
-    assert statements == [
-        "SET session_replication_role = DEFAULT",
-        "SHOW session_replication_role",
-    ]
 
 
 # ---------------------------------------------------------------------------

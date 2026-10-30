@@ -161,33 +161,6 @@ class DuckDBBackend(DatabaseBackend):
         row_key = sa.Column("_rownum", sa.BigInteger, sequence, server_default=sequence.next_value())
         return sa.Table(name, sa.MetaData(), *columns, row_key, schema=self.staging_schema)
 
-    @staticmethod
-    def _normalize_fk_check_state(previous_state: str | int) -> str | int:
-        raise NotImplementedError(
-            "DuckDB has no foreign-key-toggle mechanism; there is no state to normalize."
-        )
-
-    def disable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int:
-        raise NotImplementedError(
-            "DuckDB has no foreign-key-toggle mechanism (no PRAGMA/SET equivalent exists)."
-        )
-
-    def enable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int:
-        raise NotImplementedError(
-            "DuckDB has no foreign-key-toggle mechanism (no PRAGMA/SET equivalent exists)."
-        )
-
-    def restore_fk_check(
-        self,
-        session: so.Session,
-        previous_state: str | int,
-        *,
-        mapper: Any | None = None,
-    ) -> None:
-        raise NotImplementedError(
-            "DuckDB has no foreign-key-toggle mechanism (no PRAGMA/SET equivalent exists)."
-        )
-
     def _paginate_batches(
         self,
         table_cls: type["FileTableProtocol"],

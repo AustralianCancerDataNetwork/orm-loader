@@ -60,7 +60,7 @@ No schema changes are performed at the loader layer.
 
 ## Referential integrity
 
-On PostgreSQL and SQLite a load relaxes foreign keys while it merges, so the caller needs no foreign key handling and a row loaded before the row it references is accepted. To verify the result, call `Table.validate_foreign_keys(session)` after every table is loaded. It checks every foreign key of the table with an anti-join and raises `ForeignKeyViolationError` with up to five unmatched keys. Null references are not violations, and the load order does not matter.
+On PostgreSQL and SQLite a load relaxes foreign keys from before it writes staging until it has merged, so the caller needs no foreign key handling and a row loaded before the row it references is accepted. SQLite ignores `PRAGMA foreign_keys` inside a transaction, so a session with uncommitted writes cannot start a load there and `load_file` raises before touching anything. To verify the result, call `Table.validate_foreign_keys(session)` after every table is loaded. It checks every foreign key of the table with an anti-join and raises `ForeignKeyViolationError` with up to five unmatched keys. Null references are not violations, and the load order does not matter.
 
 To insert ORM objects built in Python that reference each other, wrap the inserts in `backend.relaxed_foreign_keys(session)`, which relaxes the keys on PostgreSQL and SQLite and leaves them enforced on DuckDB.
 

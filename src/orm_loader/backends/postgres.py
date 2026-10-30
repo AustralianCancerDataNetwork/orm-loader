@@ -2,17 +2,14 @@ from __future__ import annotations
 
 import io
 from collections.abc import Iterable, Mapping, Sequence
-from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
 import pyarrow.csv as pacsv
 import sqlalchemy as sa
-import sqlalchemy.event as sae
 import sqlalchemy.orm as so
 from oa_configurator import (
     Dialect,
-    autocommit_connection,
     qualified,
 )
 from sqlalchemy.dialects import postgresql
@@ -154,22 +151,12 @@ class PostgresBackend(DatabaseBackend):
             )
         return normalised
 
-    def disable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int:
+    def disable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str:
         execute_options = {"bind_arguments": {"mapper": mapper}} if mapper is not None else {}
         previous_state = session.execute(
             sa.text("SHOW session_replication_role"), **execute_options
         ).scalar()
         session.execute(sa.text("SET session_replication_role = 'replica'"), **execute_options)
-        if not isinstance(previous_state, str):
-            raise RuntimeError("Expected PostgreSQL FK state to be a string")
-        return previous_state
-
-    def enable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int:
-        execute_options = {"bind_arguments": {"mapper": mapper}} if mapper is not None else {}
-        previous_state = session.execute(
-            sa.text("SHOW session_replication_role"), **execute_options
-        ).scalar()
-        session.execute(sa.text("SET session_replication_role = 'origin'"), **execute_options)
         if not isinstance(previous_state, str):
             raise RuntimeError("Expected PostgreSQL FK state to be a string")
         return previous_state
@@ -417,25 +404,3 @@ class PostgresBackend(DatabaseBackend):
                         cause=error,
                     )
                 ) from error
-
-    @contextmanager
-    def engine_with_replica_role(self, engine: "Engine"):
-        def _set_replica_role(
-            dbapi_conn: sa.engine.interfaces.DBAPIConnection,
-            _,
-        ) -> None:
-            cur = dbapi_conn.cursor()
-            cur.execute("SET session_replication_role = 'replica'")
-            cur.close()
-
-        sae.listen(engine, "connect", _set_replica_role)
-
-        try:
-            yield engine
-        finally:
-            sae.remove(engine, "connect", _set_replica_role)
-            with autocommit_connection(engine) as autocommit_conn:
-                autocommit_conn.execute(sa.text("SET session_replication_role = DEFAULT"))
-                role = autocommit_conn.execute(sa.text("SHOW session_replication_role")).scalar()
-                if role != "origin":
-                    raise RuntimeError("Failed to restore session_replication_role")
