@@ -85,9 +85,9 @@ def test_a_failing_batch_source_is_raised_not_swallowed(dialect_session, tmp_pat
         backend.insert_batches(ctx, staging, batches(), COLUMNS)
 
 
-def _staging_for(session, table, **kwargs):
+def _staging_for(session, table):
     tag = None if session.get_bind().dialect.name == "sqlite" else STAGING_SCHEMA
-    table.create_staging_table(session, staging_schema_tag=tag, **kwargs)
+    table.create_staging_table(session, staging_schema_tag=tag)
     return table.get_staging_table(session, staging_schema_tag=tag)
 
 
@@ -107,11 +107,6 @@ def test_a_staging_table_has_no_key_and_no_default(dialect_session):
     staging = _staging_for(dialect_session, cast(Type[FileTableProtocol], DemoDefaultedRecord))
     assert staging.primary_key.columns.keys() == []
     assert all(c.server_default is None for c in staging.c if c.name != "_rownum")
-
-
-def test_columns_can_be_left_out_of_a_staging_table(dialect_session):
-    staging = _staging_for(dialect_session, _Demo, without={"demo_label"})
-    assert "demo_label" not in staging.c and "demo_id" in staging.c
 
 
 def test_a_staging_table_can_be_dropped_twice_and_created_again(dialect_session):

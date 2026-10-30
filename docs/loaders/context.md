@@ -21,10 +21,8 @@ on globals or implicit configuration.
 | `tableclass` | Target ORM table class |
 | `session` | Active SQLAlchemy session |
 | `path` | Path to the input file |
-| `chunksize` | Rows per batch for the default reader of formats that batch by rows |
 | `normalise` | Whether to interpret values under the policy; when false, values are written as read |
 | `dedupe` | Whether the staging table keeps only the first row for each primary key |
-| `quote_mode` | Quoting mode for delimited text: `csv`, `literal` or `by_delimiter` (default) |
 | `policy` | `ConversionPolicy`: how values are interpreted and what happens to unreadable ones |
 | `rejects_dir` | Directory that rejected rows are written to |
 | `report` | `LoadReport` row accounting |

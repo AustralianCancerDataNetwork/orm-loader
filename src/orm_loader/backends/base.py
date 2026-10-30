@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
-from collections.abc import Collection, Generator, Iterable, Iterator, Mapping, Sequence
+from collections.abc import Generator, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import wraps
@@ -352,8 +352,7 @@ class DatabaseBackend(ABC):
 
         Computed columns are excluded because backend loaders and merge helpers
         should not attempt to write to them directly. With a staging table,
-        only the columns it has are returned, so a column the load left out
-        (an autoincrement key) is assigned by the database.
+        only the columns it has are returned.
         """
         return [
             c.name
@@ -544,8 +543,6 @@ class DatabaseBackend(ABC):
         self,
         table_cls: Type["FileTableProtocol"],
         session: so.Session,
-        *,
-        without: Collection[str] = (),
     ) -> None:
         """
         Create the staging table for a table class, replacing an existing one.
@@ -561,15 +558,12 @@ class DatabaseBackend(ABC):
             Table the staging table is for.
         session
             Session whose connection creates the table.
-        without
-            Names of target columns the staging table leaves out. The merge
-            then leaves them out of its insert.
         """
         self.drop_staging_table(table_cls, session)
         columns = [
             sa.Column(c.name, c.type, nullable=c.nullable)
             for c in table_cls.__table__.columns
-            if c.computed is None and c.name not in without
+            if c.computed is None
         ]
         staging = self._staging_table(table_cls, columns)
         staging.create(bind=session.connection(bind_arguments={"mapper": table_cls}), checkfirst=True)

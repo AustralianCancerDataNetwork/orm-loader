@@ -683,13 +683,13 @@ def test_upsert_does_not_update_existing_rows(pg_session, tmp_path):
     assert _simple_rows(pg_session) == [(1, "alpha")]
 
 
-def test_insert_if_empty_loads_an_empty_target_and_refuses_a_non_empty_one(pg_session, tmp_path):
+def test_insert_loads_new_keys_and_fails_on_an_existing_key(pg_session, tmp_path):
     path = _write_simple(tmp_path, [(1, "alpha"), (2, "beta")])
-    assert SimpleTable.load_file(pg_session, path, merge_strategy="insert_if_empty", staging_schema_tag=STAGING_SCHEMA) == 2
+    assert SimpleTable.load_file(pg_session, path, merge_strategy="insert", staging_schema_tag=STAGING_SCHEMA) == 2
     pg_session.commit()
     assert _simple_rows(pg_session) == [(1, "alpha"), (2, "beta")]
-    with pytest.raises(ValueError, match="is not empty; cannot use merge strategy 'insert_if_empty'"):
-        SimpleTable.load_file(pg_session, path, merge_strategy="insert_if_empty", staging_schema_tag=STAGING_SCHEMA)
+    with pytest.raises(sa.exc.IntegrityError):
+        SimpleTable.load_file(pg_session, path, merge_strategy="insert", staging_schema_tag=STAGING_SCHEMA)
 
 
 def test_a_native_enum_column_loads_member_names(pg_session, tmp_path):

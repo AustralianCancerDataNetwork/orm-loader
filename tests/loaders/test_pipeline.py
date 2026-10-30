@@ -15,7 +15,7 @@ import sqlalchemy as sa
 from orm_loader.backends import STAGING_SCHEMA
 from orm_loader.conversion import ConversionPolicy, ErrorPolicy
 from orm_loader.helpers import ConversionError, RequiredValueError
-from orm_loader.loaders import DelimitedTextReader, LoaderContext, ParquetReader, stage_file
+from orm_loader.loaders import DelimitedTextReader, LoaderContext, ParquetReader, open_reader, stage_file
 from orm_loader.tables.typing import FileTableProtocol
 from tests.models import DemoRecord, DemoRequiredRecord, DemoTypedRecord
 
@@ -49,7 +49,7 @@ def _stage(session, table, path: Path, reader=None, **context):
     table.create_staging_table(session, staging_schema_tag=tag)
     staging = table.get_staging_table(session, staging_schema_tag=tag)
     ctx = LoaderContext(tableclass=table, session=session, path=path, staging_schema_tag=tag, **context)
-    loaded = stage_file(ctx, reader or table._select_reader(ctx), staging)
+    loaded = stage_file(ctx, reader or open_reader(path, table.model_columns(), nulls=ctx.policy.nulls), staging)
     return loaded, ctx, staging
 
 
@@ -129,7 +129,7 @@ def test_a_file_in_many_batches_loads_every_row_in_order(dialect_session, tmp_pa
 
 def test_a_failing_reader_is_raised_and_stages_nothing(dialect_session, tmp_path, fmt):
     path = _write(tmp_path, DemoRecord, fmt, [("1", "a", "", "", "")])
-    reader = _Demo._select_reader(LoaderContext(tableclass=_Demo, session=dialect_session, path=path))
+    reader = open_reader(path, _Demo.model_columns())
 
     def broken():
         raise RuntimeError("boom")

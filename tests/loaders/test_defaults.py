@@ -34,7 +34,7 @@ def _rows(session) -> list[tuple]:
 
 
 def test_only_a_default_that_can_be_supplied_makes_a_column_optional():
-    assert _Table.required_columns() == {"demo_stamp"}
+    assert _Table.required_columns() == {"demo_id", "demo_stamp"}
     assert set(_Table.column_defaults()) == {"demo_status", "demo_priority", "demo_note"}
 
 
@@ -98,8 +98,9 @@ def _keyed(session, tmp_path: Path, text: str, **kwargs) -> list[tuple]:
     return [tuple(r) for r in session.execute(sa.select(*columns).order_by(DemoKeyedRecord.keyed_id))]
 
 
-def test_a_key_the_file_lacks_is_assigned_by_the_database(dialect_session, tmp_path):
-    assert _keyed(dialect_session, tmp_path, "keyed_name\na\nb\n") == [(1, "a"), (2, "b")]
+def test_a_primary_key_the_file_lacks_is_a_missing_required_column(dialect_session, tmp_path):
+    with pytest.raises(IngestError, match="keyed_id"):
+        _keyed(dialect_session, tmp_path, "keyed_name\na\nb\n")
 
 
 def test_a_key_in_the_file_is_loaded_and_may_not_be_blank(dialect_session, tmp_path):

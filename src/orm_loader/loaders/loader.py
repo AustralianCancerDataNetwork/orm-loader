@@ -83,15 +83,10 @@ class LoaderContext:
         Active SQLAlchemy session.
     path
         Path to the source data file.
-    chunksize
-        Rows per batch for the default reader of formats that batch by rows.
     normalise
         Whether to interpret values under the policy.
     dedupe
         Whether the staging table keeps only the first row for each primary key.
-    quote_mode
-        Quoting mode of the default reader for delimited text: ``"csv"``,
-        ``"literal"`` or ``"by_delimiter"``.
     staging_schema_tag
         schema_translate_map tag the staging table lives in, passed to
         resolve_backend() so every backend resolution within this load
@@ -109,10 +104,8 @@ class LoaderContext:
     session: so.Session
     path: Path
 
-    chunksize: int | None = None
     normalise: bool = True
     dedupe: bool = True
-    quote_mode: str = "by_delimiter"
     staging_schema_tag: str | None = None
     policy: ConversionPolicy = field(default_factory=ConversionPolicy)
     rejects_dir: Path | None = None

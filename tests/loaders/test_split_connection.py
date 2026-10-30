@@ -61,7 +61,7 @@ def test_vocab_file_load_routes_every_session_bind_to_vocab_file(tmp_path):
         VocabSchemaTable.load_file(
             sqlite_session,
             csv_path,
-            merge_strategy="insert_if_empty",
+            merge_strategy="insert",
             dedupe=False,
             staging_schema_tag=staging_schema_claim().schema_tag,
         )

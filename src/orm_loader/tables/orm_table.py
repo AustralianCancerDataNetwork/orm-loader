@@ -10,25 +10,6 @@ from .allocators import IdAllocator
 logger = logging.getLogger(__name__)
 
 
-def _resolves_to_autoincrement(c: sa.Column) -> bool:
-    """Whether a column will actually autoincrement, resolving SQLAlchemy's
-    own default ``autoincrement="auto"`` sentinel the same way SQLAlchemy
-    itself does at DDL-emission time.
-
-    SQLAlchemy restricts real autoincrement behaviour to a single-column 
-    integer primary key (or an explicit ``autoincrement=True``). 
-    Treating every `"auto"` column as autoincrementing would wrongly 
-    exclude genuinely-required string PKs from `required_columns()`.
-    """
-    if c.autoincrement is False:
-        return False
-    if c.autoincrement is True:
-        return True
-    if not c.primary_key:
-        return False
-    pk_columns = list(c.table.primary_key.columns)
-    return len(pk_columns) == 1 and pk_columns[0] is c and isinstance(c.type, sa.Integer)
-
 """
 ORMTableBase
 ============
@@ -144,8 +125,6 @@ class ORMTableBase:
         A column is considered required if it is:
         - non-nullable
         - has no default that can be supplied (see ``column_defaults``)
-        - not an autoincrementing column (the database assigns its value;
-          it's never expected in inbound data at all)
 
         This method is intended for ingestion-time validation and does
         not attempt to enforce schema semantics beyond insert viability.
@@ -159,20 +138,8 @@ class ORMTableBase:
         return {
             c.key
             for c in cls.mapper_for().columns
-            if not c.nullable and c.key not in defaults and not _resolves_to_autoincrement(c)
+            if not c.nullable and c.key not in defaults
         }
-
-    @classmethod
-    def autoincrement_columns(cls) -> set[str]:
-        """
-        Return the names of the columns whose value the database assigns.
-
-        Returns
-        -------
-        set[str]
-            A set of column names.
-        """
-        return {c.key for c in cls.mapper_for().columns if _resolves_to_autoincrement(c)}
 
     @classmethod
     def column_defaults(cls) -> dict[str, Any]:

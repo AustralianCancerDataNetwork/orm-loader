@@ -41,20 +41,28 @@ class DelimitedTextReader(FileReader):
     quote_mode
         ``"csv"`` reads double quotes as field quoting, ``"literal"`` keeps
         them as data, ``"by_delimiter"`` chooses ``"literal"`` for tab
-        delimited files and ``"csv"`` otherwise.
+        delimited files and ``"csv"`` otherwise. ``None`` uses
+        ``DEFAULT_QUOTE_MODE``.
     block_size
         Bytes per block; memory use follows this, not the row count.
     skip_malformed
         Leave out a line with the wrong number of fields and record it in
         ``skipped``, instead of failing the read.
+
+    Attributes
+    ----------
+    DEFAULT_QUOTE_MODE
+        Quote mode used when none is given.
     """
+
+    DEFAULT_QUOTE_MODE = "by_delimiter"
 
     def __init__(
         self,
         path: Path,
         model_columns: Mapping[str, sa.ColumnElement[Any]],
         nulls: NullPolicy | None = None,
-        quote_mode: str = "by_delimiter",
+        quote_mode: str | None = None,
         block_size: int = 4 << 20,
         skip_malformed: bool = False,
     ) -> None:
@@ -70,7 +78,7 @@ class DelimitedTextReader(FileReader):
             codecs.lookup(self.encoding)
         except LookupError as exc:
             raise IngestError(f"{path.name}: unsupported encoding {self.encoding!r}") from exc
-        self.quote = resolve_quote_mode(quote_mode, self.delimiter)
+        self.quote_mode = resolve_quote_mode(quote_mode or self.DEFAULT_QUOTE_MODE, self.delimiter)
         self.file_columns = self._header_names()
         self.columns = [name for name in self.file_columns if name in model_columns]
         if self.nulls.marker_quoting == "unquoted_only" and self.nulls.text_markers:
@@ -118,9 +126,9 @@ class DelimitedTextReader(FileReader):
                 ),
                 parse_options=pv.ParseOptions(
                     delimiter=self.delimiter,
-                    quote_char='"' if self.quote == "csv" else False,
+                    quote_char='"' if self.quote_mode == "csv" else False,
                     escape_char=False,
-                    newlines_in_values=self.quote == "csv",
+                    newlines_in_values=self.quote_mode == "csv",
                     invalid_row_handler=self._skip_row if self.skip_malformed else None,
                 ),
                 convert_options=pv.ConvertOptions(
@@ -142,7 +150,7 @@ class DelimitedTextReader(FileReader):
                 return
             hint = (
                 " The file may contain literal double quotes; try quote_mode='literal' or 'by_delimiter'."
-                if self.quote == "csv" and str(exc).startswith("CSV parse error")
+                if self.quote_mode == "csv" and str(exc).startswith("CSV parse error")
                 else ""
             )
             raise IngestError(f"{self.path.name}: {exc}.{hint}") from exc

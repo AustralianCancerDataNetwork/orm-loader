@@ -397,12 +397,7 @@ class DuckDBBackend(DatabaseBackend):
             session.execute(stmt)
 
         def _drop_matched_from_staging(extra: sa.ColumnElement[bool] | None = None) -> None:
-            matched = sa.select(*(target.c[c] for c in pk_cols)).where(pk_join)
-            if len(pk_cols) == 1:
-                condition: sa.ColumnElement[bool] = staging.c[pk_cols[0]].in_(matched)
-            else:
-                condition = sa.tuple_(*(staging.c[c] for c in pk_cols)).in_(matched)
-            stmt = sa.delete(staging).where(condition)
+            stmt = sa.delete(staging).where(sa.exists().where(pk_join))
             if extra is not None:
                 stmt = stmt.where(extra)
             session.execute(stmt)

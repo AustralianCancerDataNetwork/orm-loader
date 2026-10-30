@@ -7,7 +7,7 @@ target table. Readers choose the file formats; backends choose the merge
 and index handling.
 """
 import logging
-from collections.abc import Collection, Mapping
+from collections.abc import Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from time import perf_counter
@@ -20,6 +20,7 @@ from sqlalchemy.exc import InvalidRequestError, UnboundExecutionError
 
 from ..backends.resolve import resolve_backend
 from ..conversion import ConversionPolicy
+from ..helpers import IngestError
 from ..loaders import FileReader, LoadReport, LoaderContext, open_reader, stage_file
 from .orm_table import ORMTableBase
 from .typing import FileTableProtocol
@@ -64,7 +65,6 @@ class FileLoadableTableInterface(ORMTableBase):
         session: so.Session,
         *,
         staging_schema_tag: str | None = None,
-        without: Collection[str] = (),
     ):
         """
         Create a fresh staging table for ingestion.
@@ -81,10 +81,6 @@ class FileLoadableTableInterface(ORMTableBase):
             schema_translate_map tag the staging table should be created
             under. ``None`` means no schema qualification (backend-default
             behavior).
-        without
-            Names of target columns the staging table leaves out. The merge
-            then leaves them out of its insert.
-
         Raises
         ------
         RuntimeError
@@ -94,7 +90,7 @@ class FileLoadableTableInterface(ORMTableBase):
         """
         _require_bind(session, cls)
         backend = resolve_backend(session, staging_schema_tag=staging_schema_tag, mapper=cls)
-        backend.create_staging_table(cls, session, without=without)
+        backend.create_staging_table(cls, session)
 
     @classmethod
     @contextmanager
@@ -112,6 +108,11 @@ class FileLoadableTableInterface(ORMTableBase):
         ``"keep"``. The backend decides what ``"auto"`` means. At the
         moment SQLite keeps indexes by default, while PostgreSQL drops
         and rebuilds them.
+
+        Raises
+        ------
+        IngestError
+            An index could not be rebuilt after a merge that was committed.
         """
         backend = resolve_backend(session, staging_schema_tag=staging_schema_tag, mapper=cls)
         resolved_index_strategy = backend.resolve_index_strategy(index_strategy)
@@ -143,6 +144,7 @@ class FileLoadableTableInterface(ORMTableBase):
                     f"{_format_elapsed(perf_counter() - commit_started)}."
                 )
 
+        merge_failed = False
         try:
             with backend.relaxed_foreign_keys(session, mapper=cls, no_autoflush=False):
                 yield
@@ -154,44 +156,83 @@ class FileLoadableTableInterface(ORMTableBase):
                     f"{_format_elapsed(perf_counter() - commit_started)}."
                 )
         except Exception as e:
+            merge_failed = True
             session.rollback()
             logger.error(f"Table `{table_name}`: Merge operation failed - {e}")
             raise
         finally:
             if indices:
-                logger.info(f"Table `{table_name}`: Verifying/Rebuilding indices.")
-                rebuild_started = perf_counter()
-                connection = session.connection(bind_arguments={"mapper": cls})
-                inspector = sa.inspect(connection)
-                schema = physical_schema_of(connection, schema_tag=cls.__table__.schema)
-                existing_idx_names = {idx['name'] for idx in inspector.get_indexes(table_name, schema=schema)}
-               
-                for idx in indices:
-                    if idx.name not in existing_idx_names:
-                        try:
-                            logger.info(f"Table `{table_name}`: Restoring missing index: {idx.name}")
-                            create_started = perf_counter()
-                            session.execute(sa.schema.CreateIndex(idx))
-                            logger.info(
-                                f"Table `{table_name}`: Restored missing index `{idx.name}` in "
-                                f"{_format_elapsed(perf_counter() - create_started)}."
-                            )
-                            logger.info(f"Table `{table_name}`: Committing restored index `{idx.name}`.")
-                            commit_started = perf_counter()
-                            session.commit()
-                            logger.info(
-                                f"Table `{table_name}`: Commit after restoring index `{idx.name}` "
-                                f"completed in {_format_elapsed(perf_counter() - commit_started)}."
-                           )
-                        except Exception as e:
-                            session.rollback()
-                            logger.error(f"Table `{table_name}`: Failed to restore {idx.name}: {e}")
-                    else:
-                        logger.debug(f"Table `{table_name}`: Index {idx.name} already exists on disk. Skipping.")
-                logger.info(
-                    f"Table `{table_name}`: Index verification/rebuild completed in "
-                    f"{_format_elapsed(perf_counter() - rebuild_started)}."
-                )
+                try:
+                    failed_indices = cls._restore_indices(session, indices)
+                except Exception as e:
+                    if not merge_failed:
+                        raise
+                    logger.error(f"Table `{table_name}`: Index rebuild after the failed merge also failed - {e}")
+                else:
+                    if failed_indices and not merge_failed:
+                        raise IngestError(
+                            f"Table `{table_name}`: the merge was committed but index(es) {failed_indices} could not be rebuilt."
+                        )
+
+
+    @classmethod
+    def _restore_indices(
+        cls: Type['FileTableProtocol'],
+        session: so.Session,
+        indices: list[sa.Index],
+    ) -> list[str]:
+        """
+        Recreate the given indexes that are missing from the table.
+
+        Parameters
+        ----------
+        session
+            An active SQLAlchemy session.
+        indices
+            Indexes the table is expected to have.
+
+        Returns
+        -------
+        list[str]
+            Names of the indexes that could not be recreated.
+        """
+        table_name = cls.__tablename__
+        failed_indices: list[str] = []
+        logger.info(f"Table `{table_name}`: Verifying/Rebuilding indices.")
+        rebuild_started = perf_counter()
+        connection = session.connection(bind_arguments={"mapper": cls})
+        inspector = sa.inspect(connection)
+        schema = physical_schema_of(connection, schema_tag=cls.__table__.schema)
+        existing_idx_names = {idx['name'] for idx in inspector.get_indexes(table_name, schema=schema)}
+
+        for idx in indices:
+            if idx.name not in existing_idx_names:
+                try:
+                    logger.info(f"Table `{table_name}`: Restoring missing index: {idx.name}")
+                    create_started = perf_counter()
+                    session.execute(sa.schema.CreateIndex(idx))
+                    logger.info(
+                        f"Table `{table_name}`: Restored missing index `{idx.name}` in "
+                        f"{_format_elapsed(perf_counter() - create_started)}."
+                    )
+                    logger.info(f"Table `{table_name}`: Committing restored index `{idx.name}`.")
+                    commit_started = perf_counter()
+                    session.commit()
+                    logger.info(
+                        f"Table `{table_name}`: Commit after restoring index `{idx.name}` "
+                        f"completed in {_format_elapsed(perf_counter() - commit_started)}."
+                   )
+                except Exception as e:
+                    session.rollback()
+                    failed_indices.append(str(idx.name))
+                    logger.error(f"Table `{table_name}`: Failed to restore {idx.name}: {e}")
+            else:
+                logger.debug(f"Table `{table_name}`: Index {idx.name} already exists on disk. Skipping.")
+        logger.info(
+            f"Table `{table_name}`: Index verification/rebuild completed in "
+            f"{_format_elapsed(perf_counter() - rebuild_started)}."
+        )
+        return failed_indices
 
 
     @classmethod
@@ -262,37 +303,9 @@ class FileLoadableTableInterface(ORMTableBase):
         """
         session, tag = loader_context.session, loader_context.staging_schema_tag
         _require_bind(session, cls)
-        left_out = set() if reader.empty else cls.autoincrement_columns() - set(reader.columns)
-        cls.create_staging_table(session, staging_schema_tag=tag, without=left_out)
+        cls.create_staging_table(session, staging_schema_tag=tag)
         staging = cls.get_staging_table(session, staging_schema_tag=tag)
         return stage_file(loader_context, reader, staging)
-
-    @classmethod
-    def _select_reader(cls: Type[FileTableProtocol], ctx: LoaderContext) -> FileReader:
-        """
-        Select the reader for a file. Override to read other formats.
-
-        The default picks the reader from the file suffix: Parquet for
-        ``.parquet`` and delimited text for every other suffix.
-
-        Parameters
-        ----------
-        ctx
-            Context of the load.
-
-        Returns
-        -------
-        FileReader
-            Reader for the file.
-        """
-        return open_reader(
-            ctx.path,
-            ctx.tableclass.model_columns(),
-            nulls=ctx.policy.nulls,
-            quote_mode=ctx.quote_mode,
-            chunksize=ctx.chunksize,
-            skip_malformed=ctx.policy.errors.on_error == "reject_row",
-        )
 
     @classmethod
     def load_file(
@@ -305,7 +318,7 @@ class FileLoadableTableInterface(ORMTableBase):
         dedupe: bool = False,
         chunksize: int | None = None,
         merge_strategy: str = "replace",
-        quote_mode: str = "by_delimiter",
+        quote_mode: str | None = None,
         index_strategy: str = "auto",
         merge_batch_size: int | None = None,
         staging_schema_tag: str | None = None,
@@ -334,8 +347,10 @@ class FileLoadableTableInterface(ORMTableBase):
         path
             Path to the input file.
         reader
-            Reader for the file. The table's ``_select_reader`` chooses one
-            when omitted, and ``chunksize`` and ``quote_mode`` then configure it.
+            Reader for the file. ``open_reader`` chooses one from the file
+            suffix when omitted, and ``chunksize`` and ``quote_mode`` then
+            configure it. Passing either together with a reader is an error, because the
+            reader is already configured.
         normalise
             Whether to convert values to the column types under the policy.
             When false, values are written as read.
@@ -346,7 +361,7 @@ class FileLoadableTableInterface(ORMTableBase):
             rows.
         merge_strategy
             Merge strategy to apply (e.g. ``replace``, ``upsert``, or
-            ``insert_if_empty``).
+            ``insert``).
         quote_mode
             How double quotes in delimited text are read: ``"csv"`` (field
             quoting), ``"literal"`` (kept as data), ``"by_delimiter"``
@@ -403,22 +418,18 @@ class FileLoadableTableInterface(ORMTableBase):
                 f"File name '{path.name}' does not match table '{cls.__tablename__}'"
             )
 
-        if merge_strategy == "insert_if_empty":
-            logger.info(
-                f"Table `{cls.__tablename__}`: Checking whether target table is empty before staging load."
+        if reader is not None and (chunksize is not None or quote_mode is not None):
+            raise ValueError("chunksize and quote_mode configure the default reader; set them on the reader passed as `reader`")
+        policy = policy or ConversionPolicy()
+        if reader is None:
+            reader = open_reader(
+                path,
+                cls.model_columns(),
+                nulls=policy.nulls,
+                quote_mode=quote_mode,
+                chunksize=chunksize,
+                skip_malformed=policy.errors.on_error == "reject_row",
             )
-            check_started = perf_counter()
-            has_rows = cls._target_has_rows(session=session)
-            logger.info(
-                f"Table `{cls.__tablename__}`: Pre-load empty-table check completed in "
-                f"{_format_elapsed(perf_counter() - check_started)}."
-            )
-
-            if has_rows:
-                raise ValueError(
-                    f"Table `{cls.__tablename__}` is not empty; cannot use merge strategy "
-                    f"'insert_if_empty'"
-                )
 
         if merge_strategy == "replace":
             backend = resolve_backend(session, staging_schema_tag=staging_schema_tag, mapper=cls)
@@ -432,12 +443,10 @@ class FileLoadableTableInterface(ORMTableBase):
             tableclass=cls,
             session=session,
             path=path,
-            chunksize=chunksize,
             normalise=normalise,
             dedupe=dedupe,
-            quote_mode=quote_mode,
             staging_schema_tag=staging_schema_tag,
-            policy=policy or ConversionPolicy(),
+            policy=policy,
             rejects_dir=rejects_dir,
             report=report or LoadReport(),
         )
@@ -445,7 +454,7 @@ class FileLoadableTableInterface(ORMTableBase):
         try:
             # Load to staging (Indices are already excluded via updated create_staging_table)
             logger.info(f"Table `{cls.__tablename__}`: Loading data into staging table")
-            total = cls.load_staging(loader_context, reader or cls._select_reader(loader_context))
+            total = cls.load_staging(loader_context, reader)
 
             # Merge staging to target (Wrapped in our index dropper!)
             logger.info(f"Table `{cls.__tablename__}`: Merging staging data into target table")
@@ -559,7 +568,7 @@ class FileLoadableTableInterface(ORMTableBase):
             An active SQLAlchemy session.
         merge_strategy
             Merge strategy to apply (for example ``replace``,
-            ``upsert``, or ``insert_if_empty``).
+            ``upsert``, or ``insert``).
         staging_schema_tag
             schema_translate_map tag the staging table lives in. ``None``
             means no schema qualification (backend-default behavior).
@@ -581,25 +590,6 @@ class FileLoadableTableInterface(ORMTableBase):
             resolved=resolved,
             physical_schemas=physical_schemas,
         )
-        target_empty_confirmed = False
-        if merge_strategy in {"replace", "upsert"}:
-            logger.info(
-                f"Table `{target}`: Checking whether target table is empty for merge optimisation."
-            )
-            check_started = perf_counter()
-            has_rows = cls._target_has_rows(session=session)
-            logger.info(
-                f"Table `{target}`: Empty-table optimisation check completed in "
-                f"{_format_elapsed(perf_counter() - check_started)}."
-            )
-            if not has_rows:
-                logger.info(
-                    f"Table `{target}`: Target table is empty; routing merge strategy "
-                    f"`{merge_strategy}` to insert-if-empty fast path."
-                )
-                target_empty_confirmed = True
-                merge_strategy = "insert_if_empty"
-
         if merge_strategy == "replace":
             logger.info(f"Table `{target}`: Merge replace delete phase starting.")
             delete_started = perf_counter()
@@ -620,6 +610,11 @@ class FileLoadableTableInterface(ORMTableBase):
                 f"{_format_elapsed(perf_counter() - insert_started)}."
             )
         elif merge_strategy == "upsert":
+            if not cls._target_has_rows(session=session):
+                logger.info(
+                    f"Table `{target}`: The target table is empty, so merge strategy `insert` "
+                    "with `dedupe=True` loads the same rows faster."
+                )
             logger.info(f"Table `{target}`: Merge upsert phase starting.")
             upsert_started = perf_counter()
             backend.merge_upsert(
@@ -629,29 +624,14 @@ class FileLoadableTableInterface(ORMTableBase):
                 f"Table `{target}`: Merge upsert phase completed in "
                 f"{_format_elapsed(perf_counter() - upsert_started)}."
             )
-        elif merge_strategy == "insert_if_empty":
-            if not target_empty_confirmed:
-                logger.info(f"Table `{target}`: Checking whether target table is empty.")
-                check_started = perf_counter()
-                has_rows = cls._target_has_rows(session=session)
-                logger.info(
-                    f"Table `{target}`: Empty-table check completed in "
-                    f"{_format_elapsed(perf_counter() - check_started)}."
-                )
-
-                if has_rows:
-                    raise ValueError(
-                        f"Table `{target}` is not empty; cannot use merge strategy "
-                        f"'insert_if_empty'"
-                    )
-
-            logger.info(f"Table `{target}`: Merge insert-if-empty phase starting.")
+        elif merge_strategy == "insert":
+            logger.info(f"Table `{target}`: Merge insert phase starting.")
             insert_started = perf_counter()
             backend.merge_insert(
                 cls, session, merge_batch_size=merge_batch_size, validate_deferred_fks=validate_deferred_fks
             )
             logger.info(
-                f"Table `{target}`: Merge insert-if-empty phase completed in "
+                f"Table `{target}`: Merge insert phase completed in "
                 f"{_format_elapsed(perf_counter() - insert_started)}."
             )
         else:

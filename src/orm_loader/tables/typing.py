@@ -1,7 +1,7 @@
 from typing import Protocol, ClassVar, runtime_checkable, TYPE_CHECKING, Optional, Type, Dict, Any, Unpack, TypedDict
 import sqlalchemy.orm as so
 import sqlalchemy as sa
-from collections.abc import Collection, Mapping
+from collections.abc import Mapping
 from pathlib import Path
 from contextlib import AbstractContextManager
 if TYPE_CHECKING:
@@ -52,7 +52,6 @@ class ORMTableProtocol(Protocol):
     def required_columns(cls) -> set[str]: ...
 
     @classmethod
-    def autoincrement_columns(cls) -> set[str]: ...
 
     @classmethod
     def column_defaults(cls) -> dict[str, Any]: ...
@@ -74,11 +73,8 @@ class FileTableProtocol(ORMTableProtocol, Protocol):
     """
 
     @classmethod
-    def _select_reader(cls, ctx: "LoaderContext") -> "FileReader": ...
-
-    @classmethod
     def create_staging_table(
-        cls, session: so.Session, *, staging_schema_tag: str | None = None, without: Collection[str] = ()
+        cls, session: so.Session, *, staging_schema_tag: str | None = None
     ) -> None: ...
 
     @classmethod
@@ -95,7 +91,7 @@ class FileTableProtocol(ORMTableProtocol, Protocol):
         dedupe: bool = False,
         chunksize: int | None = None,
         merge_strategy: str = "replace",
-        quote_mode: str = "by_delimiter",
+        quote_mode: str | None = None,
         index_strategy: str = "auto",
         merge_batch_size: int | None = None,
         staging_schema_tag: str | None = None,
@@ -138,6 +134,9 @@ class FileTableProtocol(ORMTableProtocol, Protocol):
 
     @classmethod
     def _target_has_rows(cls, session: so.Session) -> bool: ...
+
+    @classmethod
+    def _restore_indices(cls, session: so.Session, indices: list[sa.Index]) -> list[str]: ...
 
     @classmethod
     def manage_indices(

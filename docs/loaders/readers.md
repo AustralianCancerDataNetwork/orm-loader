@@ -2,7 +2,7 @@
 
 A reader yields a file as Arrow record batches holding the model columns present in the file. Text formats yield raw strings, so the conversion policy sees exactly what the file contains. Typed formats yield their stored types.
 
-`open_reader` picks the reader from the file suffix: `.parquet` is read as Parquet, any other suffix as delimited text. A table chooses its reader in `_select_reader`, and `load_file(reader=...)` passes one explicitly.
+`open_reader` picks the reader from the file suffix: `.parquet` is read as Parquet, any other suffix as delimited text. `load_file` opens the reader with it, taking `quote_mode` and `chunksize` as arguments, and `load_file(reader=...)` passes a configured reader explicitly.
 
 | Reader | Input |
 |------|------|

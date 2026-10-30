@@ -269,7 +269,7 @@ def test_merge_strategies(sqlite_session, tmp_path, merge_strategy, expected_row
     assert [(r.id, r.name) for r in rows] == expected_rows
 
 
-def test_insert_if_empty_merge_strategy(sqlite_session, tmp_path):
+def test_insert_merge_strategy(sqlite_session, tmp_path):
     csv_path = tmp_path / "test_table.csv"
 
     pd.DataFrame(
@@ -283,7 +283,7 @@ def test_insert_if_empty_merge_strategy(sqlite_session, tmp_path):
         sqlite_session,
         csv_path,
         dedupe=False,
-        merge_strategy="insert_if_empty",
+        merge_strategy="insert",
     )
     sqlite_session.commit()
 
@@ -297,23 +297,22 @@ def test_insert_if_empty_merge_strategy(sqlite_session, tmp_path):
     ]
 
 
-def test_insert_if_empty_raises_on_non_empty_target(sqlite_session, sqlite_engine, tmp_path):
+def test_insert_adds_new_keys_to_a_populated_target_and_fails_on_an_existing_key(sqlite_session, sqlite_engine, tmp_path):
     csv_path = tmp_path / "test_table.csv"
 
     pd.DataFrame([{"id": 1, "name": "alpha"}]).to_csv(csv_path, index=False, sep="\t")
-
     _SimpleTable.load_file(sqlite_session, csv_path, dedupe=False)
     sqlite_session.commit()
 
     pd.DataFrame([{"id": 2, "name": "beta"}]).to_csv(csv_path, index=False, sep="\t")
+    _SimpleTable.load_file(sqlite_session, csv_path, dedupe=False, merge_strategy="insert")
+    sqlite_session.commit()
+    rows = sqlite_session.execute(sa.select(SimpleTable.id, SimpleTable.name).order_by(SimpleTable.id)).all()
+    assert [tuple(r) for r in rows] == [(1, "alpha"), (2, "beta")]
 
-    with pytest.raises(ValueError, match="is not empty; cannot use merge strategy 'insert_if_empty'"):
-        _SimpleTable.load_file(
-            sqlite_session,
-            csv_path,
-            dedupe=False,
-            merge_strategy="insert_if_empty",
-        )
+    pd.DataFrame([{"id": 2, "name": "again"}]).to_csv(csv_path, index=False, sep="\t")
+    with pytest.raises(sa.exc.IntegrityError):
+        _SimpleTable.load_file(sqlite_session, csv_path, dedupe=False, merge_strategy="insert")
 
     inspector = sa.inspect(sqlite_engine)
     staging_name = resolve_backend(sqlite_engine).staging_name_for_table(SimpleTable.__tablename__)
@@ -321,7 +320,7 @@ def test_insert_if_empty_raises_on_non_empty_target(sqlite_session, sqlite_engin
 
 
 @pytest.mark.parametrize("merge_strategy", ["replace", "upsert"])
-def test_empty_target_routes_merge_to_insert_if_empty(sqlite_session, tmp_path, caplog, merge_strategy):
+def test_empty_target_runs_the_requested_merge(sqlite_session, tmp_path, caplog, merge_strategy):
     csv_path = tmp_path / "test_table.csv"
 
     pd.DataFrame(
@@ -351,16 +350,12 @@ def test_empty_target_routes_merge_to_insert_if_empty(sqlite_session, tmp_path, 
 
     messages = [record.getMessage() for record in caplog.records]
 
-    assert any("Checking whether target table is empty for merge optimisation." in message for message in messages)
-    assert any(
-        f"Target table is empty; routing merge strategy `{merge_strategy}` to insert-if-empty fast path."
-        in message
-        for message in messages
-    )
-    assert any("Merge insert-if-empty phase starting." in message for message in messages)
-    assert not any("Checking whether target table is empty." in message for message in messages)
-    assert not any("Merge replace delete phase starting." in message for message in messages)
-    assert not any("Merge upsert phase starting." in message for message in messages)
+    if merge_strategy == "replace":
+        assert any("Merge replace delete phase starting." in message for message in messages)
+        assert any("Merge insert phase starting." in message for message in messages)
+    else:
+        assert any("Merge upsert phase starting." in message for message in messages)
+        assert not any("Merge insert phase starting." in message for message in messages)
 
 
 def test_staging_table_is_created_and_dropped(sqlite_session, sqlite_engine, tmp_path):
@@ -585,6 +580,30 @@ def test_explicit_drop_rebuild_on_sqlite_restores_index(sqlite_session, sqlite_e
     inspector = sa.inspect(sqlite_engine)
     inspector.clear_cache()
     assert "ix_test_table_name" in {idx["name"] for idx in inspector.get_indexes("test_table")}
+
+
+def test_a_failed_index_rebuild_raises_after_the_merge_is_committed(sqlite_session, tmp_path, monkeypatch):
+    csv_path = tmp_path / "test_table.csv"
+    pd.DataFrame([{"id": 1, "name": "alpha"}]).to_csv(csv_path, index=False, sep="\t")
+
+    def failing_create_index(index):
+        raise sa.exc.OperationalError("CREATE INDEX", {}, Exception("disk full"))
+
+    monkeypatch.setattr(sa.schema, "CreateIndex", failing_create_index)
+
+    with pytest.raises(IngestError, match="ix_test_table_name"):
+        _SimpleTable.load_file(sqlite_session, csv_path, index_strategy="drop_rebuild")
+
+    assert sqlite_session.execute(sa.select(sa.func.count()).select_from(SimpleTable)).scalar_one() == 1
+
+
+def test_a_failed_merge_is_not_masked_by_a_failed_index_rebuild(sqlite_session, tmp_path, monkeypatch):
+    csv_path = tmp_path / "test_table.csv"
+    pd.DataFrame([{"id": 1, "name": "a"}, {"id": 1, "name": "b"}]).to_csv(csv_path, index=False, sep="\t")
+    monkeypatch.setattr(sa.schema, "CreateIndex", lambda index: (_ for _ in ()).throw(RuntimeError("no index")))
+
+    with pytest.raises(sa.exc.IntegrityError):
+        _SimpleTable.load_file(sqlite_session, csv_path, index_strategy="drop_rebuild")
 
 
 def test_drop_rebuild_logging_shows_merge_phases(sqlite_session, tmp_path, caplog):

@@ -15,7 +15,7 @@ def open_reader(
     model_columns: Mapping[str, sa.ColumnElement[Any]],
     *,
     nulls: NullPolicy | None = None,
-    quote_mode: str = "by_delimiter",
+    quote_mode: str | None = None,
     chunksize: int | None = None,
     skip_malformed: bool = False,
 ) -> FileReader:
@@ -33,7 +33,7 @@ def open_reader(
     nulls
         Null policy of the load.
     quote_mode
-        Quote handling for delimited text.
+        Quote handling for delimited text. ``None`` uses the reader's default.
     chunksize
         Rows per batch for formats that batch by rows.
     skip_malformed

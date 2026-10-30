@@ -59,7 +59,7 @@ def test_load_file_respects_non_default_schema_end_to_end(pg_db, tmp_path):
 def test_replace_merge_respects_non_default_schema_end_to_end(pg_db, tmp_path):
     """A second load_file() call with merge_strategy="replace" against the
     same non-default schema. Proves the merge path itself, not just the
-    initial insert-if-empty fast path, qualifies correctly."""
+    initial insert, qualifies correctly."""
     with schema_scoped_session(pg_db, SimpleTable.__table__, prefix="loader_replace") as (scoped, session):
         schema = scoped.schemas[SchemaRole.PRIMARY]
 

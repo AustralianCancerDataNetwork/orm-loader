@@ -161,3 +161,12 @@ def test_a_column_type_without_a_handler_is_fine_when_values_are_not_interpreted
     with pytest.raises(PolicyError, match="demo_blob"):
         table.load_file(dialect_session, path, staging_schema_tag=tag)
     assert table.load_file(dialect_session, path, staging_schema_tag=tag, normalise=False) == 1
+
+
+@pytest.mark.parametrize("option", [{"quote_mode": "csv"}, {"chunksize": 10}])
+def test_reader_options_alongside_a_reader_are_refused(dialect_session, tmp_path, option):
+    path = tmp_path / "demo_record.csv"
+    path.write_text("demo_id,demo_label,demo_number\n1,a,1\n")
+    reader = DelimitedTextReader(path, DemoRecord.model_columns())
+    with pytest.raises(ValueError, match="configure the default reader"):
+        _Demo.load_file(dialect_session, path, reader=reader, **option)
