@@ -482,7 +482,7 @@ class DatabaseBackend(ABC):
         self,
         table_cls: Type["FileTableProtocol"],
         session: so.Session,
-    ) -> None:
+    ) -> sa.Table:
         """
         Create the staging table for a table class, replacing an existing one.
 
@@ -497,6 +497,11 @@ class DatabaseBackend(ABC):
             Table the staging table is for.
         session
             Session whose connection creates the table.
+
+        Returns
+        -------
+        sqlalchemy.Table
+            The staging table as created.
         """
         self.drop_staging_table(table_cls, session)
         columns = [
@@ -507,6 +512,7 @@ class DatabaseBackend(ABC):
         staging = self._staging_table(table_cls, columns)
         staging.create(bind=session.connection(bind_arguments={"mapper": table_cls}), checkfirst=True)
         session.commit()
+        return staging
 
     def drop_staging_table(
         self,
@@ -694,6 +700,7 @@ class DatabaseBackend(ABC):
         table_cls: Type["FileTableProtocol"],
         session: so.Session,
         pk_cols: list[str],
+        staging: sa.Table,
         *,
         merge_batch_size: int | None = None,
         validate_deferred_fks: bool = True,
@@ -712,6 +719,7 @@ class DatabaseBackend(ABC):
         table_cls: Type["FileTableProtocol"],
         session: so.Session,
         pk_cols: list[str],
+        staging: sa.Table,
         *,
         merge_batch_size: int | None = None,
         validate_deferred_fks: bool = True,
@@ -727,6 +735,7 @@ class DatabaseBackend(ABC):
         self,
         table_cls: Type["FileTableProtocol"],
         session: so.Session,
+        staging: sa.Table,
         *,
         merge_batch_size: int | None = None,
         validate_deferred_fks: bool = True,

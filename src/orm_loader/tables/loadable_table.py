@@ -18,6 +18,7 @@ import sqlalchemy.orm as so
 from oa_configurator import ResolvedDatabase, physical_schema_of
 from sqlalchemy.exc import InvalidRequestError, UnboundExecutionError
 
+from ..backends.base import DatabaseBackend
 from ..backends.resolve import resolve_backend
 from ..conversion import ConversionPolicy
 from ..helpers import IngestError
@@ -66,7 +67,7 @@ class FileLoadableTableInterface(ORMTableBase):
         session: so.Session,
         index_strategy: str = "auto",
         *,
-        staging_schema_tag: str | None = None,
+        backend: DatabaseBackend,
     ) -> Generator[None, None, None]:
         """
         Manage non-primary-key indexes around a staged merge.
@@ -81,7 +82,6 @@ class FileLoadableTableInterface(ORMTableBase):
         IngestError
             An index could not be rebuilt after a merge that was committed.
         """
-        backend = resolve_backend(session, staging_schema_tag=staging_schema_tag, mapper=cls)
         resolved_index_strategy = backend.resolve_index_strategy(index_strategy)
         table_name = cls.__tablename__
 
@@ -200,51 +200,6 @@ class FileLoadableTableInterface(ORMTableBase):
         )
         return failed_indices
 
-
-    @classmethod
-    def get_staging_table(
-        cls: Type[FileTableProtocol],
-        session: so.Session,
-        *,
-        staging_schema_tag: str | None = None,
-    ) -> sa.Table:
-        """
-        Return the reflected staging table.
-
-        Parameters
-        ----------
-        session
-            An active SQLAlchemy session bound to an engine.
-        staging_schema_tag
-            schema_translate_map tag the staging table lives in. ``None``
-            means no schema qualification (backend-default behavior).
-
-        Returns
-        -------
-        sqlalchemy.Table
-            The reflected staging table.
-
-        Raises
-        ------
-        sqlalchemy.exc.NoSuchTableError
-            The staging table has not been created.
-
-        Notes
-        -----
-        Reflects via ``session.connection()``, not the bare engine. On
-        SQLite's SingletonThreadPool a second connection opened straight
-        from the engine is the same underlying DBAPI connection, and closing
-        that second wrapper resets its perceived transaction state, silently
-        discarding the session's own uncommitted work.
-        """
-        _require_bind(session, cls)
-        backend = resolve_backend(session, staging_schema_tag=staging_schema_tag, mapper=cls)
-        return sa.Table(
-            backend.staging_name_for_table(cls.__tablename__),
-            sa.MetaData(),  # throwaway — keeps staging table out of Base.metadata
-            autoload_with=session.connection(bind_arguments={"mapper": cls}),
-            schema=backend.staging_schema,
-        )
 
     @classmethod
     def load_file(
@@ -391,9 +346,9 @@ class FileLoadableTableInterface(ORMTableBase):
             tableclass=cls,
             session=session,
             path=path,
+            backend=backend,
             normalise=normalise,
             dedupe=dedupe,
-            staging_schema_tag=staging_schema_tag,
             policy=policy,
             rejects_dir=rejects_dir,
             report=report or LoadReport(),
@@ -403,20 +358,18 @@ class FileLoadableTableInterface(ORMTableBase):
             # SQLite cannot switch foreign key checks inside a transaction, so relax before staging writes.
             with backend.relaxed_foreign_keys(session, mapper=cls, no_autoflush=False):
                 logger.info(f"Table `{cls.__tablename__}`: Loading data into staging table")
-                backend.create_staging_table(cls, session)
-                staging = cls.get_staging_table(session, staging_schema_tag=staging_schema_tag)
+                staging = backend.create_staging_table(cls, session)
                 total = stage_file(loader_context, reader, staging)
 
                 logger.info(f"Table `{cls.__tablename__}`: Merging staging data into target table")
-                with cls.manage_indices(session, index_strategy=index_strategy, staging_schema_tag=staging_schema_tag):
+                with cls.manage_indices(session, index_strategy, backend=backend):
                     cls.merge_from_staging(
                         session,
-                        merge_strategy=merge_strategy,
+                        merge_strategy,
+                        backend=backend,
+                        staging=staging,
                         merge_batch_size=merge_batch_size,
-                        staging_schema_tag=staging_schema_tag,
                         validate_deferred_fks=validate_deferred_fks,
-                        resolved=resolved,
-                        physical_schemas=physical_schemas,
                     )
                     if validate_deferred_fks:
                         logger.info(f"Table `{cls.__tablename__}`: Validating deferred foreign keys.")
@@ -496,11 +449,10 @@ class FileLoadableTableInterface(ORMTableBase):
         session: so.Session,
         merge_strategy: str = "replace",
         *,
+        backend: DatabaseBackend,
+        staging: sa.Table,
         merge_batch_size: int | None = None,
-        staging_schema_tag: str | None = None,
         validate_deferred_fks: bool = True,
-        resolved: ResolvedDatabase | None = None,
-        physical_schemas: Mapping[str, str | None] | None = None,
     ):
         """
         Merge data from the staging table into the target table.
@@ -512,32 +464,25 @@ class FileLoadableTableInterface(ORMTableBase):
         merge_strategy
             Merge strategy to apply (for example ``replace``,
             ``upsert``, or ``insert``).
-        staging_schema_tag
-            schema_translate_map tag the staging table lives in. ``None``
-            means no schema qualification (backend-default behavior).
+        backend
+            Backend of the session's database.
+        staging
+            Staging table the rows are merged from.
+        merge_batch_size
+            Rows per merge batch, or ``None`` for one statement.
         validate_deferred_fks
             Forwarded to the backend's merge methods, which validate
             deferred FKs before every intermediate commit a batched merge
             makes. See ``load_file()``.
-        resolved, physical_schemas
-            Forwarded to ``resolve_backend()``. See ``load_file()``.
         """
         target = cls.__tablename__
         pk_cols = cls.pk_names()
 
-        _require_bind(session, cls)
-        backend = resolve_backend(
-            session,
-            staging_schema_tag=staging_schema_tag,
-            mapper=cls,
-            resolved=resolved,
-            physical_schemas=physical_schemas,
-        )
         if merge_strategy == "replace":
             logger.info(f"Table `{target}`: Merge replace delete phase starting.")
             delete_started = perf_counter()
             backend.merge_replace(
-                cls, session, pk_cols, merge_batch_size=merge_batch_size, validate_deferred_fks=validate_deferred_fks
+                cls, session, pk_cols, staging, merge_batch_size=merge_batch_size, validate_deferred_fks=validate_deferred_fks
             )
             logger.info(
                 f"Table `{target}`: Merge replace delete phase completed in "
@@ -546,7 +491,7 @@ class FileLoadableTableInterface(ORMTableBase):
             logger.info(f"Table `{target}`: Merge insert phase starting.")
             insert_started = perf_counter()
             backend.merge_insert(
-                cls, session, merge_batch_size=merge_batch_size, validate_deferred_fks=validate_deferred_fks
+                cls, session, staging, merge_batch_size=merge_batch_size, validate_deferred_fks=validate_deferred_fks
             )
             logger.info(
                 f"Table `{target}`: Merge insert phase completed in "
@@ -561,7 +506,7 @@ class FileLoadableTableInterface(ORMTableBase):
             logger.info(f"Table `{target}`: Merge upsert phase starting.")
             upsert_started = perf_counter()
             backend.merge_upsert(
-                cls, session, pk_cols, merge_batch_size=merge_batch_size, validate_deferred_fks=validate_deferred_fks
+                cls, session, pk_cols, staging, merge_batch_size=merge_batch_size, validate_deferred_fks=validate_deferred_fks
             )
             logger.info(
                 f"Table `{target}`: Merge upsert phase completed in "
@@ -571,7 +516,7 @@ class FileLoadableTableInterface(ORMTableBase):
             logger.info(f"Table `{target}`: Merge insert phase starting.")
             insert_started = perf_counter()
             backend.merge_insert(
-                cls, session, merge_batch_size=merge_batch_size, validate_deferred_fks=validate_deferred_fks
+                cls, session, staging, merge_batch_size=merge_batch_size, validate_deferred_fks=validate_deferred_fks
             )
             logger.info(
                 f"Table `{target}`: Merge insert phase completed in "

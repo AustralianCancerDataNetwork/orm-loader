@@ -90,7 +90,7 @@ class EnumTable(Base, FileLoadableTableInterface):
 
 class ComputedColumnTable(Base, FileLoadableTableInterface):
     """A real, registered table with a computed column, for merge-method
-    tests that need get_staging_table() to work. Unlike a bare
+    tests that need a staging table to be reflected. Unlike a bare
     __tablename__/__table__ pair, this actually implements
     FileLoadableTableInterface."""
 

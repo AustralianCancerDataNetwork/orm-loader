@@ -269,6 +269,20 @@ def test_merge_strategies(sqlite_session, tmp_path, merge_strategy, expected_row
     assert [(r.id, r.name) for r in rows] == expected_rows
 
 
+def test_a_load_resolves_its_backend_once(sqlite_session, tmp_path, monkeypatch):
+    import orm_loader.tables.loadable_table as loadable_table
+
+    calls = []
+    original = loadable_table.resolve_backend
+    monkeypatch.setattr(loadable_table, "resolve_backend", lambda *a, **k: calls.append(1) or original(*a, **k))
+    csv_path = tmp_path / "test_table.csv"
+    pd.DataFrame([{"id": 1, "name": "alpha"}]).to_csv(csv_path, index=False, sep="\t")
+
+    _SimpleTable.load_file(sqlite_session, csv_path, dedupe=False, merge_strategy="insert")
+
+    assert len(calls) == 1
+
+
 def test_insert_merge_strategy(sqlite_session, tmp_path):
     csv_path = tmp_path / "test_table.csv"
 

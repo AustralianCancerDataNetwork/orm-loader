@@ -21,6 +21,7 @@ on globals or implicit configuration.
 | `tableclass` | Target ORM table class |
 | `session` | Active SQLAlchemy session |
 | `path` | Path to the input file |
+| `backend` | The session's database backend, resolved once for the load |
 | `normalise` | Whether to interpret values under the policy; when false, values are written as read |
 | `dedupe` | Whether the staging table keeps only the first row for each primary key |
 | `policy` | `ConversionPolicy`: how values are interpreted and what happens to unreadable ones |

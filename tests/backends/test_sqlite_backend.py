@@ -65,6 +65,7 @@ def test_sqlite_backend_rejects_non_positive_merge_batch_size(merge_batch_size, 
     args = [_ComputedTableCls, sqlite_session]
     if merge_strategy in {"replace", "upsert"}:
         args.append(["id"])
+    args.append(sa.Table("staging", sa.MetaData()))
 
     with pytest.raises(ValueError, match="merge_batch_size must be a positive integer or None"):
         merge(*args, merge_batch_size=merge_batch_size)

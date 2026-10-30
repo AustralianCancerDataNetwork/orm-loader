@@ -7,6 +7,7 @@ from contextlib import AbstractContextManager
 if TYPE_CHECKING:
     from oa_configurator import ResolvedDatabase
 
+    from ..backends.base import DatabaseBackend
     from ..conversion import ConversionPolicy
     from ..loaders import FileReader, LoadReport
 
@@ -96,19 +97,15 @@ class FileTableProtocol(ORMTableProtocol, Protocol):
     ) -> int: ...
 
     @classmethod
-    def get_staging_table(cls, session: so.Session, *, staging_schema_tag: str | None = None) -> sa.Table: ...
-
-    @classmethod
     def merge_from_staging(
         cls,
         session: so.Session,
         merge_strategy: str = "replace",
         *,
+        backend: "DatabaseBackend",
+        staging: sa.Table,
         merge_batch_size: int | None = None,
-        staging_schema_tag: str | None = None,
         validate_deferred_fks: bool = True,
-        resolved: Optional["ResolvedDatabase"] = None,
-        physical_schemas: Optional[Mapping[str, str | None]] = None,
     ) -> None: ...
 
     @classmethod
@@ -129,7 +126,7 @@ class FileTableProtocol(ORMTableProtocol, Protocol):
 
     @classmethod
     def manage_indices(
-        cls, session: so.Session, index_strategy: str = "auto", *, staging_schema_tag: str | None = None
+        cls, session: so.Session, index_strategy: str = "auto", *, backend: "DatabaseBackend"
     ) -> AbstractContextManager[None]:
         ...
     

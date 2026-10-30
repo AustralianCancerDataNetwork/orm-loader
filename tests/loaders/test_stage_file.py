@@ -18,6 +18,7 @@ def test_loader_context_fields(sqlite_session):
     ctx = LoaderContext(
         tableclass=FileLoaderTable,
         session=sqlite_session,
+        backend=resolve_backend(sqlite_session, mapper=FileLoaderTable),
         path=Path("file.csv"),
         normalise=False,
         dedupe=True,
@@ -42,6 +43,7 @@ def test_stage_file_case_insensitive_headers(tmp_path, sqlite_session):
     ctx = LoaderContext(
         tableclass=FileLoaderTable,
         session=sqlite_session,
+        backend=resolve_backend(sqlite_session, mapper=FileLoaderTable),
         path=csv,
         dedupe=True,
     )
@@ -73,6 +75,7 @@ def test_stage_file_literal_mode_preserves_quotes(tmp_path, sqlite_session):
     ctx = LoaderContext(
         tableclass=FileLoaderTable,
         session=sqlite_session,
+        backend=resolve_backend(sqlite_session, mapper=FileLoaderTable),
         path=csv,
         dedupe=True,
     )
@@ -103,6 +106,7 @@ def test_stage_file_csv_mode_strips_quotes(tmp_path, sqlite_session):
     ctx = LoaderContext(
         tableclass=FileLoaderTable,
         session=sqlite_session,
+        backend=resolve_backend(sqlite_session, mapper=FileLoaderTable),
         path=csv,
         dedupe=True,
     )
@@ -133,6 +137,7 @@ def test_stage_file_by_delimiter_tab_preserves_quotes(tmp_path, sqlite_session):
     ctx = LoaderContext(
         tableclass=FileLoaderTable,
         session=sqlite_session,
+        backend=resolve_backend(sqlite_session, mapper=FileLoaderTable),
         path=tsv,
         dedupe=True,
     )
@@ -154,6 +159,7 @@ def test_file_without_data_rows_loads_nothing_whatever_its_header(tmp_path, sqli
         ctx = LoaderContext(
             tableclass=FileLoaderTable,
             session=sqlite_session,
+        backend=resolve_backend(sqlite_session, mapper=FileLoaderTable),
             path=csv,
         )
         assert stage_file(ctx, _reader(ctx), FileLoaderTable.__table__) == 0
@@ -167,6 +173,7 @@ def test_accounting_is_checked_against_the_staging_table(tmp_path, sqlite_sessio
     ctx = LoaderContext(
         tableclass=FileLoaderTable,
         session=sqlite_session,
+        backend=resolve_backend(sqlite_session, mapper=FileLoaderTable),
         path=csv,
         dedupe=False,
     )

@@ -18,10 +18,10 @@ COLUMNS = ["demo_id", "demo_label", "demo_number", "demo_flag", "demo_date"]
 
 def _sink(session, tmp_path):
     tag = None if session.get_bind().dialect.name == "sqlite" else STAGING_SCHEMA
-    resolve_backend(session, staging_schema_tag=tag, mapper=_Demo).create_staging_table(_Demo, session)
-    staging = _Demo.get_staging_table(session, staging_schema_tag=tag)
-    ctx = LoaderContext(tableclass=_Demo, session=session, path=tmp_path / "demo_record.csv", staging_schema_tag=tag)
-    return resolve_backend(session, staging_schema_tag=tag, mapper=_Demo), ctx, staging
+    backend = resolve_backend(session, staging_schema_tag=tag, mapper=_Demo)
+    staging = backend.create_staging_table(_Demo, session)
+    ctx = LoaderContext(tableclass=_Demo, session=session, path=tmp_path / "demo_record.csv", backend=backend)
+    return backend, ctx, staging
 
 
 def _batch(i: int, label: str | None) -> pa.Table:
@@ -87,8 +87,8 @@ def test_a_failing_batch_source_is_raised_not_swallowed(dialect_session, tmp_pat
 
 def _staging_for(session, table):
     tag = None if session.get_bind().dialect.name == "sqlite" else STAGING_SCHEMA
-    resolve_backend(session, staging_schema_tag=tag, mapper=table).create_staging_table(table, session)
-    return table.get_staging_table(session, staging_schema_tag=tag)
+    created = resolve_backend(session, staging_schema_tag=tag, mapper=table).create_staging_table(table, session)
+    return sa.Table(created.name, sa.MetaData(), autoload_with=session.connection(), schema=created.schema)
 
 
 def test_a_staging_table_mirrors_the_columns_and_nullability_of_the_target(dialect_session):
@@ -114,6 +114,5 @@ def test_a_staging_table_can_be_dropped_twice_and_created_again(dialect_session)
     tag = None if dialect_session.get_bind().dialect.name == "sqlite" else STAGING_SCHEMA
     for _ in range(2):
         resolve_backend(dialect_session, staging_schema_tag=tag, mapper=_Demo).drop_staging_table(_Demo, dialect_session)
-    with pytest.raises(sa.exc.NoSuchTableError):
-        _Demo.get_staging_table(dialect_session, staging_schema_tag=tag)
+    assert not sa.inspect(dialect_session.connection()).has_table(staging.name, schema=staging.schema)
     assert _staging_for(dialect_session, _Demo).name == staging.name

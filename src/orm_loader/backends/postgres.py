@@ -107,9 +107,6 @@ class PostgresBackend(DatabaseBackend, MaterializedViewBackend):
                     pacsv.write_csv(table, buffer, options)
                     copy.write(buffer.getvalue())
             ctx.session.flush()
-        except Exception:
-            ctx.session.rollback()
-            raise
         finally:
             cursor.close()
 
@@ -171,6 +168,7 @@ class PostgresBackend(DatabaseBackend, MaterializedViewBackend):
         table_cls: type["FileTableProtocol"],
         session: so.Session,
         pk_cols: list[str],
+        staging: sa.Table,
         *,
         merge_batch_size: int | None = None,
         validate_deferred_fks: bool = True,
@@ -178,7 +176,6 @@ class PostgresBackend(DatabaseBackend, MaterializedViewBackend):
         """Delete every target row whose primary key appears in staging."""
         self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
-        staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
         pk_join = sa.and_(*(target.c[c] == staging.c[c] for c in pk_cols))
 
         for batch_range in self._paginate_batches(table_cls, staging, session, merge_batch_size):
@@ -193,13 +190,13 @@ class PostgresBackend(DatabaseBackend, MaterializedViewBackend):
         table_cls: type["FileTableProtocol"],
         session: so.Session,
         pk_cols: list[str],
+        staging: sa.Table,
         *,
         merge_batch_size: int | None = None,
         validate_deferred_fks: bool = True,
     ) -> None:
         self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
-        staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
         insertable_cols = self._insertable_column_names(table_cls, staging)
 
         def _upsert(select_: Any) -> sa.Insert:
@@ -223,6 +220,7 @@ class PostgresBackend(DatabaseBackend, MaterializedViewBackend):
         self,
         table_cls: type["FileTableProtocol"],
         session: so.Session,
+        staging: sa.Table,
         *,
         merge_batch_size: int | None = None,
         validate_deferred_fks: bool = True,
@@ -234,7 +232,6 @@ class PostgresBackend(DatabaseBackend, MaterializedViewBackend):
         """
         self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
-        staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
         insertable_cols = self._insertable_column_names(table_cls, staging)
         non_paginated_select = sa.select(*(staging.c[c] for c in insertable_cols))
 

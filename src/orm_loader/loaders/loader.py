@@ -18,8 +18,7 @@ from typing import TYPE_CHECKING
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 
-from ..backends.base import DedupeResult
-from ..backends.resolve import resolve_backend
+from ..backends.base import DatabaseBackend, DedupeResult
 from ..conversion import ConversionPolicy
 from ..helpers import IngestError
 from .processor import BatchProcessor
@@ -83,14 +82,12 @@ class LoaderContext:
         Active SQLAlchemy session.
     path
         Path to the source data file.
+    backend
+        Backend of the session's database, resolved once for the load.
     normalise
         Whether to interpret values under the policy.
     dedupe
         Whether the staging table keeps only the first row for each primary key.
-    staging_schema_tag
-        schema_translate_map tag the staging table lives in, passed to
-        resolve_backend() so every backend resolution within this load
-        resolves the same schema.
     policy
         How values are interpreted and what happens to unreadable ones.
     rejects_dir
@@ -103,10 +100,10 @@ class LoaderContext:
     tableclass: type[FileTableProtocol]
     session: so.Session
     path: Path
+    backend: DatabaseBackend
 
     normalise: bool = True
     dedupe: bool = True
-    staging_schema_tag: str | None = None
     policy: ConversionPolicy = field(default_factory=ConversionPolicy)
     rejects_dir: Path | None = None
     report: LoadReport = field(default_factory=LoadReport)
@@ -145,7 +142,9 @@ def stage_file(ctx: LoaderContext, reader: FileReader, staging: sa.Table) -> int
     The reader streams the file in bounded batches, so memory does not grow
     with the row count. A file without data rows loads nothing and is not
     checked for required columns. With ``ctx.dedupe`` set, the staging table keeps the
-    first row for each primary key.
+    first row for each primary key. A failure after the first write rolls
+    the session back; DuckDB commits every few batches, so earlier batches
+    stay committed there.
 
     Parameters
     ----------
@@ -184,7 +183,7 @@ def stage_file(ctx: LoaderContext, reader: FileReader, staging: sa.Table) -> int
         logger.warning("File %s has columns that %s does not have, which are ignored: %s", ctx.path.name, table_name, ignored)
     if ctx.normalise:
         _require_columns_present(ctx.tableclass, reader.columns)
-    backend = resolve_backend(ctx.session, staging_schema_tag=ctx.staging_schema_tag, mapper=ctx.tableclass)
+    backend = ctx.backend
     rejects_dir = ctx.rejects_dir or ctx.path.parent / "rejects"
     processor = BatchProcessor(
         ctx.tableclass,
@@ -196,16 +195,21 @@ def stage_file(ctx: LoaderContext, reader: FileReader, staging: sa.Table) -> int
         reader.skipped,
         lambda expression, column_type: backend.evaluate_default(ctx.session, ctx.tableclass, expression, column_type),
     )
-    backend.insert_batches(ctx, staging, processor.stream(chain([] if first is None else [first], batches)), processor.out_columns)
-    total = backend.count_staging(ctx, staging)
-    keys = [c for c in ctx.tableclass.pk_names() if c in reader.columns]
-    if ctx.dedupe and keys:
-        ctx.report.dedupe = backend.deduplicate_staging(ctx, staging, keys)
-        total = ctx.report.dedupe.rows_after
-    ctx.report.rows_loaded += total
-    if not ctx.report.accounted:
-        raise IngestError(
-            f"{table_name}: read {ctx.report.rows_read} rows but loaded {ctx.report.rows_loaded}, "
-            f"rejected {ctx.report.rows_rejected} and dropped {ctx.report.rows_deduplicated} duplicates"
-        )
+    try:
+        batches = processor.stream(chain([] if first is None else [first], batches))
+        backend.insert_batches(ctx, staging, batches, processor.out_columns)
+        total = backend.count_staging(ctx, staging)
+        keys = [c for c in ctx.tableclass.pk_names() if c in reader.columns]
+        if ctx.dedupe and keys:
+            ctx.report.dedupe = backend.deduplicate_staging(ctx, staging, keys)
+            total = ctx.report.dedupe.rows_after
+        ctx.report.rows_loaded += total
+        if not ctx.report.accounted:
+            raise IngestError(
+                f"{table_name}: read {ctx.report.rows_read} rows but loaded {ctx.report.rows_loaded}, "
+                f"rejected {ctx.report.rows_rejected} and dropped {ctx.report.rows_deduplicated} duplicates"
+            )
+    except Exception:
+        ctx.session.rollback()
+        raise
     return total

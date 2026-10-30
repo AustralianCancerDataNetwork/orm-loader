@@ -315,6 +315,7 @@ class DuckDBBackend(DatabaseBackend):
         table_cls: type["FileTableProtocol"],
         session: so.Session,
         pk_cols: list[str],
+        staging: sa.Table,
         *,
         merge_batch_size: int | None = None,
         validate_deferred_fks: bool = True,
@@ -341,7 +342,6 @@ class DuckDBBackend(DatabaseBackend):
         self._validate_merge_batch_size(merge_batch_size)
         self.check_replace_feasible(table_cls, pk_cols, session)
         target = table_cls.__table__
-        staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
         update_cols = [c for c in self._insertable_column_names(table_cls, staging) if c not in pk_cols]
         pk_join = sa.and_(*(target.c[c] == staging.c[c] for c in pk_cols))
 
@@ -411,6 +411,7 @@ class DuckDBBackend(DatabaseBackend):
         table_cls: type["FileTableProtocol"],
         session: so.Session,
         pk_cols: list[str],
+        staging: sa.Table,
         *,
         merge_batch_size: int | None = None,
         validate_deferred_fks: bool = True,
@@ -419,7 +420,6 @@ class DuckDBBackend(DatabaseBackend):
 
         self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
-        staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
         insertable_cols = self._insertable_column_names(table_cls, staging)
 
         def _upsert(select_: Any) -> sa.Insert:
@@ -447,13 +447,13 @@ class DuckDBBackend(DatabaseBackend):
         self,
         table_cls: type["FileTableProtocol"],
         session: so.Session,
+        staging: sa.Table,
         *,
         merge_batch_size: int | None = None,
         validate_deferred_fks: bool = True,
     ) -> None:
         self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
-        staging = table_cls.get_staging_table(session, staging_schema_tag=self.staging_schema_tag)
         insertable_cols = self._insertable_column_names(table_cls, staging)
         non_paginated_select = sa.select(*(staging.c[c] for c in insertable_cols))
 

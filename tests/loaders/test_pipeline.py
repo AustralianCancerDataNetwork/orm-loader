@@ -47,11 +47,23 @@ def _write(tmp_path: Path, table, fmt: str, rows: list[tuple], header: list[str]
 
 def _stage(session, table, path: Path, reader=None, **context):
     tag = None if session.get_bind().dialect.name == "sqlite" else STAGING_SCHEMA
-    resolve_backend(session, staging_schema_tag=tag, mapper=table).create_staging_table(table, session)
-    staging = table.get_staging_table(session, staging_schema_tag=tag)
-    ctx = LoaderContext(tableclass=table, session=session, path=path, staging_schema_tag=tag, **context)
+    backend = resolve_backend(session, staging_schema_tag=tag, mapper=table)
+    staging = backend.create_staging_table(table, session)
+    ctx = LoaderContext(tableclass=table, session=session, path=path, backend=backend, **context)
     loaded = stage_file(ctx, reader or open_reader(path, table.model_columns(), nulls=ctx.policy.nulls), staging)
     return loaded, ctx, staging
+
+
+def _reflected(session, table) -> sa.Table:
+    """The staging table of a table as the database holds it."""
+    tag = None if session.get_bind().dialect.name == "sqlite" else STAGING_SCHEMA
+    backend = resolve_backend(session, staging_schema_tag=tag, mapper=table)
+    return sa.Table(
+        backend.staging_name_for_table(table.__tablename__),
+        sa.MetaData(),
+        autoload_with=session.connection(),
+        schema=backend.staging_schema,
+    )
 
 
 def _staged(session, staging, *columns: str) -> list[tuple]:
@@ -89,8 +101,7 @@ def test_an_unreadable_value_raises_and_stages_nothing(dialect_session, tmp_path
     path = _write(tmp_path, DemoRecord, fmt, rows)
     with pytest.raises(ConversionError, match="demo_number"):
         _stage(dialect_session, _Demo, path)
-    staging = _Demo.get_staging_table(dialect_session, staging_schema_tag=None if dialect_session.get_bind().dialect.name == "sqlite" else STAGING_SCHEMA)
-    assert _staged(dialect_session, staging, "demo_id") == []
+    assert _staged(dialect_session, _reflected(dialect_session, _Demo), "demo_id") == []
 
 
 def test_a_missing_required_value_raises(dialect_session, tmp_path, fmt):
@@ -139,8 +150,7 @@ def test_a_failing_reader_is_raised_and_stages_nothing(dialect_session, tmp_path
     reader.batches = broken  # type: ignore[method-assign]
     with pytest.raises(RuntimeError, match="boom"):
         _stage(dialect_session, _Demo, path, reader=reader)
-    tag = None if dialect_session.get_bind().dialect.name == "sqlite" else STAGING_SCHEMA
-    assert _staged(dialect_session, _Demo.get_staging_table(dialect_session, staging_schema_tag=tag), "demo_id") == []
+    assert _staged(dialect_session, _reflected(dialect_session, _Demo), "demo_id") == []
 
 
 TYPED_HEADER = [
