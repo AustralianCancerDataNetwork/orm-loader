@@ -116,16 +116,6 @@ class SQLiteBackend(DatabaseBackend):
             column = pc.cast(column, pa.string())
         return column.to_pylist()
 
-    def evaluate_default(
-        self,
-        session: so.Session,
-        table_cls: type["FileTableProtocol"],
-        expression: sa.ColumnElement[Any],
-        column_type: Any,
-    ) -> Any:
-        """Evaluate without a cast: SQLite casts a date to the integer of its year."""
-        return session.execute(sa.select(expression), bind_arguments={"mapper": table_cls}).scalar_one()
-
     def disable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int | None:
         """Turn ``PRAGMA foreign_keys`` off and return its previous value.
 
@@ -200,6 +190,7 @@ class SQLiteBackend(DatabaseBackend):
         """
         self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
+        target_columns = {column.name: column for column in target.columns}
 
         # SQLite's DELETE has no USING, so staging keys go in a subquery. IN
         # rather than a correlated EXISTS, which rescans the unindexed staging
@@ -209,9 +200,9 @@ class SQLiteBackend(DatabaseBackend):
             if extra is not None:
                 keys = keys.where(extra)
             if len(pk_cols) == 1:
-                return sa.delete(target).where(target.c[pk_cols[0]].in_(keys))
+                return sa.delete(target).where(target_columns[pk_cols[0]].in_(keys))
             return sa.delete(target).where(
-                sa.tuple_(*(target.c[c] for c in pk_cols)).in_(keys)
+                sa.tuple_(*(target_columns[c] for c in pk_cols)).in_(keys)
             )
 
         for batch_range in self._paginate_batches(table_cls, staging, session, merge_batch_size):
@@ -229,16 +220,17 @@ class SQLiteBackend(DatabaseBackend):
     ) -> None:
         self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
+        target_columns = {column.name: column for column in target.columns}
         insertable_cols = self._insertable_column_names(table_cls, staging)
 
         def _upsert(select_: Any) -> sa.Insert:
             return (
                 sqlite_dialect.insert(target)
-                .from_select(insertable_cols, select_)
-                .on_conflict_do_nothing(index_elements=pk_cols)
+                .from_select([target_columns[c] for c in insertable_cols], select_)
+                .on_conflict_do_nothing(index_elements=[target_columns[c] for c in pk_cols])
             )
 
-        non_paginated_select = sa.select(*(staging.c[c] for c in insertable_cols))
+        non_paginated_select = sa.select(*(self._staging_value(table_cls, staging, c) for c in insertable_cols))
 
         for batch_range in self._paginate_batches(table_cls, staging, session, merge_batch_size):
 
@@ -256,11 +248,12 @@ class SQLiteBackend(DatabaseBackend):
     ) -> None:
         self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
+        target_columns = {column.name: column for column in target.columns}
         insertable_cols = self._insertable_column_names(table_cls, staging)
-        non_paginated_select = sa.select(*(staging.c[c] for c in insertable_cols))
+        non_paginated_select = sa.select(*(self._staging_value(table_cls, staging, c) for c in insertable_cols))
 
         def _insert(select_: Any) -> sa.Insert:
-            return sa.insert(target).from_select(insertable_cols, select_)
+            return sa.insert(target).from_select([target_columns[c] for c in insertable_cols], select_)
 
         for batch_range in self._paginate_batches(table_cls, staging, session, merge_batch_size):
             select_ = non_paginated_select if batch_range is None else non_paginated_select.where(batch_range)

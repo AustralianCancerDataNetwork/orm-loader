@@ -109,28 +109,27 @@ def test_a_key_in_the_file_is_loaded_and_may_not_be_blank(dialect_session, tmp_p
         _keyed(dialect_session, tmp_path, "keyed_id,keyed_name\n,a\n")
 
 
-def test_an_expression_default_is_evaluated_once_for_the_load(dialect_session, tmp_path, monkeypatch):
-    from orm_loader.backends import resolve_backend
+def test_expression_defaults_fill_nulls_across_reader_batches(dialect_session, tmp_path):
     from orm_loader.loaders import DelimitedTextReader
 
-    calls: list[object] = []
-    backend_class = type(resolve_backend(dialect_session, mapper=DemoDefaultKinds))
-    original = backend_class.evaluate_default
-
-    def counting(self, session, table_cls, expression, column_type):
-        calls.append(expression)
-        return original(self, session, table_cls, expression, column_type)
-
-    monkeypatch.setattr(backend_class, "evaluate_default", counting)
     path = tmp_path / "demo_default_kinds.csv"
-    path.write_text("kind_id,kind_now\n" + "".join(f"{i},\n" for i in range(1, 30_001)))
+    path.write_text(
+        "kind_id,kind_now\n1,2020-01-01 00:00:00\n"
+        + "".join(f"{i},\n" for i in range(2, 201))
+    )
     tag = None if dialect_session.get_bind().dialect.name == "sqlite" else STAGING_SCHEMA
     table = cast(Type[FileTableProtocol], DemoDefaultKinds)
-    reader = DelimitedTextReader(path, DemoDefaultKinds.model_columns(), block_size=64 << 10)
+    reader = DelimitedTextReader(path, DemoDefaultKinds.model_columns(), block_size=256)
+    assert len(list(reader.batches())) > 1
     table.load_file(dialect_session, path, staging_schema_tag=tag, reader=reader)
-    batches = len(list(DelimitedTextReader(path, DemoDefaultKinds.model_columns(), block_size=64 << 10).batches()))
-    now_calls = [c for c in calls if isinstance(c, sa.sql.functions.FunctionElement)]
-    assert batches > 1 and len(now_calls) == 1
+    dialect_session.commit()
+    rows = dialect_session.execute(
+        sa.select(DemoDefaultKinds.kind_id, DemoDefaultKinds.kind_now)
+        .order_by(DemoDefaultKinds.kind_id)
+    ).all()
+    assert len(rows) == 200
+    assert rows[0].kind_now == datetime(2020, 1, 1)
+    assert all(isinstance(row.kind_now, datetime) for row in rows)
 
 
 def test_a_default_the_handler_cannot_read_is_an_error_naming_the_column(dialect_session, tmp_path):

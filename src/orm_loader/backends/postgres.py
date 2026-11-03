@@ -176,7 +176,8 @@ class PostgresBackend(DatabaseBackend, MaterializedViewBackend):
         """Delete every target row whose primary key appears in staging."""
         self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
-        pk_join = sa.and_(*(target.c[c] == staging.c[c] for c in pk_cols))
+        target_columns = {column.name: column for column in target.columns}
+        pk_join = sa.and_(*(target_columns[c] == staging.c[c] for c in pk_cols))
 
         for batch_range in self._paginate_batches(table_cls, staging, session, merge_batch_size):
             where = pk_join if batch_range is None else sa.and_(pk_join, batch_range)
@@ -197,17 +198,18 @@ class PostgresBackend(DatabaseBackend, MaterializedViewBackend):
     ) -> None:
         self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
+        target_columns = {column.name: column for column in target.columns}
         insertable_cols = self._insertable_column_names(table_cls, staging)
 
         def _upsert(select_: Any) -> sa.Insert:
             # sa.insert() has no .on_conflict_do_nothing()
             return (
                 postgresql.insert(target)
-                .from_select(insertable_cols, select_)
-                .on_conflict_do_nothing(index_elements=pk_cols)
+                .from_select([target_columns[c] for c in insertable_cols], select_)
+                .on_conflict_do_nothing(index_elements=[target_columns[c] for c in pk_cols])
             )
 
-        non_paginated_select = sa.select(*(staging.c[c] for c in insertable_cols))
+        non_paginated_select = sa.select(*(self._staging_value(table_cls, staging, c) for c in insertable_cols))
 
         for batch_range in self._paginate_batches(table_cls, staging, session, merge_batch_size):
             select_ = non_paginated_select if batch_range is None else non_paginated_select.where(batch_range)
@@ -232,11 +234,12 @@ class PostgresBackend(DatabaseBackend, MaterializedViewBackend):
         """
         self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
+        target_columns = {column.name: column for column in target.columns}
         insertable_cols = self._insertable_column_names(table_cls, staging)
-        non_paginated_select = sa.select(*(staging.c[c] for c in insertable_cols))
+        non_paginated_select = sa.select(*(self._staging_value(table_cls, staging, c) for c in insertable_cols))
 
         def _insert(select_: Any) -> sa.Insert:
-            return sa.insert(target).from_select(insertable_cols, select_)
+            return sa.insert(target).from_select([target_columns[c] for c in insertable_cols], select_)
 
         for batch_range in self._paginate_batches(table_cls, staging, session, merge_batch_size):
             select_ = non_paginated_select if batch_range is None else non_paginated_select.where(batch_range)

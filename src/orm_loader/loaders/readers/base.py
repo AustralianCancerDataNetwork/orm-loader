@@ -90,8 +90,13 @@ class FileReader(ABC):
         values = pa.array(sorted(markers), pa.string())
         arrays = []
         for column in batch.columns:
+            was_dictionary = pa.types.is_dictionary(column.type) and pa.types.is_string(column.type.value_type)
+            if was_dictionary:
+                column = column.dictionary_decode()
             if pa.types.is_string(column.type):
                 hit = pc.fill_null(pc.is_in(pc.utf8_trim_whitespace(column), value_set=values), False)
                 column = pc.if_else(hit, pa.scalar(None, pa.string()), column)
+                if was_dictionary:
+                    column = pc.dictionary_encode(column)
             arrays.append(column)
         return pa.RecordBatch.from_arrays(arrays, names=batch.schema.names)

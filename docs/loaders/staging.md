@@ -11,14 +11,14 @@
 - Values are interpreted by column type, as described in [Conversion](conversion.md).
 - With the default policy an unreadable value or a missing required value raises and nothing is loaded.
 - With `ErrorPolicy(on_error="reject_row")` those rows, and delimited lines with the wrong number of fields, are written to `<rejects_dir>/<file name>.rejects.csv` and the rest load. A malformed line is listed with its row number in the file, and its text is in the reason. `rejects_dir` defaults to a `rejects` directory inside the input file's directory, and the file of an earlier load is removed. `LoadReport` accounts for every row read, checked against the rows counted in the staging table.
-- With `normalise=False` raw text is passed to the staging table unchanged, without defaults, required checks or type conversion. What the database does with a value that does not fit its column then depends on the dialect.
-- A blank value, and a column the file lacks, take the column's default when it has one: a server default written as text, a scalar Python default, or a SQL expression such as `current_date`. The column's handler reads the default like a value from the file, and an expression is evaluated by the database for each batch that needs it. A column with a callable default stays required.
+- With `normalise=False` raw text is passed to the staging table unchanged, without literal defaults, non-key required checks or type conversion. SQL-expression defaults still apply to null staging values during merge. Primary-key columns must still be present. What the database does with a value that does not fit its column then depends on the dialect.
+- A blank value, and a column the file lacks, take the column's default when it has one: a server default written as text, a scalar Python default, or a SQL expression such as `current_date`. Literal defaults are converted by the column's handler. SQL expressions are applied in the merge with `COALESCE`, so the database evaluates them once for each row that needs a default. A column with a callable default stays required.
 
 ---
 
 ## Staging table
 
-Staging mirrors the target: its columns, their types and their nullability, with no key, index, default or constraint, and a `_rownum` column that orders the rows (SQLite uses its rowid). The processor completes every value before it is written, so a NOT NULL column never receives NULL. Every column that is required and has no default must be in the file, primary key columns included, so a file without its key fails before anything is loaded.
+Staging mirrors the target’s loadable columns and types, excluding computed columns, with no key, index, default or constraint, and a `_rownum` column that orders the rows (SQLite uses its rowid). Columns with SQL-expression defaults allow NULL in staging so the merge can apply their defaults. Other columns preserve the target’s nullability. Every column that is required and has no default must be in the file, primary key columns included, so a file without its key fails before anything is loaded.
 
 ---
 
@@ -52,7 +52,9 @@ Each strategy does what its name says, whatever the target already holds.
 | `upsert` | Inserts the file and skips rows whose primary key already exists, keeping the first of a repeated key |
 | `insert` | Inserts the file without any key check, so a key that already exists fails with the database's duplicate key error |
 
-`insert` suits a first load into an empty table, or any file whose keys are new. With `dedupe=True` it is several times faster than `upsert`, because `upsert` checks every row against the key index. A load with `upsert` into an empty table logs this hint and runs unchanged. With `merge_batch_size` set, batches commit separately on PostgreSQL, so a duplicate key partway through leaves the earlier batches in the table.
+`insert` suits a first load into an empty table, or any file whose keys are new. With `dedupe=True` it is several times faster than `upsert`, because `upsert` checks every row against the key index. A load with `upsert` into an empty table logs this hint and runs unchanged.
+
+With `merge_batch_size` set, PostgreSQL and DuckDB commit the session after each merge batch. If a later batch or deferred-key validation fails, earlier target batches stay committed, along with any other pending session work. A `replace` failure can leave some rows deleted or updated. SQLite keeps the batches in the caller's transaction. Use batching only when you can accept partial results and the session has no unrelated pending work.
 
 No schema changes are performed at the loader layer.
 

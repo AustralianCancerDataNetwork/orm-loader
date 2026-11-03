@@ -109,7 +109,9 @@ class LoaderContext:
     report: LoadReport = field(default_factory=LoadReport)
 
 
-def _require_columns_present(tableclass: type[FileTableProtocol], present_columns: Iterable[str]) -> None:
+def _require_columns_present(
+    tableclass: type[FileTableProtocol], present_columns: Iterable[str], *, normalise: bool = True
+) -> None:
     """Raise before staging if a required column is entirely absent from the file.
 
     Partial-column loads are not supported, so every merge strategy
@@ -122,6 +124,8 @@ def _require_columns_present(tableclass: type[FileTableProtocol], present_column
         Table being loaded.
     present_columns
         Model columns present in the file.
+    normalise
+        When false, require only primary-key columns.
 
     Raises
     ------
@@ -129,10 +133,12 @@ def _require_columns_present(tableclass: type[FileTableProtocol], present_column
         A non-nullable column without a default is not in the file.
     """
     present = set(present_columns)
-    missing = sorted(c for c in tableclass.required_columns() if c not in present)
+    required = tableclass.required_columns() if normalise else set(tableclass.pk_names())
+    missing = sorted(c for c in required if c not in present)
     if missing:
         raise IngestError(
-            f"{tableclass.__tablename__}: source data is missing required column(s) {missing} (non-nullable, no default)"
+            f"{tableclass.__tablename__}: source data is missing required column(s) {missing} "
+            "(non-nullable without a default, or primary-key columns)"
         )
 
 
@@ -181,8 +187,7 @@ def stage_file(ctx: LoaderContext, reader: FileReader, staging: sa.Table) -> int
     ignored = [name for name in reader.file_columns if name not in reader.columns]
     if ignored:
         logger.warning("File %s has columns that %s does not have, which are ignored: %s", ctx.path.name, table_name, ignored)
-    if ctx.normalise:
-        _require_columns_present(ctx.tableclass, reader.columns)
+    _require_columns_present(ctx.tableclass, reader.columns, normalise=ctx.normalise)
     backend = ctx.backend
     rejects_dir = ctx.rejects_dir or ctx.path.parent / "rejects"
     processor = BatchProcessor(
@@ -193,7 +198,6 @@ def stage_file(ctx: LoaderContext, reader: FileReader, staging: sa.Table) -> int
         rejects_dir / f"{ctx.path.stem}.rejects.csv",
         ctx.normalise,
         reader.skipped,
-        lambda expression, column_type: backend.evaluate_default(ctx.session, ctx.tableclass, expression, column_type),
     )
     try:
         batches = processor.stream(chain([] if first is None else [first], batches))

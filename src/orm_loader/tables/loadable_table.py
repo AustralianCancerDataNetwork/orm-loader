@@ -263,6 +263,12 @@ class FileLoadableTableInterface(ORMTableBase):
         index_strategy
             Index handling strategy during merge. Use ``"auto"`` to let
             the backend choose a sensible default.
+        merge_batch_size
+            Rows per merge batch, or ``None`` to merge in one statement. On
+            PostgreSQL and DuckDB, each merge batch commits the session. A
+            later failure leaves earlier target batches committed, along
+            with any other pending session work. SQLite keeps the batches in
+            the caller's transaction.
         staging_schema_tag
             schema_translate_map tag the staging table lives in. ``None``
             means no schema qualification (backend-default behavior).
@@ -319,11 +325,20 @@ class FileLoadableTableInterface(ORMTableBase):
         if reader is None:
             reader = open_reader(
                 path,
-                cls.model_columns(),
+                {
+                    name: column
+                    for name, column in cls.model_columns().items()
+                    if column.computed is None
+                },
                 nulls=policy.nulls,
                 quote_mode=quote_mode,
                 chunksize=chunksize,
                 skip_malformed=policy.errors.on_error == "reject_row",
+            )
+        elif reader.nulls != policy.nulls:
+            raise ValueError(
+                "the reader's null policy differs from policy.nulls; "
+                "build the reader with nulls=policy.nulls"
             )
 
         backend = resolve_backend(
@@ -469,7 +484,10 @@ class FileLoadableTableInterface(ORMTableBase):
         staging
             Staging table the rows are merged from.
         merge_batch_size
-            Rows per merge batch, or ``None`` for one statement.
+            Rows per merge batch, or ``None`` for one statement. On
+            PostgreSQL and DuckDB, each batch commits the session; earlier
+            batches stay committed if a later batch fails. SQLite keeps the
+            batches in the caller's transaction.
         validate_deferred_fks
             Forwarded to the backend's merge methods, which validate
             deferred FKs before every intermediate commit a batched merge

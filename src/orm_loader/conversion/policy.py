@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from itertools import product
 from types import MappingProxyType
 from typing import Any, ClassVar, Literal
 
@@ -36,6 +37,12 @@ from .handlers import (
 from .values import no_failures, underlying_type
 
 
+def _case_variants(value: str) -> frozenset[str]:
+    """Return every upper/lower-case spelling of a short null marker."""
+    choices = [(char.lower(), char.upper()) if char.isalpha() else (char,) for char in value]
+    return frozenset("".join(chars) for chars in product(*choices))
+
+
 @dataclass(frozen=True)
 class NullPolicy:
     """What counts as a missing value, shared by every column handler.
@@ -61,6 +68,12 @@ class NullPolicy:
     DEFAULT_TYPED_MISSING: ClassVar[frozenset[str]] = frozenset(
         {"null", "none", "na", "n/a", "nan", "#n/a", "-nan", "<na>"}
     )
+    LEGACY_TEXT_MARKERS: ClassVar[frozenset[str]] = frozenset(
+        {
+            "#N/A", "#N/A N/A", "#NA", "-1.#IND", "-1.#QNAN", "-NaN", "-nan", "1.#IND", "1.#QNAN",
+            "<NA>", "N/A", "NA", "NULL", "NaN", "None", "n/a", "nan", "null",
+        }
+    ) | frozenset().union(*(_case_variants(word) for word in ("nan", "null", "none", "na", "n/a")))
 
     empty_is_null: bool = True
     text_markers: frozenset[str] = frozenset()

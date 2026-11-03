@@ -25,10 +25,11 @@ QUOTE_SAMPLE_LINES = 50
 class DelimitedTextReader(FileReader):
     """A delimited text file read as raw strings in bounded blocks.
 
-    Date columns are dictionary-encoded. An unquoted empty field is null and
-    a quoted empty field is an empty string. Header names are normalised as
-    described by ``normalise_headers``. File columns that are not model
-    columns are ignored.
+    Date columns are dictionary-encoded. With the default null policy, an
+    unquoted empty field is null and a quoted empty field is an empty string.
+    With ``empty_is_null=False``, unquoted empty text remains empty. Header
+    names are normalised as described by ``normalise_headers``. File columns
+    that are not model columns are ignored.
 
     Parameters
     ----------
@@ -42,7 +43,8 @@ class DelimitedTextReader(FileReader):
         ``"csv"`` reads double quotes as field quoting, ``"literal"`` keeps
         them as data, ``"by_delimiter"`` chooses ``"literal"`` for tab
         delimited files and ``"csv"`` otherwise. ``None`` uses
-        ``DEFAULT_QUOTE_MODE``.
+        ``DEFAULT_QUOTE_MODE``. In CSV mode, unquoted-only null markers must
+        match exactly, including surrounding whitespace.
     block_size
         Bytes per block; memory use follows this, not the row count.
     skip_malformed
@@ -105,10 +107,23 @@ class DelimitedTextReader(FileReader):
                 sorted(self.nulls.text_markers),
             )
 
+    def _null_values(self, markers: frozenset[str]) -> list[str]:
+        """Return exact import markers; padded markers are handled after parsing."""
+        empty = [""] if self.nulls.empty_is_null else []
+        quoted_markers = sorted(markers) if self.quote_mode == "csv" else []
+        return empty + quoted_markers
+
+    def _apply_reader_markers(self, batch: pa.RecordBatch, markers: frozenset[str]) -> pa.RecordBatch:
+        """Apply whitespace-tolerant markers after parsing when quoting is not tracked."""
+        if self.quote_mode == "csv" or not markers:
+            return batch
+        return self.null_markers(batch, markers)
+
     def batches(self) -> Iterator[pa.RecordBatch]:
         """Yield the file's rows in blocks of ``block_size`` bytes."""
         if self.empty:
             return
+        markers = self.reader_markers()
         string, encoded = pa.string(), pa.dictionary(pa.int32(), pa.string())
         column_types = {
             name: encoded if isinstance(self.model_columns[name].type, sa.Date) else string
@@ -134,13 +149,14 @@ class DelimitedTextReader(FileReader):
                 convert_options=pv.ConvertOptions(
                     column_types=column_types,
                     include_columns=self.columns,
-                    null_values=[""] + sorted(self.reader_markers()),
+                    null_values=self._null_values(markers),
                     strings_can_be_null=True,
                     quoted_strings_can_be_null=False,
                 ),
             )
             with reader:
                 for batch in reader:
+                    batch = self._apply_reader_markers(batch, markers)
                     if batch.num_rows:
                         yield batch
         except UnicodeDecodeError as exc:

@@ -102,7 +102,7 @@ class ORMTableBase:
         list[str]
             A list of primary key column names.
         """
-        return [c.key for c in cls.pk_columns() if c.key is not None]
+        return [c.name for c in cls.pk_columns() if c.name is not None]
 
     @classmethod
     def model_columns(cls) -> dict[str, sa.ColumnElement[Any]]:
@@ -112,19 +112,21 @@ class ORMTableBase:
         Returns
         -------
         dict[str, sqlalchemy.ColumnElement]
-            A mapping of column name to column object.
+        A mapping of database column name to column object. This is the name
+        used by file headers and staging tables, even when ``Column.key``
+        differs.
         """
         mapper = cls.mapper_for()
-        return {c.key: c for c in mapper.columns}
+        return {c.name: c for c in mapper.columns}
     
     @classmethod
     def required_columns(cls) -> set[str]:
         """
         Return column names that must be present in inbound data.
 
-        A column is considered required if it is:
-        - non-nullable
-        - has no default that can be supplied (see ``column_defaults``)
+        A non-nullable column is required when it has no default that can be
+        supplied (see ``column_defaults``). Primary keys are always required
+        by the file loader.
 
         This method is intended for ingestion-time validation and does
         not attempt to enforce schema semantics beyond insert viability.
@@ -136,15 +138,16 @@ class ORMTableBase:
         """
         defaults = cls.column_defaults()
         return {
-            c.key
+            c.name
             for c in cls.mapper_for().columns
-            if not c.nullable and c.key not in defaults
+            if c.computed is None
+            and (c.primary_key or (not c.nullable and c.name not in defaults))
         }
 
     @classmethod
     def column_defaults(cls) -> dict[str, Any]:
         """
-        Return the default of each column that has one that can be supplied.
+        Return defaults the file loader can supply for non-key, non-computed columns.
 
         A server default given as text and a scalar Python default are
         returned as the value itself. A server default given as a SQL
@@ -159,12 +162,23 @@ class ORMTableBase:
         """
         defaults: dict[str, Any] = {}
         for c in cls.mapper_for().columns:
+            if c.computed is not None or c.primary_key:
+                continue
             server_default = getattr(c.server_default, "arg", None)
             if server_default is not None:
                 defaults[c.name] = server_default
             elif c.default is not None and c.default.is_scalar:
                 defaults[c.name] = c.default.arg  # ty: ignore[unresolved-attribute]
         return defaults
+
+    @classmethod
+    def sql_expression_defaults(cls) -> dict[str, sa.ClauseElement]:
+        """Return server defaults that should be evaluated for each merged row."""
+        return {
+            name: default
+            for name, default in cls.column_defaults().items()
+            if isinstance(default, sa.ClauseElement)
+        }
 
     @classmethod
     def max_id(cls, session: so.Session) -> int:

@@ -5,14 +5,13 @@ from __future__ import annotations
 import logging
 import os
 from bisect import bisect_left
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.csv as pv
-import sqlalchemy as sa
 
 from ..conversion import ConversionPolicy, Interpretation
 from ..conversion.values import no_failures, underlying_type
@@ -103,23 +102,17 @@ class BatchProcessor:
         Lines the reader left out as malformed, each as its line number in the
         file and the reason. They are written to the rejects file and count as
         rows read and rejected.
-    evaluate
-        Function that returns the value of a SQL expression default as a
-        column of the given type stores it. It is called once for each such
-        default when the processor is built.
-
     Attributes
     ----------
     out_columns
-        Columns of the typed batches: the file's columns, then the columns
-        the file lacks that have a default.
+        Columns of typed batches: loadable file columns, then the columns the
+        file lacks that have a literal or SQL-expression default.
 
     Notes
     -----
-    A missing value takes the column's default, and a column the file lacks
-    is filled with it. The default is read by the column's handler like a
-    value from the file. A missing value left in a non-nullable column is a
-    required value that is missing.
+    Missing values take literal defaults. SQL-expression defaults remain
+    null in staging so the database can evaluate them per row during merge.
+    A missing value left in a required column is an error.
     """
 
     def __init__(
@@ -131,9 +124,7 @@ class BatchProcessor:
         rejects_path: Path,
         normalise: bool = True,
         skipped: list[tuple[int | None, str]] | None = None,
-        evaluate: Callable[[Any, Any], Any] | None = None,
     ) -> None:
-        self.columns = columns
         self.skipped = skipped if skipped is not None else []
         self._parsed = 0
         self._shifts: list[int] = []
@@ -141,17 +132,44 @@ class BatchProcessor:
         self.report = report
         self.normalise = normalise
         self.table_name = tableclass.__tablename__
-        model_columns = tableclass.model_columns()
-        defaults = tableclass.column_defaults() if normalise else {}
-        self.out_columns = [*columns, *(name for name in defaults if name not in columns)]
+        model_columns = {
+            name: column
+            for name, column in tableclass.model_columns().items()
+            if column.computed is None
+        }
+        self.columns = [name for name in columns if name in model_columns]
+        all_defaults = tableclass.column_defaults() if normalise else {}
+        self.sql_expression_defaults = tableclass.sql_expression_defaults() if normalise else {}
+        defaults = {
+            name: default
+            for name, default in all_defaults.items()
+            if name not in self.sql_expression_defaults
+        }
+        self.out_columns = [*self.columns, *(name for name in all_defaults if name not in self.columns)]
         self.types = {name: underlying_type(model_columns[name].type) for name in self.out_columns}
         self.handlers = (
             {name: policy.for_column(self.types[name], self.table_name, name) for name in self.out_columns}
             if normalise
             else {}
         )
-        self.defaults = {name: self._evaluated(name, default, evaluate) for name, default in defaults.items()}
-        self.required = [name for name in self.out_columns if not model_columns[name].nullable]
+        for name, handler in self.handlers.items():
+            try:
+                handler.arrow_type(self.types[name])
+            except ValueError as exc:
+                raise PolicyError(
+                    table_name=self.table_name,
+                    column_name=name,
+                    column_type=repr(self.types[name]),
+                    detail=str(exc),
+                ) from exc
+        self.defaults = defaults
+        primary_keys = set(tableclass.pk_names())
+        self.required = [
+            name
+            for name in self.out_columns
+            if (not model_columns[name].nullable or name in primary_keys)
+            and name not in self.sql_expression_defaults
+        ]
         self._literals: dict[str, pa.Scalar] = {}
         self.rejects = RejectsWriter(rejects_path)
         if policy.errors.on_error == "reject_row":
@@ -162,8 +180,9 @@ class BatchProcessor:
         """Yield typed tables for the raw batches, closing the rejects file afterwards."""
         try:
             for raw in batches:
-                self._reject_skipped()
+                self._reject_skipped(check_limit=False)
                 table = self.process(raw)
+                self._check_limit()
                 if table.num_rows:
                     yield table
             self._reject_skipped()
@@ -197,7 +216,7 @@ class BatchProcessor:
         self._parsed += raw.num_rows
         self.report.rows_read += raw.num_rows
         if not self.normalise:
-            return pa.Table.from_batches([raw])
+            return pa.Table.from_batches([raw.select(self.columns)])
         results = {
             name: self.handlers[name].interpret(raw.column(name), self.types[name], self.policy.nulls)
             for name in self.columns
@@ -212,6 +231,12 @@ class BatchProcessor:
 
     def _fill_defaults(self, results: dict[str, Interpretation], count: int) -> None:
         """Give a missing value, and a column the file lacks, the column's default."""
+        for name in self.sql_expression_defaults:
+            if name not in results:
+                results[name] = Interpretation(
+                    pa.nulls(count, self.handlers[name].arrow_type(self.types[name])),
+                    no_failures(count),
+                )
         for name, default in self.defaults.items():
             if name not in results:
                 results[name] = Interpretation(pa.repeat(self._fill_value(name, default), count), no_failures(count))
@@ -221,14 +246,6 @@ class BatchProcessor:
             if pc.any(missing).as_py():
                 filled = pc.if_else(missing, self._fill_value(name, default), values)
                 results[name] = Interpretation(filled, invalid)
-
-    def _evaluated(self, name: str, default: Any, evaluate: Callable[[Any, Any], Any] | None) -> Any:
-        """Return a literal default as it is and the value of a SQL expression default."""
-        if not isinstance(default, sa.ClauseElement):
-            return default
-        if evaluate is None:
-            raise PolicyError(table_name=self.table_name, column_name=name, column_type="SQL expression default")
-        return evaluate(default, self.types[name])
 
     def _fill_value(self, name: str, default: Any) -> pa.Scalar:
         """Return the scalar that fills a column, read through the column's handler once."""
@@ -249,16 +266,16 @@ class BatchProcessor:
             )
         return values[0]
 
-    def _failures(self, results: dict[str, Any]) -> dict[str, tuple[pa.Array, str]]:
-        found: dict[str, tuple[pa.Array, str]] = {}
+    def _failures(self, results: dict[str, Any]) -> dict[str, list[tuple[pa.Array, str]]]:
+        found: dict[str, list[tuple[pa.Array, str]]] = {}
         for name in self.columns:
             invalid = results[name].invalid
             if pc.any(invalid).as_py():
-                found[name] = (invalid, f"cannot be read as {self.handlers[name].expected(self.types[name])}")
+                found[name] = [(invalid, f"cannot be read as {self.handlers[name].expected(self.types[name])}")]
         for name in self.required:
             missing = pc.and_(pc.is_null(results[name].values), pc.invert(results[name].invalid))
             if pc.any(missing).as_py():
-                found[name] = (pc.or_(found[name][0], missing) if name in found else missing, "required value is missing")
+                found.setdefault(name, []).append((missing, "required value is missing"))
         return found
 
     def _conversion_error(self, name: str, raw: pa.Array | pa.ChunkedArray, invalid: pa.Array) -> ConversionError | None:
@@ -311,17 +328,18 @@ class BatchProcessor:
         self,
         raw: pa.RecordBatch,
         results: dict[str, Any],
-        failures: dict[str, tuple[pa.Array, str]],
+        failures: dict[str, list[tuple[pa.Array, str]]],
         first: int,
     ) -> pa.Table:
         rejected = no_failures(raw.num_rows)
         column = pa.nulls(raw.num_rows, pa.string())
         reason = pa.nulls(raw.num_rows, pa.string())
-        for name, (mask, why) in failures.items():
-            first_hit = pc.and_(mask, pc.invert(rejected))
-            column = pc.if_else(first_hit, pa.scalar(name), column)
-            reason = pc.if_else(first_hit, pa.scalar(why), reason)
-            rejected = pc.or_(rejected, mask)
+        for name, reasons in failures.items():
+            for mask, why in reasons:
+                first_hit = pc.and_(mask, pc.invert(rejected))
+                column = pc.if_else(first_hit, pa.scalar(name), column)
+                reason = pc.if_else(first_hit, pa.scalar(why), reason)
+                rejected = pc.or_(rejected, mask)
         row_numbers = self._row_numbers(first, raw.num_rows)
         plain = [c.dictionary_decode() if pa.types.is_dictionary(c.type) else c for c in raw.columns]
         listing = pa.table(
@@ -348,7 +366,7 @@ class BatchProcessor:
         positions = range(first + 1, first + count + 1)
         return pa.array([p + bisect_left(self._shifts, p) for p in positions], pa.int64())
 
-    def _reject_skipped(self) -> None:
+    def _reject_skipped(self, *, check_limit: bool = True) -> None:
         """Write the lines the reader left out to the rejects file and remember where they were."""
         count = len(self.skipped)
         if not count:
@@ -370,7 +388,8 @@ class BatchProcessor:
         self.report.rows_read += count
         self.report.rows_rejected += count
         self.report.rejects_path = self.rejects.path
-        self._check_limit()
+        if check_limit:
+            self._check_limit()
 
     def _check_limit(self) -> None:
         limit = self.policy.errors.max_rejects

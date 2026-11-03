@@ -299,6 +299,15 @@ class DatabaseBackend(ABC):
             if c.computed is None and (staging is None or c.name in staging.c)
         ]
 
+    @staticmethod
+    def _staging_value(
+        table_cls: Type["FileTableProtocol"], staging: sa.Table, name: str
+    ) -> sa.ColumnElement[Any]:
+        """Apply a SQL-expression default to null staging values during merge."""
+        column = staging.c[name]
+        default = table_cls.sql_expression_defaults().get(name)
+        return column if default is None else sa.func.coalesce(column, default).label(name)
+
     def deferred_fk_constraints(
         self,
         table_cls: Type["FileTableProtocol"],
@@ -488,8 +497,8 @@ class DatabaseBackend(ABC):
 
         The staging table has the target's columns with their types and
         nullability, and no key, index, default or constraint, plus the row
-        key column of the backend. The processor completes every value before
-        it is written, so the target's NOT NULL holds in staging.
+        key column of the backend. Columns with SQL-expression defaults are
+        nullable in staging so the merge can evaluate their defaults per row.
 
         Parameters
         ----------
@@ -504,8 +513,9 @@ class DatabaseBackend(ABC):
             The staging table as created.
         """
         self.drop_staging_table(table_cls, session)
+        expression_defaults = table_cls.sql_expression_defaults()
         columns = [
-            sa.Column(c.name, c.type, nullable=c.nullable)
+            sa.Column(c.name, c.type, nullable=c.nullable or c.name in expression_defaults)
             for c in table_cls.__table__.columns
             if c.computed is None
         ]
@@ -546,22 +556,6 @@ class DatabaseBackend(ABC):
             *columns,
             schema=self.staging_schema,
         )
-
-    def evaluate_default(
-        self,
-        session: so.Session,
-        table_cls: Type["FileTableProtocol"],
-        expression: sa.ColumnElement[Any],
-        column_type: Any,
-    ) -> Any:
-        """
-        Return the value of a SQL expression default, as a column of the given type stores it.
-
-        The database evaluates the expression and casts the result to the
-        column type, as it would for the default of an inserted row.
-        """
-        select = sa.select(sa.cast(expression, column_type))
-        return session.execute(select, bind_arguments={"mapper": table_cls}).scalar_one()
 
     @abstractmethod
     def insert_batches(

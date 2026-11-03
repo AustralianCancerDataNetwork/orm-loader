@@ -291,11 +291,12 @@ class DuckDBBackend(DatabaseBackend):
             rejects a SET on an FK-constrained column of a referenced row.
         """
         target = table_cls.__table__
+        target_columns = {column.name: column for column in target.columns}
         update_cols = [c for c in self._insertable_column_names(table_cls) if c not in pk_cols]
         deferred_cols = {col.name for fk in self.deferred_fk_constraints(table_cls) for col in fk.columns}
         enforced_fk_cols = [
             c for c in update_cols
-            if c in target.c and target.c[c].foreign_keys and c not in deferred_cols
+            if c in target_columns and target_columns[c].foreign_keys and c not in deferred_cols
         ]
         if not enforced_fk_cols:
             return
@@ -342,8 +343,9 @@ class DuckDBBackend(DatabaseBackend):
         self._validate_merge_batch_size(merge_batch_size)
         self.check_replace_feasible(table_cls, pk_cols, session)
         target = table_cls.__table__
+        target_columns = {column.name: column for column in target.columns}
         update_cols = [c for c in self._insertable_column_names(table_cls, staging) if c not in pk_cols]
-        pk_join = sa.and_(*(target.c[c] == staging.c[c] for c in pk_cols))
+        pk_join = sa.and_(*(target_columns[c] == staging.c[c] for c in pk_cols))
 
         def _batch_keys(extra: sa.ColumnElement[bool] | None = None) -> sa.Select[Any]:
             keys = sa.select(*(staging.c[c] for c in pk_cols))
@@ -353,11 +355,13 @@ class DuckDBBackend(DatabaseBackend):
 
         def _pk_in(keys: sa.Select[Any]) -> sa.ColumnElement[bool]:
             if len(pk_cols) == 1:
-                return target.c[pk_cols[0]].in_(keys)
-            return sa.tuple_(*(target.c[c] for c in pk_cols)).in_(keys)
+                return target_columns[pk_cols[0]].in_(keys)
+            return sa.tuple_(*(target_columns[c] for c in pk_cols)).in_(keys)
 
         def _update(extra: sa.ColumnElement[bool] | None = None) -> None:
-            stmt = sa.update(target).values({c: staging.c[c] for c in update_cols}).where(pk_join)
+            stmt = sa.update(target).values(
+                {target_columns[c]: self._staging_value(table_cls, staging, c) for c in update_cols}
+            ).where(pk_join)
             if extra is not None:
                 stmt = stmt.where(_pk_in(_batch_keys(extra)))
             session.execute(stmt)
@@ -376,10 +380,10 @@ class DuckDBBackend(DatabaseBackend):
         self_referential_fks = self._self_referential_deferred_fks(table_cls)
         if self_referential_fks:
             insertable_cols = self._insertable_column_names(table_cls, staging)
-            non_paginated_select = sa.select(*(staging.c[c] for c in insertable_cols))
+            non_paginated_select = sa.select(*(self._staging_value(table_cls, staging, c) for c in insertable_cols))
 
             def _insert(select_: Any) -> sa.Insert:
-                return sa.insert(target).from_select(insertable_cols, select_)
+                return sa.insert(target).from_select([target_columns[c] for c in insertable_cols], select_)
 
             def _process_batch(batch_range: sa.ColumnElement[bool] | None) -> None:
                 # batch_range's rows already in target are updated; what's
@@ -420,16 +424,17 @@ class DuckDBBackend(DatabaseBackend):
 
         self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
+        target_columns = {column.name: column for column in target.columns}
         insertable_cols = self._insertable_column_names(table_cls, staging)
 
         def _upsert(select_: Any) -> sa.Insert:
             return (
                 duckdb_sqlalchemy.insert(target)
-                .from_select(insertable_cols, select_)
-                .on_conflict_do_nothing(index_elements=pk_cols)
+                .from_select([target_columns[c] for c in insertable_cols], select_)
+                .on_conflict_do_nothing(index_elements=[target_columns[c] for c in pk_cols])
             )
 
-        non_paginated_select = sa.select(*(staging.c[c] for c in insertable_cols))
+        non_paginated_select = sa.select(*(self._staging_value(table_cls, staging, c) for c in insertable_cols))
         self_referential = bool(self._self_referential_deferred_fks(table_cls))
 
         for batch_range in self._paginate_batches(table_cls, staging, session, merge_batch_size):
@@ -454,11 +459,12 @@ class DuckDBBackend(DatabaseBackend):
     ) -> None:
         self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
+        target_columns = {column.name: column for column in target.columns}
         insertable_cols = self._insertable_column_names(table_cls, staging)
-        non_paginated_select = sa.select(*(staging.c[c] for c in insertable_cols))
+        non_paginated_select = sa.select(*(self._staging_value(table_cls, staging, c) for c in insertable_cols))
 
         def _insert(select_: Any) -> sa.Insert:
-            return sa.insert(target).from_select(insertable_cols, select_)
+            return sa.insert(target).from_select([target_columns[c] for c in insertable_cols], select_)
 
         self_referential = bool(self._self_referential_deferred_fks(table_cls))
 

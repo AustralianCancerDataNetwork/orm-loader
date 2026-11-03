@@ -19,16 +19,26 @@ class PolicyError(IngestError):
         Name of the column type that has no handler.
     """
 
-    def __init__(self, *, table_name: str | None, column_name: str | None, column_type: str) -> None:
+    def __init__(
+        self,
+        *,
+        table_name: str | None,
+        column_name: str | None,
+        column_type: str,
+        detail: str | None = None,
+    ) -> None:
         self.table_name = table_name
         self.column_name = column_name
         self.column_type = column_type
         target = ".".join(part for part in (table_name, column_name) if part) or "column"
-        super().__init__(
-            f"{target}: no handler for column type {column_type}. Register one in "
+        message = (
+            f"{target}: unsupported column type {column_type}: {detail}."
+            if detail
+            else f"{target}: no handler for column type {column_type}. Register one in "
             f"ConversionPolicy(handlers=...) or ConversionPolicy(columns=...), "
             f"or PassthroughHandler() to load the values unchanged."
         )
+        super().__init__(message)
 
 
 class ConversionError(IngestError):

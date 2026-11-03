@@ -76,10 +76,26 @@ def test_numeric_precision_without_scale_has_scale_zero():
     assert unreadable("1.5", sa.Numeric(30))
 
 
-def test_numeric_without_precision_is_exact_and_rejects_what_does_not_fit():
-    assert read("12345678901234567890.123456789", sa.Numeric()) == Decimal("12345678901234567890.123456789000000000")
-    assert unreadable("1" + "0" * 30, sa.Numeric())
-    assert unreadable("0.1234567890123456789", sa.Numeric())
+@pytest.mark.parametrize("raw", [
+    "12345678901234567890.123456789", "1" + "0" * 80, "0.1234567890123456789",
+])
+def test_numeric_without_precision_preserves_every_digit_as_text(raw):
+    assert read(raw, sa.Numeric()) == raw
+
+
+def test_wide_numeric_uses_decimal256_and_enforces_its_declared_shape():
+    from orm_loader.conversion.handlers import NumericHandler
+
+    assert NumericHandler().arrow_type(sa.Numeric(50, 2)) == pa.decimal256(50, 2)
+    raw = "123456789012345678901234567890123456789012.25"
+    assert read(raw, sa.Numeric(50, 2)) == Decimal(raw)
+    assert unreadable("1.555", sa.Numeric(50, 2))
+    assert unreadable("9" * 49, sa.Numeric(50, 2))
+
+
+@pytest.mark.parametrize("raw", ["abc", "1e5", ".", "--1"])
+def test_unconstrained_numeric_still_rejects_non_decimal_text(raw):
+    assert unreadable(raw, sa.Numeric())
 
 
 def test_numeric_digits_beyond_the_precision_do_not_wrap_around():
@@ -140,3 +156,13 @@ def test_numeric_with_scale_zero_accepts_a_zero_fraction_only():
         [Decimal("2"), Decimal("2"), None, None],
         [False, False, True, True],
     )
+
+
+def test_numeric_wider_than_decimal256_preserves_text_and_declared_bounds():
+    from orm_loader.conversion.handlers import NumericHandler
+
+    assert NumericHandler().arrow_type(sa.Numeric(80, 2)) == pa.string()
+    raw = "9" * 78 + ".12"
+    assert read(raw, sa.Numeric(80, 2)) == raw
+    assert unreadable("9" * 79, sa.Numeric(80, 2))
+    assert unreadable("1.234", sa.Numeric(80, 2))

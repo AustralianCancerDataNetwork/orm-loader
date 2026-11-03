@@ -42,7 +42,9 @@ policy = ConversionPolicy(
 ## NullPolicy
 
 - Text columns keep every nonempty value verbatim. Only empty and whitespace-only text is null.
-- `text_markers` adds exact, case-sensitive words that are null in every text column of the load. To treat a word as missing in some columns only, subclass `TextHandler`, override `missing()` and register it in `ConversionPolicy.columns`.
+- Compared with 2.x, words such as `NULL`, `None`, `N/A` and `NaN` stay as text by default. To restore the legacy marker set, pass `NullPolicy(text_markers=NullPolicy.LEGACY_TEXT_MARKERS)`. You can add or remove markers with set operations.
+- `text_markers` adds exact, case-sensitive words that are null in every text column of the load. Matching ignores surrounding whitespace in normal conversion. With `marker_quoting="unquoted_only"` in CSV quote mode, Arrow matches markers exactly because it applies them while parsing. To treat a word as missing in some columns only, subclass `TextHandler`, override `missing()` and register it in `ConversionPolicy.columns`.
+- `empty_is_null=False` keeps empty text fields as empty strings in delimited files. Typed columns still treat empty fields as missing.
 - `marker_quoting="unquoted_only"` matches a marker only when the source did not quote it.
 - Typed columns accept a valid value, a missing word (`null`, `none`, `na`, `n/a`, `nan` and similar) or a real null, and fail otherwise.
 
@@ -68,7 +70,7 @@ The handler for a column is the first match of: the entry in `ConversionPolicy.c
 | `EnumHandler` | `Enum` | One of the labels the column stores | `strip` |
 | `IntegerHandler` | `Integer`, `SmallInteger`, `BigInteger` | Optional sign and digits, with an optional all-zero fraction (`1.0`); a value outside the 16, 32 or 64 bits of the column type is an error | none |
 | `FloatHandler` | `Float` | Decimal or exponent form; `Infinity` and values that overflow to infinity are errors | none |
-| `NumericHandler` | `Numeric` | Decimal form, converted to the declared precision and scale without rounding; a precision without a scale has scale 0 and a column without a precision reads as `decimal128(38, 18)` | none |
+| `NumericHandler` | `Numeric` | Decimal form, checked against declared precision and scale without rounding; a precision without a scale has scale 0. Unconstrained and wider declarations stay as decimal text until the database stores them | none |
 | `BooleanHandler` | `Boolean` | `true`, `t`, `yes`, `y`, `1`, `on` and their opposites | `true_words`, `false_words` |
 | `DateHandler` | `Date` | One of `formats`, validated against the calendar; year 0 is an error | `formats` |
 | `DateTimeHandler` | `DateTime` | ISO date and time, or a date in one of `formats`; see time zones below | `formats` |

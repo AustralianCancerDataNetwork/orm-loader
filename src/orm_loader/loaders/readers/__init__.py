@@ -7,6 +7,7 @@ import sqlalchemy as sa
 from ...conversion import NullPolicy
 from .base import FileReader
 from .delimited import DelimitedTextReader
+from .detection import infer_delim
 from .parquet import ParquetReader
 
 
@@ -52,4 +53,4 @@ def open_reader(
 
 
 
-__all__ = ["DelimitedTextReader", "FileReader", "ParquetReader", "open_reader"]
+__all__ = ["DelimitedTextReader", "FileReader", "ParquetReader", "infer_delim", "open_reader"]
