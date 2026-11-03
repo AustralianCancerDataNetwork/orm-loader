@@ -66,5 +66,16 @@ On PostgreSQL and SQLite a load relaxes foreign keys from before it writes stagi
 
 To insert ORM objects built in Python that reference each other, wrap the inserts in `backend.relaxed_foreign_keys(session)`, which relaxes the keys on PostgreSQL and SQLite and leaves them enforced on DuckDB.
 
+Autoflush is suspended by default. Flush the pending inserts inside the block so they run while checks are relaxed:
+
+```python
+with backend.relaxed_foreign_keys(session):
+    session.add_all(objects)
+    session.flush()
+session.commit()
+```
+
+On PostgreSQL, relaxation is transaction-local and is reapplied when a new transaction begins, even if the session switches pooled connections. Exiting the scope restores the prior role on any transaction still active.
+
 DuckDB enforces the keys it creates, so load parent tables first. `load_file` already validates the keys DuckDB never enforces (cross-schema, cyclic and self-referential) after each table's merge, and `validate_foreign_keys` repeats that check, so it works the same way on every backend. A DuckDB table with foreign keys needs `resolved=` for both.
 

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import io
+import logging
+from contextlib import contextmanager, nullcontext
 from collections.abc import Iterable, Mapping, Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import pyarrow as pa
 import pyarrow.csv as pacsv
@@ -12,6 +14,7 @@ from oa_configurator import (
     Dialect,
     qualified,
 )
+from sqlalchemy import event
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.sql.compiler import IdentifierPreparer
@@ -32,6 +35,8 @@ if TYPE_CHECKING:
     from ..loaders.loader import LoaderContext
     from ..mappers.materialised_view_contracts import MaterializedViewIndex
     from ..tables.typing import FileTableProtocol
+
+logger = logging.getLogger(__name__)
 
 _VALID_PG_REPLICATION_ROLES = frozenset({"origin", "local", "replica"})
 
@@ -150,6 +155,63 @@ class PostgresBackend(DatabaseBackend, MaterializedViewBackend):
             sa.text(f"SET session_replication_role = '{safe_state}'"), **execute_options
         )
 
+    @contextmanager
+    def relaxed_foreign_keys(
+        self,
+        session: so.Session | so.scoped_session[so.Session],
+        *,
+        mapper: Any | None = None,
+        no_autoflush: bool = True,
+    ):
+        """Relax checks in each transaction on the selected bind.
+
+        SET LOCAL resets when a transaction ends. The after_begin listener
+        reapplies it even when a commit or rollback changes the pooled
+        connection. An existing transaction is relaxed immediately, and its
+        original role is restored when the scope exits.
+        """
+        if isinstance(session, so.scoped_session):
+            session = cast(so.Session, session())
+        target_engine = session.get_bind(mapper=mapper).engine
+        active_connection: sa.Connection | None = None
+        previous_role = "origin"
+
+        def after_begin(_session, _transaction, connection: sa.Connection) -> None:
+            nonlocal active_connection, previous_role
+            if connection.engine is not target_engine:
+                return
+            if connection is not active_connection:
+                previous_role = self._normalize_fk_check_state(
+                    connection.scalar(sa.text("SHOW session_replication_role"))
+                )
+                active_connection = connection
+            connection.exec_driver_sql("SET LOCAL session_replication_role = 'replica'")
+
+        scope = f"Table `{mapper.__tablename__}`: " if hasattr(mapper, "__tablename__") else ""
+        event.listen(session, "after_begin", after_begin)
+        try:
+            connection = session.connection(bind_arguments={"mapper": mapper})
+            if connection is not active_connection:
+                after_begin(session, session.get_transaction(), connection)
+            logger.info("%sForeign key checks disabled.", scope)
+            with session.no_autoflush if no_autoflush else nullcontext():
+                yield
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            event.remove(session, "after_begin", after_begin)
+            if (
+                active_connection is not None
+                and not active_connection.closed
+                and not active_connection.invalidated
+                and active_connection.in_transaction()
+            ):
+                active_connection.exec_driver_sql(
+                    f"SET LOCAL session_replication_role = '{previous_role}'"
+                )
+            logger.info("%sForeign key checks restored.", scope)
+
     @property
     def _commits_between_pagination_batches(self) -> bool:
         """True: bounds the WAL growth, lock duration, and dead-tuple
@@ -229,8 +291,8 @@ class PostgresBackend(DatabaseBackend, MaterializedViewBackend):
     ) -> None:
         """Insert all staging rows into the target table.
 
-        session_replication_role='replica' is session-level and persists
-        across commits, so FK checks stay disabled for every batch.
+        relaxed_foreign_keys reapplies transaction-local replication-role
+        settings after each commit, keeping FK checks disabled for every batch.
         """
         self._validate_merge_batch_size(merge_batch_size)
         target = table_cls.__table__
