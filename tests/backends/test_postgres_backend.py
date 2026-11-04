@@ -120,21 +120,6 @@ def test_postgres_backend_create_staging_table_drops_computed_columns(pg_session
     assert cols == {"id", "name", "_rownum"}  # slug is computed, excluded
 
 
-def test_postgres_backend_fk_methods_emit_expected_sql():
-    backend = PostgresBackend()
-    session = _FakeSession()
-
-    previous = backend.disable_fk_check(_sess(session))
-    backend.restore_fk_check(_sess(session), previous)
-
-    assert previous == "origin"
-    assert session.statements == [
-        "SHOW session_replication_role",
-        "SET session_replication_role = 'replica'",
-        "SET session_replication_role = 'origin'",
-    ]
-
-
 def test_postgres_backend_materialized_view_methods_work_end_to_end(pg_db):
     """Real create + refresh + query, not just checking emitted SQL text.
     The whole point is proving this DDL actually round-trips correctly."""
@@ -523,25 +508,6 @@ def test_postgres_backend_normalize_fk_check_state():
         assert "Invalid PostgreSQL session_replication_role" in str(exc)
     else:
         raise AssertionError("Expected ValueError for unrecognised role")
-
-    try:
-        normalize(1)
-    except ValueError as exc:
-        assert "Postgres uses string roles" in str(exc)
-    else:
-        raise AssertionError("Expected ValueError for integer input")
-
-
-def test_postgres_backend_disable_fk_raises_when_show_returns_non_string():
-    backend = PostgresBackend()
-    session = _FakeSession(scalar_result=42)
-
-    try:
-        backend.disable_fk_check(_sess(session))
-    except RuntimeError as exc:
-        assert "Expected PostgreSQL FK state to be a string" in str(exc)
-    else:
-        raise AssertionError("Expected RuntimeError when SHOW returns a non-string")
 
 
 # ---------------------------------------------------------------------------

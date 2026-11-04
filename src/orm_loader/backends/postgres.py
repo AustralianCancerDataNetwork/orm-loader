@@ -116,44 +116,15 @@ class PostgresBackend(DatabaseBackend, MaterializedViewBackend):
             cursor.close()
 
     @staticmethod
-    def _normalize_fk_check_state(previous_state: str | int) -> str:
-        if isinstance(previous_state, int):
-            raise ValueError(
-                f"Invalid PostgreSQL session_replication_role {previous_state!r}: "
-                "Postgres uses string roles ('origin', 'local', 'replica'), not integers. "
-                "The value passed here should always come from this backend's own "
-                "disable_fk_check(), which returns a string."
-            )
-        normalised = previous_state.strip().lower()
+    def _normalize_fk_check_state(role: str) -> str:
+        """Return a ``session_replication_role`` value in lowercase, or raise for an unknown role."""
+        normalised = role.strip().lower()
         if normalised not in _VALID_PG_REPLICATION_ROLES:
             raise ValueError(
-                f"Invalid PostgreSQL session_replication_role {previous_state!r}. "
+                f"Invalid PostgreSQL session_replication_role {role!r}. "
                 f"Expected one of: {sorted(_VALID_PG_REPLICATION_ROLES)}"
             )
         return normalised
-
-    def disable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str:
-        execute_options = {"bind_arguments": {"mapper": mapper}} if mapper is not None else {}
-        previous_state = session.execute(
-            sa.text("SHOW session_replication_role"), **execute_options
-        ).scalar()
-        session.execute(sa.text("SET session_replication_role = 'replica'"), **execute_options)
-        if not isinstance(previous_state, str):
-            raise RuntimeError("Expected PostgreSQL FK state to be a string")
-        return previous_state
-
-    def restore_fk_check(
-        self,
-        session: so.Session,
-        previous_state: str | int,
-        *,
-        mapper: Any | None = None,
-    ) -> None:
-        safe_state = self._normalize_fk_check_state(previous_state)
-        execute_options = {"bind_arguments": {"mapper": mapper}} if mapper is not None else {}
-        session.execute(
-            sa.text(f"SET session_replication_role = '{safe_state}'"), **execute_options
-        )
 
     @contextmanager
     def relaxed_foreign_keys(
