@@ -1,3 +1,5 @@
+import inspect
+
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 from orm_loader.tables.orm_table import ORMTableBase
@@ -21,6 +23,12 @@ def test_orm_table_protocol_conformance():
     assert hasattr(Q, "__tablename__")
     assert callable(Q.pk_names)
     assert callable(Q.model_columns)
+
+def test_every_protocol_member_is_a_plain_classmethod():
+    for name in ("column_defaults", "sql_expression_defaults"):
+        descriptor = vars(ORMTableProtocol)[name]
+        assert isinstance(descriptor, classmethod)
+        assert inspect.isfunction(descriptor.__func__)
 
 def test_serialized_table_protocol_conformance():
     class G(SerialisableTableInterface, ORMTableBase, Base):

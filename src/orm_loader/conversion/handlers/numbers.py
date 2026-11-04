@@ -84,32 +84,28 @@ class FloatHandler(NumberHandler):
 class NumericHandler(NumberHandler):
     """Accepts decimal forms and keeps the column's declared precision and scale.
 
-    A precision without a scale has scale 0. Values without a declared
-    precision, and supported declarations wider than Arrow's decimal types,
-    stay as decimal text until the database stores them. Trailing fractional
-    zeros are dropped, and a value outside a declared precision or scale is
-    unreadable.
+    A precision without a scale has scale 0. A value is checked against the
+    declared digits and is unreadable when it does not fit, and trailing
+    fractional zeros are dropped. Up to 38 digits the value is cast to an
+    Arrow decimal. A column without a precision, or with more than 38 digits,
+    stays decimal text until the database stores it.
     """
 
     @staticmethod
     def precision_scale(sa_type: TypeEngine[Any]) -> tuple[int | None, int | None]:
         """Return a column's declared precision and scale."""
-        precision = getattr(sa_type, "precision", None)
-        scale = getattr(sa_type, "scale", None)
-        if precision is not None and (
-            precision < 1 or (scale is not None and (scale < 0 or scale > precision))
-        ):
+        return getattr(sa_type, "precision", None), getattr(sa_type, "scale", None)
+
+    def validate(self, sa_type: TypeEngine[Any]) -> None:
+        precision, scale = self.precision_scale(sa_type)
+        if precision is not None and (precision < 1 or (scale is not None and not 0 <= scale <= precision)):
             raise ValueError(f"unsupported Numeric precision/scale declaration ({precision}, {scale})")
-        return precision, scale
 
     def arrow_type(self, sa_type: TypeEngine[Any]) -> pa.DataType:
         precision, scale = self.precision_scale(sa_type)
-        if precision is None or precision > 76:
+        if precision is None or precision > 38:
             return pa.string()
-        scale = scale or 0
-        if precision > 38:
-            return pa.decimal256(precision, scale)
-        return pa.decimal128(precision, scale)
+        return pa.decimal128(precision, scale or 0)
 
     def clean(self, raw: pa.Array, trimmed: pa.Array) -> pa.Array:
         return pc.replace_substring_regex(trimmed, r"(\.\d*?)0+$", r"\1")
@@ -121,15 +117,10 @@ class NumericHandler(NumberHandler):
         than a decimal holds, so both parts are bounded here.
         """
         precision, scale = self.precision_scale(sa_type)
-        if precision is None:
-            if scale is None:
-                return r"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$"
-            forms = [rf"\d+(\.\d{{0,{scale}}})?"]
-            if scale:
-                forms.append(rf"\.\d{{1,{scale}}}")
-            return rf"^[+-]?({'|'.join(forms)})$"
-        scale = scale or 0
-        forms = [rf"0*\d{{0,{precision - scale}}}(\.\d{{0,{scale}}})?"]
-        if scale:
-            forms.append(rf"\.\d{{1,{scale}}}")
+        digits = None if precision is None and scale is None else scale or 0
+        whole = r"\d+" if precision is None else rf"0*\d{{0,{precision - (digits or 0)}}}"
+        fraction = r"\d*" if digits is None else rf"\d{{0,{digits}}}"
+        forms = [rf"{whole}(\.{fraction})?"]
+        if digits != 0:
+            forms.append(r"\.\d+" if digits is None else rf"\.\d{{1,{digits}}}")
         return rf"^[+-]?({'|'.join(forms)})$"

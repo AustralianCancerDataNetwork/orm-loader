@@ -1,6 +1,7 @@
 """BatchProcessor: raw batches in, typed rows, rejects and accounting out, no database."""
 
 import csv
+import logging
 from datetime import date
 from pathlib import Path
 
@@ -118,9 +119,67 @@ def test_max_rejects_stops_a_load_over_a_count_or_a_fraction(tmp_path, limit, ro
     rows = [(str(i), "a", "x" if i <= rows_bad else "1", "") for i in range(1, 5)]
     if should_stop:
         with pytest.raises(RejectLimitError):
-            processor.process(_batch(*rows))
+            list(processor.stream([_batch(*rows)]))
     else:
-        assert processor.process(_batch(*rows)).num_rows == 4 - rows_bad
+        assert sum(t.num_rows for t in processor.stream([_batch(*rows)])) == 4 - rows_bad
+
+
+def test_a_count_limit_stops_the_stream_before_the_next_batch(tmp_path):
+    policy = ConversionPolicy(errors=ErrorPolicy(on_error="reject_row", max_rejects=1))
+    processor, report = _processor(tmp_path, policy)
+    batches = [_batch(("1", "a", "x", ""), ("2", "a", "y", "")), _batch(("3", "a", "1", ""))]
+    with pytest.raises(RejectLimitError):
+        list(processor.stream(batches))
+    assert report.rows_read == 2
+
+
+def test_a_fraction_is_checked_against_all_rows_read_not_the_rows_so_far(tmp_path):
+    policy = ConversionPolicy(errors=ErrorPolicy(on_error="reject_row", max_rejects=0.01))
+    processor, report = _processor(tmp_path, policy)
+    early_rejects = _batch(*[(str(i), "a", "x" if i <= 5 else "1", "") for i in range(1, 51)])
+    clean = _batch(*[(str(i), "a", "1", "") for i in range(51, 5051)])
+    assert sum(t.num_rows for t in processor.stream([early_rejects, clean])) == 5045
+    assert (report.rows_read, report.rows_rejected) == (5050, 5)
+
+
+def test_a_fraction_over_the_limit_stops_the_load_when_the_stream_ends(tmp_path):
+    policy = ConversionPolicy(errors=ErrorPolicy(on_error="reject_row", max_rejects=0.01))
+    processor, _ = _processor(tmp_path, policy)
+    batches = [_batch(("1", "a", "x", ""), *[(str(i), "a", "1", "") for i in range(2, 51)])]
+    with pytest.raises(RejectLimitError, match="1 of 50"):
+        list(processor.stream(batches))
+
+
+def test_a_malformed_line_is_counted_with_the_rows_of_its_own_block(tmp_path):
+    policy = ConversionPolicy(errors=ErrorPolicy(on_error="reject_row", max_rejects=0.01))
+    processor, report = _processor(tmp_path, policy, skipped=[(2, "expected 4 columns, got 5")])
+    clean = _batch(*[(str(i), "a", "1", "") for i in range(2, 201)])
+    assert sum(t.num_rows for t in processor.stream([clean])) == 199
+    assert (report.rows_read, report.rows_rejected) == (200, 1)
+
+
+def test_rejected_rows_are_reported_in_a_warning(tmp_path, caplog):
+    processor, _ = _processor(tmp_path, REJECT)
+    with caplog.at_level(logging.WARNING):
+        list(processor.stream([_batch(("1", "a", "x", ""), ("2", "a", "1", ""))]))
+    assert "1 of 2 rows rejected" in caplog.text
+
+
+def test_a_clean_stream_logs_no_warning(tmp_path, caplog):
+    processor, _ = _processor(tmp_path, REJECT)
+    with caplog.at_level(logging.WARNING):
+        list(processor.stream([_batch(("1", "a", "1", ""))]))
+    assert "rejected" not in caplog.text
+
+
+def test_an_unreadable_value_and_a_missing_value_keep_their_own_reasons(tmp_path):
+    processor, _ = _processor(tmp_path, REJECT, table=DemoRequiredRecord, columns=["demo_id", "demo_label"])
+    processor.process(_batch(("1", "a"), ("x", "b"), ("2", ""), columns=["demo_id", "demo_label"]))
+    processor.rejects.close()
+    assert [(r["row"], r["column"], r["reason"]) for r in _rejects(tmp_path)] == [
+        ("2", "demo_id", "cannot be read as Integer"),
+        ("3", "demo_label", "required value is missing"),
+    ]
 
 
 def test_stream_skips_empty_results_and_closes_the_rejects_file(tmp_path):

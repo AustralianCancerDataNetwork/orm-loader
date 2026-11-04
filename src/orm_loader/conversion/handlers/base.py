@@ -47,6 +47,9 @@ class ColumnHandler(ABC):
         """Return the name reported in an error for an unreadable value."""
         return type(sa_type).__name__
 
+    def validate(self, sa_type: TypeEngine[Any]) -> None:
+        """Raise ``ValueError`` when the handler cannot read the column type as declared."""
+
 
 class PassthroughHandler(ColumnHandler):
     """Returns a column unchanged, for column types that are not converted."""

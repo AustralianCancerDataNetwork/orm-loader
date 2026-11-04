@@ -102,17 +102,21 @@ class BatchProcessor:
         Lines the reader left out as malformed, each as its line number in the
         file and the reason. They are written to the rejects file and count as
         rows read and rejected.
+
     Attributes
     ----------
     out_columns
-        Columns of typed batches: loadable file columns, then the columns the
-        file lacks that have a literal or SQL-expression default.
+        Columns of the typed batches: the file's columns, then the columns
+        the file lacks that have a literal default.
 
     Notes
     -----
-    Missing values take literal defaults. SQL-expression defaults remain
-    null in staging so the database can evaluate them per row during merge.
-    A missing value left in a required column is an error.
+    A missing value takes the column's literal default, and a column the file
+    lacks is filled with it. The default is read by the column's handler like
+    a value from the file. A SQL-expression default is not applied here: the
+    value stays null in staging and the merge applies the default for each
+    row. A missing value left in any other non-nullable column is a required
+    value that is missing.
     """
 
     def __init__(
@@ -132,20 +136,15 @@ class BatchProcessor:
         self.report = report
         self.normalise = normalise
         self.table_name = tableclass.__tablename__
-        model_columns = {
-            name: column
-            for name, column in tableclass.model_columns().items()
-            if column.computed is None
-        }
-        self.columns = [name for name in columns if name in model_columns]
-        all_defaults = tableclass.column_defaults() if normalise else {}
-        self.sql_expression_defaults = tableclass.sql_expression_defaults() if normalise else {}
+        model_columns = tableclass.model_columns()
+        self.columns = columns
+        expressions = tableclass.sql_expression_defaults() if normalise else {}
         defaults = {
             name: default
-            for name, default in all_defaults.items()
-            if name not in self.sql_expression_defaults
+            for name, default in (tableclass.column_defaults() if normalise else {}).items()
+            if name not in expressions
         }
-        self.out_columns = [*self.columns, *(name for name in all_defaults if name not in self.columns)]
+        self.out_columns = [*columns, *(name for name in defaults if name not in columns)]
         self.types = {name: underlying_type(model_columns[name].type) for name in self.out_columns}
         self.handlers = (
             {name: policy.for_column(self.types[name], self.table_name, name) for name in self.out_columns}
@@ -154,7 +153,7 @@ class BatchProcessor:
         )
         for name, handler in self.handlers.items():
             try:
-                handler.arrow_type(self.types[name])
+                handler.validate(self.types[name])
             except ValueError as exc:
                 raise PolicyError(
                     table_name=self.table_name,
@@ -167,8 +166,7 @@ class BatchProcessor:
         self.required = [
             name
             for name in self.out_columns
-            if (not model_columns[name].nullable or name in primary_keys)
-            and name not in self.sql_expression_defaults
+            if (not model_columns[name].nullable or name in primary_keys) and name not in expressions
         ]
         self._literals: dict[str, pa.Scalar] = {}
         self.rejects = RejectsWriter(rejects_path)
@@ -180,12 +178,13 @@ class BatchProcessor:
         """Yield typed tables for the raw batches, closing the rejects file afterwards."""
         try:
             for raw in batches:
-                self._reject_skipped(check_limit=False)
+                self._reject_skipped()
                 table = self.process(raw)
-                self._check_limit()
                 if table.num_rows:
                     yield table
             self._reject_skipped()
+            self._check_limit(final=True)
+            self._warn_if_rejected()
         finally:
             self.rejects.close()
 
@@ -216,7 +215,7 @@ class BatchProcessor:
         self._parsed += raw.num_rows
         self.report.rows_read += raw.num_rows
         if not self.normalise:
-            return pa.Table.from_batches([raw.select(self.columns)])
+            return pa.Table.from_batches([raw])
         results = {
             name: self.handlers[name].interpret(raw.column(name), self.types[name], self.policy.nulls)
             for name in self.columns
@@ -231,12 +230,6 @@ class BatchProcessor:
 
     def _fill_defaults(self, results: dict[str, Interpretation], count: int) -> None:
         """Give a missing value, and a column the file lacks, the column's default."""
-        for name in self.sql_expression_defaults:
-            if name not in results:
-                results[name] = Interpretation(
-                    pa.nulls(count, self.handlers[name].arrow_type(self.types[name])),
-                    no_failures(count),
-                )
         for name, default in self.defaults.items():
             if name not in results:
                 results[name] = Interpretation(pa.repeat(self._fill_value(name, default), count), no_failures(count))
@@ -366,7 +359,7 @@ class BatchProcessor:
         positions = range(first + 1, first + count + 1)
         return pa.array([p + bisect_left(self._shifts, p) for p in positions], pa.int64())
 
-    def _reject_skipped(self, *, check_limit: bool = True) -> None:
+    def _reject_skipped(self) -> None:
         """Write the lines the reader left out to the rejects file and remember where they were."""
         count = len(self.skipped)
         if not count:
@@ -388,14 +381,32 @@ class BatchProcessor:
         self.report.rows_read += count
         self.report.rows_rejected += count
         self.report.rejects_path = self.rejects.path
-        if check_limit:
-            self._check_limit()
+        self._check_limit()
 
-    def _check_limit(self) -> None:
+    def _check_limit(self, final: bool = False) -> None:
+        """Raise when the rejected rows pass ``max_rejects``.
+
+        A count is checked whenever rows are rejected. A fraction needs the
+        total number of rows, so it is checked once, when ``final`` is set at
+        the end of the stream.
+        """
         limit = self.policy.errors.max_rejects
         if limit is None:
             return
         rejected, read = self.report.rows_rejected, self.report.rows_read
-        over = rejected / read > limit if isinstance(limit, float) and limit < 1 else rejected > limit
+        if isinstance(limit, float) and limit < 1:
+            over = final and read > 0 and rejected / read > limit
+        else:
+            over = rejected > limit
         if over:
             raise RejectLimitError(rejected=rejected, read=read, limit=limit)
+
+    def _warn_if_rejected(self) -> None:
+        if self.report.rows_rejected:
+            logger.warning(
+                "%s: %d of %d rows rejected, see %s",
+                self.table_name,
+                self.report.rows_rejected,
+                self.report.rows_read,
+                self.report.rejects_path,
+            )

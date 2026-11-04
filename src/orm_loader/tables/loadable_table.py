@@ -325,20 +325,10 @@ class FileLoadableTableInterface(ORMTableBase):
         if reader is None:
             reader = open_reader(
                 path,
-                {
-                    name: column
-                    for name, column in cls.model_columns().items()
-                    if column.computed is None
-                },
-                nulls=policy.nulls,
+                cls.model_columns(),
                 quote_mode=quote_mode,
                 chunksize=chunksize,
                 skip_malformed=policy.errors.on_error == "reject_row",
-            )
-        elif reader.nulls != policy.nulls:
-            raise ValueError(
-                "the reader's null policy differs from policy.nulls; "
-                "build the reader with nulls=policy.nulls"
             )
 
         backend = resolve_backend(

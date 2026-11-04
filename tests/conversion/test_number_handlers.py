@@ -83,14 +83,6 @@ def test_numeric_without_precision_preserves_every_digit_as_text(raw):
     assert read(raw, sa.Numeric()) == raw
 
 
-def test_wide_numeric_uses_decimal256_and_enforces_its_declared_shape():
-    from orm_loader.conversion.handlers import NumericHandler
-
-    assert NumericHandler().arrow_type(sa.Numeric(50, 2)) == pa.decimal256(50, 2)
-    raw = "123456789012345678901234567890123456789012.25"
-    assert read(raw, sa.Numeric(50, 2)) == Decimal(raw)
-    assert unreadable("1.555", sa.Numeric(50, 2))
-    assert unreadable("9" * 49, sa.Numeric(50, 2))
 
 
 @pytest.mark.parametrize("raw", ["abc", "1e5", ".", "--1"])
@@ -158,11 +150,13 @@ def test_numeric_with_scale_zero_accepts_a_zero_fraction_only():
     )
 
 
-def test_numeric_wider_than_decimal256_preserves_text_and_declared_bounds():
+@pytest.mark.parametrize("precision", [50, 80])
+def test_numeric_wider_than_an_arrow_decimal_preserves_text_and_declared_bounds(precision):
     from orm_loader.conversion.handlers import NumericHandler
 
-    assert NumericHandler().arrow_type(sa.Numeric(80, 2)) == pa.string()
-    raw = "9" * 78 + ".12"
-    assert read(raw, sa.Numeric(80, 2)) == raw
-    assert unreadable("9" * 79, sa.Numeric(80, 2))
-    assert unreadable("1.234", sa.Numeric(80, 2))
+    column = sa.Numeric(precision, 2)
+    assert NumericHandler().arrow_type(column) == pa.string()
+    raw = "9" * (precision - 2) + ".12"
+    assert read(raw, column) == raw
+    assert unreadable("9" * (precision - 1), column)
+    assert unreadable("1.234", column)
