@@ -4,10 +4,8 @@ from typing import Any
 
 import sqlalchemy as sa
 
-from ...conversion import NullPolicy
 from .base import FileReader
 from .delimited import DelimitedTextReader
-from .detection import infer_delim
 from .parquet import ParquetReader
 
 
@@ -15,7 +13,6 @@ def open_reader(
     path: Path,
     model_columns: Mapping[str, sa.ColumnElement[Any]],
     *,
-    nulls: NullPolicy | None = None,
     quote_mode: str | None = None,
     chunksize: int | None = None,
     skip_malformed: bool = False,
@@ -31,8 +28,6 @@ def open_reader(
         File to read.
     model_columns
         Model columns by name; only these are read.
-    nulls
-        Null policy of the load.
     quote_mode
         Quote handling for delimited text. ``None`` uses the reader's default.
     chunksize
@@ -47,10 +42,8 @@ def open_reader(
         The opened reader.
     """
     if path.suffix.lower() == ".parquet":
-        return ParquetReader(path, model_columns, nulls, chunksize)
-    return DelimitedTextReader(path, model_columns, nulls, quote_mode, skip_malformed=skip_malformed)
+        return ParquetReader(path, model_columns, chunksize)
+    return DelimitedTextReader(path, model_columns, quote_mode, skip_malformed=skip_malformed)
 
 
-
-
-__all__ = ["DelimitedTextReader", "FileReader", "ParquetReader", "infer_delim", "open_reader"]
+__all__ = ["DelimitedTextReader", "FileReader", "ParquetReader", "open_reader"]

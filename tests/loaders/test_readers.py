@@ -6,7 +6,6 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from orm_loader.conversion import NullPolicy
 from orm_loader.loaders import DelimitedTextReader, ParquetReader, open_reader
 from tests.models import DemoRecord
 
@@ -50,9 +49,9 @@ def test_headers_are_lowercased_and_stripped_of_quotes_and_hash_suffix(tmp_path)
     assert DelimitedTextReader(path, COLUMNS).columns == ["demo_id", "demo_label"]
 
 
-def test_an_unquoted_empty_field_is_null_and_a_quoted_one_is_an_empty_string(tmp_path):
+def test_a_quoted_and_an_unquoted_empty_field_are_both_empty_strings(tmp_path):
     path = _write(tmp_path, 'demo_id,demo_label\n1,\n2,""\n')
-    assert [r["demo_label"] for r in _rows(DelimitedTextReader(path, COLUMNS, quote_mode="csv"))] == [None, ""]
+    assert [r["demo_label"] for r in _rows(DelimitedTextReader(path, COLUMNS, quote_mode="csv"))] == ["", ""]
 
 
 def test_embedded_newlines_and_tabs_survive(tmp_path):
@@ -91,11 +90,12 @@ def test_an_empty_file_has_no_content_and_a_header_only_file_has_no_rows(tmp_pat
     assert not header_only.empty and list(header_only.batches()) == []
 
 
-def test_unquoted_markers_are_nulled_while_reading_but_quoted_ones_are_kept(tmp_path):
-    path = _write(tmp_path, 'demo_id,demo_label\n1,NULL\n2,"NULL"\n')
-    nulls = NullPolicy(text_markers=frozenset({"NULL"}), marker_quoting="unquoted_only")
-    labels = [r["demo_label"] for r in _rows(DelimitedTextReader(path, COLUMNS, nulls, quote_mode="csv"))]
-    assert labels == [None, "NULL"]
+@pytest.mark.parametrize("name, quote_mode", [("demo_record.csv", "csv"), ("demo_record.tsv", "literal")])
+def test_a_delimited_reader_nulls_nothing(tmp_path, name, quote_mode):
+    delimiter = "," if name.endswith("csv") else "\t"
+    path = _write(tmp_path, f"demo_id{delimiter}demo_label\n1{delimiter}\n2{delimiter}NULL\n3{delimiter} NA \n", name)
+    labels = [r["demo_label"] for r in _rows(DelimitedTextReader(path, COLUMNS, quote_mode=quote_mode))]
+    assert labels == ["", "NULL", " NA "]
 
 
 def test_parquet_keeps_stored_types_and_ignores_other_columns(tmp_path):
@@ -115,8 +115,7 @@ def test_parquet_is_read_in_batches_of_chunksize_rows(tmp_path):
     assert sizes == [100, 100, 50]
 
 
-def test_parquet_markers_are_nulled_while_reading(tmp_path):
+def test_parquet_strings_are_not_nulled_by_the_reader(tmp_path):
     path = tmp_path / "demo_record.parquet"
-    pq.write_table(pa.table({"demo_id": [1, 2], "demo_label": ["NULL", "kept"]}), path)
-    nulls = NullPolicy(text_markers=frozenset({"NULL"}), marker_quoting="unquoted_only")
-    assert [r["demo_label"] for r in _rows(ParquetReader(path, COLUMNS, nulls))] == [None, "kept"]
+    pq.write_table(pa.table({"demo_id": [1, 2], "demo_label": ["NULL", ""]}), path)
+    assert [r["demo_label"] for r in _rows(ParquetReader(path, COLUMNS))] == ["NULL", ""]

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from itertools import product
 from types import MappingProxyType
 from typing import Any, ClassVar, Literal
 
@@ -37,12 +36,6 @@ from .handlers import (
 from .values import no_failures, underlying_type
 
 
-def _case_variants(value: str) -> frozenset[str]:
-    """Return every upper/lower-case spelling of a short null marker."""
-    choices = [(char.lower(), char.upper()) if char.isalpha() else (char,) for char in value]
-    return frozenset("".join(chars) for chars in product(*choices))
-
-
 @dataclass(frozen=True)
 class NullPolicy:
     """What counts as a missing value, shared by every column handler.
@@ -57,10 +50,6 @@ class NullPolicy:
     text_markers
         Exact, case-sensitive text values treated as missing in text columns.
         Matching ignores surrounding whitespace.
-    marker_quoting
-        ``"ignore"`` matches markers whether or not the source quoted them.
-        ``"unquoted_only"`` matches only markers the source did not quote,
-        which needs a source that records quoting and import-level markers.
     typed_missing_words
         Lowercase words treated as missing in non-text columns.
     """
@@ -68,21 +57,10 @@ class NullPolicy:
     DEFAULT_TYPED_MISSING: ClassVar[frozenset[str]] = frozenset(
         {"null", "none", "na", "n/a", "nan", "#n/a", "-nan", "<na>"}
     )
-    LEGACY_TEXT_MARKERS: ClassVar[frozenset[str]] = frozenset(
-        {
-            "#N/A", "#N/A N/A", "#NA", "-1.#IND", "-1.#QNAN", "-NaN", "-nan", "1.#IND", "1.#QNAN",
-            "<NA>", "N/A", "NA", "NULL", "NaN", "None", "n/a", "nan", "null",
-        }
-    ) | frozenset().union(*(_case_variants(word) for word in ("nan", "null", "none", "na", "n/a")))
 
     empty_is_null: bool = True
     text_markers: frozenset[str] = frozenset()
-    marker_quoting: Literal["ignore", "unquoted_only"] = "ignore"
     typed_missing_words: frozenset[str] = DEFAULT_TYPED_MISSING
-
-    def __post_init__(self) -> None:
-        if self.marker_quoting not in ("ignore", "unquoted_only"):
-            raise ValueError(f"marker_quoting must be 'ignore' or 'unquoted_only', not {self.marker_quoting!r}")
 
     def text_missing(self, trimmed: pa.Array) -> pa.Array:
         """Return a mask of trimmed text values that are missing in a text column.
@@ -97,8 +75,7 @@ class NullPolicy:
         pa.Array
             Boolean array that is true where the value is missing.
         """
-        words = self.text_markers if self.marker_quoting == "ignore" else frozenset()
-        return self._mask(trimmed, words, empty=self.empty_is_null, casefold=False)
+        return self._mask(trimmed, self.text_markers, empty=self.empty_is_null, casefold=False)
 
     def typed_missing(self, trimmed: pa.Array) -> pa.Array:
         """Return a mask of trimmed text values that are missing in a typed column."""

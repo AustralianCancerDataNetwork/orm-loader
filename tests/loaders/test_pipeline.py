@@ -50,7 +50,7 @@ def _stage(session, table, path: Path, reader=None, **context):
     backend = resolve_backend(session, staging_schema_tag=tag, mapper=table)
     staging = backend.create_staging_table(table, session)
     ctx = LoaderContext(tableclass=table, session=session, path=path, backend=backend, **context)
-    loaded = stage_file(ctx, reader or open_reader(path, table.model_columns(), nulls=ctx.policy.nulls), staging)
+    loaded = stage_file(ctx, reader or open_reader(path, table.model_columns()), staging)
     return loaded, ctx, staging
 
 

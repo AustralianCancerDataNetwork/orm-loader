@@ -8,10 +8,8 @@ from pathlib import Path
 from typing import Any
 
 import pyarrow as pa
-import pyarrow.compute as pc
 import sqlalchemy as sa
 
-from ...conversion import NullPolicy
 from ...helpers import IngestError
 
 
@@ -21,8 +19,7 @@ class FileReader(ABC):
     A reader yields batches holding only the model columns present in the
     file, named as the model names them. Text formats yield raw strings, so
     the null policy sees exactly what the file contains. Typed formats yield
-    typed columns. Markers that are quote-sensitive are applied while
-    reading, because quoting is not visible afterwards.
+    typed columns. A reader decides nothing about missing values.
 
     Parameters
     ----------
@@ -30,8 +27,6 @@ class FileReader(ABC):
         File to read.
     model_columns
         Model columns by name; only these are read.
-    nulls
-        Null policy whose quote-sensitive markers are applied while reading.
 
     Attributes
     ----------
@@ -51,11 +46,9 @@ class FileReader(ABC):
         self,
         path: Path,
         model_columns: Mapping[str, sa.ColumnElement[Any]],
-        nulls: NullPolicy | None = None,
     ) -> None:
         self.path = path
         self.model_columns = model_columns
-        self.nulls = nulls or NullPolicy()
         self.columns: list[str] = []
         self.file_columns: list[str] = []
         self.empty = False
@@ -77,26 +70,3 @@ class FileReader(ABC):
     @abstractmethod
     def batches(self) -> Iterator[pa.RecordBatch]:
         """Yield the file's rows as non-empty record batches."""
-
-    def reader_markers(self) -> frozenset[str]:
-        """Return the markers that must be applied while reading."""
-        if self.nulls.marker_quoting == "unquoted_only":
-            return self.nulls.text_markers
-        return frozenset()
-
-    @staticmethod
-    def null_markers(batch: pa.RecordBatch, markers: frozenset[str]) -> pa.RecordBatch:
-        """Set string values equal to a marker, ignoring padding, to null."""
-        values = pa.array(sorted(markers), pa.string())
-        arrays = []
-        for column in batch.columns:
-            was_dictionary = pa.types.is_dictionary(column.type) and pa.types.is_string(column.type.value_type)
-            if was_dictionary:
-                column = column.dictionary_decode()
-            if pa.types.is_string(column.type):
-                hit = pc.fill_null(pc.is_in(pc.utf8_trim_whitespace(column), value_set=values), False)
-                column = pc.if_else(hit, pa.scalar(None, pa.string()), column)
-                if was_dictionary:
-                    column = pc.dictionary_encode(column)
-            arrays.append(column)
-        return pa.RecordBatch.from_arrays(arrays, names=batch.schema.names)

@@ -10,7 +10,7 @@ from tests.models import FileLoaderTable
 
 
 def _reader(ctx, **options):
-    return open_reader(ctx.path, ctx.tableclass.model_columns(), nulls=ctx.policy.nulls, **options)
+    return open_reader(ctx.path, ctx.tableclass.model_columns(), **options)
 
 
 def test_loader_context_fields(sqlite_session):

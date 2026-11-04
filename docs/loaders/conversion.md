@@ -42,10 +42,9 @@ policy = ConversionPolicy(
 ## NullPolicy
 
 - Text columns keep every nonempty value verbatim. Only empty and whitespace-only text is null.
-- Compared with 2.x, words such as `NULL`, `None`, `N/A` and `NaN` stay as text by default. To restore the legacy marker set, pass `NullPolicy(text_markers=NullPolicy.LEGACY_TEXT_MARKERS)`. You can add or remove markers with set operations.
-- `text_markers` adds exact, case-sensitive words that are null in every text column of the load. Matching ignores surrounding whitespace in normal conversion. With `marker_quoting="unquoted_only"` in CSV quote mode, Arrow matches markers exactly because it applies them while parsing. To treat a word as missing in some columns only, subclass `TextHandler`, override `missing()` and register it in `ConversionPolicy.columns`.
-- `empty_is_null=False` keeps empty text fields as empty strings in delimited files. Typed columns still treat empty fields as missing.
-- `marker_quoting="unquoted_only"` matches a marker only when the source did not quote it.
+- Words such as `NULL`, `None`, `N/A` and `NaN` stay as text in text columns. Version 2 turned them into NULL, which dropped concepts with those names. To treat words as missing again, list them in `text_markers`, for example `NullPolicy(text_markers=frozenset({"NULL", "None", "N/A", "NaN", "nan", "null", "NA", "n/a"}))`. Set operations add or remove words from a set you keep.
+- `text_markers` are exact, case-sensitive words that are null in every text column of the load. Matching ignores surrounding whitespace and applies the same way to every file format. To treat a word as missing in some columns only, subclass `TextHandler`, override `missing()` and register it in `ConversionPolicy.columns`.
+- `empty_is_null=False` keeps empty text fields as empty strings. Typed columns still treat empty fields as missing.
 - Typed columns accept a valid value, a missing word (`null`, `none`, `na`, `n/a`, `nan` and similar) or a real null, and fail otherwise.
 
 ::: orm_loader.conversion.NullPolicy
@@ -54,7 +53,7 @@ policy = ConversionPolicy(
 
 ## ErrorPolicy
 
-`on_error` is `raise` (default) or `reject_row`. `max_rejects` stops a `reject_row` load once rejected rows pass a count or a fraction of the rows read.
+`on_error` is `raise` (default) or `reject_row`. `max_rejects` stops a `reject_row` load before the merge. A count stops the load as soon as it is passed, and a fraction is checked once all rows have been read, against the total number of rows read. A load that rejected rows logs a warning with their number and the rejects file.
 
 ::: orm_loader.conversion.ErrorPolicy
 

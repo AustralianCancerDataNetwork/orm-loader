@@ -10,7 +10,6 @@ import pyarrow as pa
 import pyarrow.dataset as ds
 import sqlalchemy as sa
 
-from ...conversion import NullPolicy
 from .base import FileReader
 
 
@@ -25,10 +24,6 @@ class ParquetReader(FileReader):
         File to read.
     model_columns
         Model columns by name; only these are read.
-    nulls
-        Null policy whose quote-sensitive markers are applied while reading. A
-        Parquet string was never quoted, so every marker match counts as
-        unquoted.
     chunksize
         Rows per batch.
     """
@@ -37,10 +32,9 @@ class ParquetReader(FileReader):
         self,
         path: Path,
         model_columns: Mapping[str, sa.ColumnElement[Any]],
-        nulls: NullPolicy | None = None,
         chunksize: int | None = None,
     ) -> None:
-        super().__init__(path, model_columns, nulls)
+        super().__init__(path, model_columns)
         self.chunksize = chunksize or 64_000
         self._dataset = ds.dataset(path, format="parquet")
         self.file_columns = self.normalise_headers(self._dataset.schema.names)
@@ -50,10 +44,7 @@ class ParquetReader(FileReader):
 
     def batches(self) -> Iterator[pa.RecordBatch]:
         """Yield the stored rows in batches of ``chunksize`` rows."""
-        markers = self.reader_markers()
         for batch in self._dataset.to_batches(columns=self._stored, batch_size=self.chunksize):
             batch = batch.rename_columns(self.columns)
-            if markers:
-                batch = self.null_markers(batch, markers)
             if batch.num_rows:
                 yield batch

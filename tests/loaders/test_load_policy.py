@@ -1,6 +1,5 @@
 """Loading under a null policy: markers, rejected rows, row accounting and sources."""
 
-import logging
 import os
 from datetime import date
 from pathlib import Path
@@ -62,21 +61,24 @@ def test_marker_in_a_required_column_raises(dialect_session, tmp_path):
         _load(dialect_session, tmp_path, _DemoRequired, text, policy=MARKER)
 
 
-def test_quote_sensitive_marker_matches_only_unquoted(dialect_session, tmp_path):
-    policy = ConversionPolicy(nulls=NullPolicy(text_markers=frozenset({"NULL"}), marker_quoting="unquoted_only"))
-    _load(dialect_session, tmp_path, _Demo, SEVEN_ROWS, policy=policy)
-    assert _labels(dialect_session, DemoRecord) == {
-        1: None, 2: "NULL", 3: '"NULL"', 4: None, 5: None, 6: "alpha,beta", 7: "alpha\nbeta",
-    }
+@pytest.mark.parametrize("suffix, delimiter", [("csv", ","), ("tsv", "\t")])
+def test_empty_text_is_kept_when_the_policy_says_so(dialect_session, tmp_path, suffix, delimiter):
+    text = f"demo_id{delimiter}demo_label{delimiter}demo_number\n1{delimiter}{delimiter}\n2{delimiter}x{delimiter}5\n"
+    path = tmp_path / f"demo_record.{suffix}"
+    path.write_text(text, encoding="utf-8")
+    tag = None if dialect_session.get_bind().dialect.name == "sqlite" else STAGING_SCHEMA
+    policy = ConversionPolicy(nulls=NullPolicy(empty_is_null=False))
+    _Demo.load_file(dialect_session, path, staging_schema_tag=tag, policy=policy)
+    rows = dialect_session.execute(sa.select(DemoRecord.demo_label, DemoRecord.demo_number).order_by(DemoRecord.demo_id)).all()
+    assert [tuple(r) for r in rows] == [("", None), ("x", 5)]
 
 
-def test_quote_sensitive_marker_warns_when_every_field_is_quoted(dialect_session, tmp_path, caplog):
-    policy = ConversionPolicy(nulls=NullPolicy(text_markers=frozenset({"NULL"}), marker_quoting="unquoted_only"))
-    text = '"demo_id","demo_label"\n"1","NULL"\n"2","x"\n'
-    with caplog.at_level(logging.WARNING):
-        _load(dialect_session, tmp_path, _Demo, text, policy=policy)
-    assert "quotes every field" in caplog.text
-    assert _labels(dialect_session, DemoRecord) == {1: "NULL", 2: "x"}
+def test_markers_ignore_padding_in_a_tab_delimited_file(dialect_session, tmp_path):
+    path = tmp_path / "demo_record.tsv"
+    path.write_text("demo_id\tdemo_label\n1\t NULL \n2\tNULL\n3\tkept\n", encoding="utf-8")
+    tag = None if dialect_session.get_bind().dialect.name == "sqlite" else STAGING_SCHEMA
+    _Demo.load_file(dialect_session, path, staging_schema_tag=tag, policy=MARKER)
+    assert _labels(dialect_session, DemoRecord) == {1: None, 2: None, 3: "kept"}
 
 
 def test_both_athena_date_formats_and_iso_load_in_one_file(dialect_session, tmp_path):

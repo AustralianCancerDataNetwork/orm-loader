@@ -13,7 +13,6 @@ from orm_loader.conversion import (
     FloatHandler,
     IntegerHandler,
     Interpretation,
-    NullPolicy,
     NumericHandler,
     PassthroughHandler,
     TextHandler,
@@ -115,8 +114,3 @@ def test_the_handler_and_column_mappings_cannot_be_changed_afterwards():
 def test_unknown_error_mode_is_rejected():
     with pytest.raises(ValueError, match="on_error"):
         ErrorPolicy(on_error="ignore")  # type: ignore[arg-type]
-
-
-def test_unknown_marker_quoting_is_rejected():
-    with pytest.raises(ValueError, match="marker_quoting"):
-        NullPolicy(marker_quoting="sometimes")  # type: ignore[arg-type]
