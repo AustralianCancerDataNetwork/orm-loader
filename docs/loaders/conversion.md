@@ -69,7 +69,7 @@ The handler for a column is the first match of: the entry in `ConversionPolicy.c
 | `EnumHandler` | `Enum` | One of the labels the column stores | `strip` |
 | `IntegerHandler` | `Integer`, `SmallInteger`, `BigInteger` | Optional sign and digits, with an optional all-zero fraction (`1.0`); a value outside the 16, 32 or 64 bits of the column type is an error | none |
 | `FloatHandler` | `Float` | Decimal or exponent form; `Infinity` and values that overflow to infinity are errors | none |
-| `NumericHandler` | `Numeric` | Decimal form, checked against declared precision and scale without rounding; a precision without a scale has scale 0. Unconstrained and wider declarations stay as decimal text until the database stores them | none |
+| `NumericHandler` | `Numeric` | Plain and exponent decimal forms such as `1.5`, `.05` and `1.5E3`, converted to an Arrow decimal of the declared precision and scale without rounding; a precision without a scale has scale 0. A value that does not fit the declared digits is an error. The declaration must have a precision of at most 38 digits, see below | none |
 | `BooleanHandler` | `Boolean` | `true`, `t`, `yes`, `y`, `1`, `on` and their opposites | `true_words`, `false_words` |
 | `DateHandler` | `Date` | One of `formats`, validated against the calendar; year 0 is an error | `formats` |
 | `DateTimeHandler` | `DateTime` | ISO date and time, or a date in one of `formats`; see time zones below | `formats` |
@@ -86,6 +86,12 @@ The column type decides, so no value is converted by a convention the schema did
 ### Typed input
 
 Input that already has a type, such as a Parquet column, is cast to the column type and checked like parsed text. A value that does not come back unchanged when cast back to its input type is an error, so an integer `2` in a `Boolean` column, a timestamp with a time in a `Date` column and a decimal that loses digits are all rejected. Float `NaN` is missing.
+
+In a `Numeric` column an integer is read exactly and a float is read as its shortest decimal text, so a Parquet float column loads the same values as a CSV of the same numbers. Infinity is an error.
+
+### Numeric columns
+
+The loader converts only what an Arrow decimal can hold, which is a precision of at most 38 digits. That is also the widest decimal DuckDB stores, and SQLite stores `Numeric` as a float. A `Numeric` column with a wider precision or no precision raises a `PolicyError` before any row is read. To load it anyway, leave the value to the database with `columns={("table", "column"): PassthroughHandler()}`: the database then parses the text and rounds a value that exceeds the scale, and a value it cannot parse aborts the load.
 
 ### Adding a column type
 

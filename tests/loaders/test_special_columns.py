@@ -73,6 +73,18 @@ class InvalidNumericRecord(SpecialBase, FileLoadableTableInterface):
     amount: so.Mapped[float] = so.mapped_column(sa.Numeric(2, 5))
 
 
+class UnboundedNumericRecord(SpecialBase, FileLoadableTableInterface):
+    __tablename__ = "special_unbounded_numeric"
+    record_id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
+    amount: so.Mapped[float] = so.mapped_column(sa.Numeric())
+
+
+class WideNumericRecord(SpecialBase, FileLoadableTableInterface):
+    __tablename__ = "special_wide_numeric"
+    record_id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
+    amount: so.Mapped[float] = so.mapped_column(sa.Numeric(50, 2))
+
+
 def _create(session, model):
     model.__table__.create(session.connection())
     session.commit()
@@ -185,9 +197,12 @@ def test_a_primary_key_is_required_and_takes_no_default():
     assert "record_id" not in DefaultKeyRecord.column_defaults()
 
 
-def test_unsupported_numeric_declaration_names_the_table_and_column(tmp_path):
-    with pytest.raises(PolicyError, match=r"special_invalid_numeric.amount.*\(2, 5\)"):
+@pytest.mark.parametrize("model, declared", [
+    (InvalidNumericRecord, r"\(2, 5\)"), (UnboundedNumericRecord, r"\(None, None\)"), (WideNumericRecord, r"\(50, 2\)"),
+])
+def test_unsupported_numeric_declaration_names_the_table_and_column(tmp_path, model, declared):
+    with pytest.raises(PolicyError, match=rf"{model.__tablename__}.amount.*{declared}"):
         BatchProcessor(
-            cast(type[FileTableProtocol], InvalidNumericRecord), ["record_id", "amount"],
+            cast(type[FileTableProtocol], model), ["record_id", "amount"],
             ConversionPolicy(), LoadReport(), tmp_path / "rejects.csv",
         )

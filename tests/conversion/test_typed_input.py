@@ -4,6 +4,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 
 import pyarrow as pa
+import pytest
 import sqlalchemy as sa
 
 from tests.support import interpret
@@ -81,3 +82,19 @@ def test_the_time_zone_rule_of_the_column_applies_to_typed_timestamps():
     assert _result(naive, sa.DateTime(timezone=True))[1] == [True, False]
     assert _result(pa.array([date(2020, 1, 1)], pa.date32()), sa.DateTime(timezone=True))[1] == [True]
     assert _result(pa.array([date(2020, 1, 1)], pa.date32()), sa.DateTime())[1] == [False]
+
+
+@pytest.mark.parametrize("source", [pa.decimal128(10, 3), pa.decimal256(55, 3)])
+def test_decimals_of_any_width_are_read_exactly_or_refused(source):
+    values, invalid = _result(pa.array([Decimal("1.250"), Decimal("1.555"), None], source), sa.Numeric(12, 2))
+    assert values == [Decimal("1.25"), None, None]
+    assert invalid == [False, True, False]
+
+
+def test_floats_and_integers_in_a_numeric_column_must_fit_exactly():
+    values, invalid = _result(pa.array([0.1, 1.555, float("inf"), float("nan"), 2.5]), sa.Numeric(12, 2))
+    assert values == [Decimal("0.10"), None, None, None, Decimal("2.50")]
+    assert invalid == [False, True, True, False, False]
+    values, invalid = _result(pa.array([5, 10**11]), sa.Numeric(12, 2))
+    assert values == [Decimal("5.00"), None]
+    assert invalid == [False, True]
