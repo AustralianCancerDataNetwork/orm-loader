@@ -6,12 +6,14 @@ import sqlalchemy.orm as so
 from oa_configurator import Bindable, UnregisteredSchemaTagError, physical_schema_of
 
 from .base import DatabaseBackend, Dialect
+from .duckdb import DuckDBBackend
 from .postgres import PostgresBackend
 from .sqlite import SQLiteBackend
 
 _BACKEND_TYPES: dict[Dialect, type[DatabaseBackend]] = {
     Dialect.POSTGRESQL: PostgresBackend,
     Dialect.SQLITE: SQLiteBackend,
+    Dialect.DUCKDB: DuckDBBackend,
 }
 
 

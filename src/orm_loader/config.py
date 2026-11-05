@@ -28,6 +28,9 @@ class OrmLoaderConfig(PackageConfigBase):
         against SQLite specifically, regardless of what ``test_orm_db_pg``
         happens to be configured to. Left unconfigured by design in every
         environment.
+    test_orm_db_duckdb : str, optional
+        Same shape as ``test_orm_db_sqlite``, for tests that must always
+        run against DuckDB specifically.
 
     Notes
     -----
@@ -47,5 +50,12 @@ class OrmLoaderConfig(PackageConfigBase):
         description=(
             "Disposable SQLite test database; left unconfigured by design "
             "(isolated_test_database(..., dialect='sqlite') provisions one automatically)."
+        ),
+    )
+    test_orm_db_duckdb: Annotated[str | None, RefTo(CDMDatabaseConfig, is_test=True)] = Field(
+        default=None,
+        description=(
+            "Disposable DuckDB test database; left unconfigured by design "
+            "(isolated_test_database(..., dialect='duckdb') provisions one automatically)."
         ),
     )

@@ -51,11 +51,11 @@ def test_vocab_csv_load_routes_every_session_bind_to_vocab_file(tmp_path):
             if mapper is None and clause is None:
                 raise UnboundExecutionError("a mapper or clause is required")
             if mapper is not None:
-                engine = (
+                sqlite_engine = (
                     vocab_engine if mapper.__table__.schema == SchemaRole.VOCAB else primary_engine
                 )
-                self._last_mapper_engine = engine
-                return engine
+                self._last_mapper_engine = sqlite_engine
+                return sqlite_engine
             table = getattr(clause, "table", None)
             if table is not None and table.schema in {SchemaRole.PRIMARY, SchemaRole.VOCAB}:
                 return vocab_engine if table.schema == SchemaRole.VOCAB else primary_engine
@@ -63,19 +63,19 @@ def test_vocab_csv_load_routes_every_session_bind_to_vocab_file(tmp_path):
 
     csv_path = tmp_path / "test_vocab_role_table.csv"
     pd.DataFrame([{"id": 7, "name": "vocab-row"}]).to_csv(csv_path, index=False, sep="\t")
-    session = MapperRoutedSession()
+    sqlite_session = MapperRoutedSession()
     try:
         VocabSchemaTable.load_csv(
-            session,
+            sqlite_session,
             csv_path,
             merge_strategy="insert_if_empty",
             dedupe=False,
             loader=PandasLoader(),
             staging_schema_tag=staging_schema_claim().schema_tag,
         )
-        session.commit()
+        sqlite_session.commit()
     finally:
-        session.close()
+        sqlite_session.close()
 
     with vocab_engine.connect() as connection:
         rows = connection.execute(sa.select(VocabSchemaTable.id, VocabSchemaTable.name)).all()
@@ -85,9 +85,9 @@ def test_vocab_csv_load_routes_every_session_bind_to_vocab_file(tmp_path):
     vocab_engine.dispose()
 
 
-def test_load_csv_across_two_genuinely_separate_connections(pg_db, session, tmp_path):
-    """``pg_db`` (real Postgres, primary connection) and ``session`` (real
-    SQLite, vocab connection, via the module-level ``engine``/``session``
+def test_load_csv_across_two_genuinely_separate_connections(pg_db, sqlite_session, tmp_path):
+    """``pg_db`` (real Postgres, primary connection) and ``sqlite_session`` (real
+    SQLite, vocab connection, via the module-level ``sqlite_engine``/``sqlite_session``
     fixtures) are two entirely different engines against two entirely
     different database systems."""
     with schema_scoped_session(pg_db, SimpleTable.__table__, prefix="loader_split") as (
@@ -109,8 +109,8 @@ def test_load_csv_across_two_genuinely_separate_connections(pg_db, session, tmp_
         SimpleTable.load_csv(primary_session, primary_csv, dedupe=False, loader=PandasLoader())
         primary_session.commit()
 
-        VocabSchemaTable.load_csv(session, vocab_csv, dedupe=False, loader=PandasLoader())
-        session.commit()
+        VocabSchemaTable.load_csv(sqlite_session, vocab_csv, dedupe=False, loader=PandasLoader())
+        sqlite_session.commit()
 
         with scoped.engine.connect() as conn:
             primary_rows = conn.execute(
@@ -124,7 +124,7 @@ def test_load_csv_across_two_genuinely_separate_connections(pg_db, session, tmp_
         assert leaked_vocab_table_in_pg is None
 
         vocab_rows = (
-            session.execute(sa.select(VocabSchemaTable).order_by(VocabSchemaTable.id))
+            sqlite_session.execute(sa.select(VocabSchemaTable).order_by(VocabSchemaTable.id))
             .scalars()
             .all()
         )

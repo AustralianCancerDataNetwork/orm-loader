@@ -1,6 +1,7 @@
 from .bootstrap import bootstrap, create_db, create_tables
 from .bulk import bulk_load_context, engine_with_replica_role
 from .discovery import get_model_by_tablename
+from .engines import dispose_engines
 from .errors import IngestError, ValidationError
 from .metadata import Base
 from .null_handlers import normalise_null
@@ -19,6 +20,7 @@ __all__ = [
     "bulk_load_context",
     "create_db",
     "create_tables",
+    "dispose_engines",
     "engine_with_replica_role",
     "explain_sqlite_fk_error",
     "get_model_by_tablename",

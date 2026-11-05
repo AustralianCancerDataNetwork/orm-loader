@@ -41,8 +41,8 @@ def test_arrow_drop_duplicates_simple():
     assert deduped["id"].to_pylist() == [1, 2]
 
 
-def test_internal_deduplication(session, engine, tmp_path):
-    Base.metadata.create_all(engine)
+def test_internal_deduplication(sqlite_session, sqlite_engine, tmp_path):
+    Base.metadata.create_all(sqlite_engine)
 
     csv = tmp_path / "dedup_table.csv"
     pd.DataFrame(
@@ -54,11 +54,11 @@ def test_internal_deduplication(session, engine, tmp_path):
     ).to_csv(csv, index=False)
 
     inserted = _DedupTable.load_csv(
-        session,
+        sqlite_session,
         csv,
         loader=PandasLoader(),
         dedupe=True,
     )
-    session.commit()
+    sqlite_session.commit()
 
     assert inserted == 2

@@ -13,7 +13,7 @@ The library focuses on:
 * loader and validation infrastructure
 * operational helpers that work across supported backends
 
-At the moment, the built-in backends are SQLite and PostgreSQL.
+The built-in backends are SQLite, PostgreSQL, and DuckDB. See [oa-configurator's supported dialects](https://AustralianCancerDataNetwork.github.io/oa-configurator/config-reference/#supported-dialects) for the dialect list this is built against.
 
 
 ### What this library provides

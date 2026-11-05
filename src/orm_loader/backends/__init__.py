@@ -11,6 +11,7 @@ from .base import (
     Dialect,
     staging_schema_claim,
 )
+from .duckdb import DuckDBBackend
 from .postgres import PostgresBackend
 from .resolve import resolve_backend
 from .sqlite import SQLiteBackend
@@ -21,6 +22,7 @@ __all__ = [
     "ConcurrentRefreshNotEligibleError",
     "DatabaseBackend",
     "Dialect",
+    "DuckDBBackend",
     "MaterializationError",
     "MaterializationFailure",
     "MaterializationOperation",

@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import (
@@ -15,6 +16,8 @@ import sqlalchemy as sa
 import sqlalchemy.orm as so
 
 if TYPE_CHECKING:
+    from oa_configurator import ResolvedDatabase
+
     from ..loaders import LoaderContext, LoaderInterface
 
 
@@ -105,6 +108,9 @@ class CSVTableProtocol(ORMTableProtocol, Protocol):
         index_strategy: str = "auto",
         merge_batch_size: int | None = None,
         staging_schema_tag: str | None = None,
+        validate_deferred_fks: bool = True,
+        resolved: Optional["ResolvedDatabase"] = None,
+        physical_schemas: Mapping[str, str | None] | None = None,
     ) -> int: ...
 
     @classmethod
@@ -125,6 +131,9 @@ class CSVTableProtocol(ORMTableProtocol, Protocol):
         *,
         merge_batch_size: int | None = None,
         staging_schema_tag: str | None = None,
+        validate_deferred_fks: bool = True,
+        resolved: Optional["ResolvedDatabase"] = None,
+        physical_schemas: Mapping[str, str | None] | None = None,
     ) -> None: ...
 
     @classmethod
