@@ -1,11 +1,13 @@
+import inspect
+
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 from orm_loader.tables.orm_table import ORMTableBase
 from orm_loader.tables.serialisable_table import SerialisableTableInterface
-from orm_loader.tables.loadable_table import CSVLoadableTableInterface
+from orm_loader.tables.loadable_table import FileLoadableTableInterface
 from orm_loader.tables.typing import (
     ORMTableProtocol,
-    CSVTableProtocol,
+    FileTableProtocol,
     SerializedTableProtocol,
 )
 
@@ -21,6 +23,12 @@ def test_orm_table_protocol_conformance():
     assert hasattr(Q, "__tablename__")
     assert callable(Q.pk_names)
     assert callable(Q.model_columns)
+
+def test_every_protocol_member_is_a_plain_classmethod():
+    for name in ("column_defaults", "sql_expression_defaults"):
+        descriptor = vars(ORMTableProtocol)[name]
+        assert isinstance(descriptor, classmethod)
+        assert inspect.isfunction(descriptor.__func__)
 
 def test_serialized_table_protocol_conformance():
     class G(SerialisableTableInterface, ORMTableBase, Base):
@@ -38,13 +46,12 @@ def test_serialized_table_protocol_conformance():
     assert callable(obj.to_json)
     assert callable(obj.fingerprint)
 
-def test_csv_table_protocol_conformance():
-    class P(CSVLoadableTableInterface, ORMTableBase, Base):
+def test_file_table_protocol_conformance():
+    class P(FileLoadableTableInterface, ORMTableBase, Base):
         __tablename__ = "p"
         id = sa.Column(sa.Integer, primary_key=True)
 
-    assert isinstance(P, CSVTableProtocol)  
+    assert isinstance(P, FileTableProtocol)  
     # Required class-level API
-    assert callable(P.load_csv)
-    assert callable(P.create_staging_table)
+    assert callable(P.load_file)
     assert callable(P.merge_from_staging)

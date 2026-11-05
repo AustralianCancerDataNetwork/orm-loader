@@ -9,6 +9,7 @@ import sqlalchemy as sa
 import sqlalchemy.orm as so
 from oa_configurator import CDMDatabaseConfig, ConnectionConfig, Resolver, StackConfig
 
+from orm_loader.mappers import MaterializedViewBackend
 from orm_loader.backends import Dialect, DuckDBBackend, staging_schema_claim
 from orm_loader.backends.base import DeferredForeignKeyViolationError
 from orm_loader.helpers.bootstrap import create_tables
@@ -26,15 +27,15 @@ from tests.models import (
 )
 
 if TYPE_CHECKING:
-    from orm_loader.tables.typing import CSVTableProtocol
+    from orm_loader.tables.typing import FileTableProtocol
 
-_ComputedTableCls = cast("Type[CSVTableProtocol]", ComputedColumnTable)
-_CycleATableCls = cast("Type[CSVTableProtocol]", CycleATable)
-_CycleBTableCls = cast("Type[CSVTableProtocol]", CycleBTable)
-_ReferencedParentTableCls = cast("Type[CSVTableProtocol]", ReferencedParentTable)
-_SelfReferentialTableCls = cast("Type[CSVTableProtocol]", SelfReferentialTable)
-_VocabReferencingTableCls = cast("Type[CSVTableProtocol]", VocabReferencingTable)
-_VocabSchemaTableCls = cast("Type[CSVTableProtocol]", VocabSchemaTable)
+_ComputedTableCls = cast("Type[FileTableProtocol]", ComputedColumnTable)
+_CycleATableCls = cast("Type[FileTableProtocol]", CycleATable)
+_CycleBTableCls = cast("Type[FileTableProtocol]", CycleBTable)
+_ReferencedParentTableCls = cast("Type[FileTableProtocol]", ReferencedParentTable)
+_SelfReferentialTableCls = cast("Type[FileTableProtocol]", SelfReferentialTable)
+_VocabReferencingTableCls = cast("Type[FileTableProtocol]", VocabReferencingTable)
+_VocabSchemaTableCls = cast("Type[FileTableProtocol]", VocabSchemaTable)
 _TARGET_TABLE = ComputedColumnTable.__tablename__
 _STAGING_TABLE = f"_staging_{_TARGET_TABLE}"
 
@@ -159,12 +160,7 @@ def test_duckdb_backend_identity_and_capabilities():
 
     assert backend.name == "duckdb"
     assert backend.dialect == Dialect.DUCKDB
-    assert backend.supports_dialect(Dialect.DUCKDB) is True
-    assert backend.capabilities.supports_fast_load is False
-    assert backend.capabilities.supports_unlogged_staging is False
-    assert backend.capabilities.supports_fk_toggle is False
-    assert backend.capabilities.supports_materialized_views is False
-    assert backend.capabilities.supports_replace_with_kept_indexes is False
+    assert backend.supports_replace_with_kept_indexes is False
     assert backend.resolve_index_strategy("auto") == "drop_rebuild"
 
 
@@ -177,6 +173,7 @@ def test_duckdb_backend_rejects_non_positive_merge_batch_size(merge_batch_size, 
     args = [_ComputedTableCls, duckdb_session]
     if merge_strategy in {"replace", "upsert"}:
         args.append(["id"])
+    args.append(sa.Table("staging", sa.MetaData()))
     merge = getattr(backend, f"merge_{merge_strategy}")
 
     with pytest.raises(ValueError, match="merge_batch_size must be a positive integer or None"):
@@ -192,8 +189,9 @@ def test_duckdb_backend_create_staging_table(duckdb_session):
     inspector = sa.inspect(duckdb_session.get_bind())
     assert inspector.has_table(_STAGING_TABLE) is True
     cols = inspector.get_columns(_STAGING_TABLE)
-    assert [c["name"] for c in cols] == ["id", "name", "slug", "_rownum"]
-    assert all(c["nullable"] is True for c in cols if c["name"] != "_rownum")
+    assert [c["name"] for c in cols] == ["id", "name", "_rownum"]
+    target = {c.name: c.nullable for c in ComputedColumnTable.__table__.columns}
+    assert {c["name"]: c["nullable"] for c in cols if c["name"] != "_rownum"} == {name: target[name] for name in ("id", "name")}
 
 
 @pytest.mark.duckdb
@@ -232,10 +230,22 @@ def test_duckdb_backend_drop_staging_table_also_drops_rownum_sequence(duckdb_ses
 
 @pytest.mark.duckdb
 @pytest.mark.db_dialect
-def test_duckdb_backend_rownum_populates_monotonically_on_insert(duckdb_session):
+def test_duckdb_backend_creates_staging_again_when_only_its_sequence_was_left_behind(duckdb_session):
     backend = DuckDBBackend()
     backend.create_staging_table(_ComputedTableCls, duckdb_session)
-    staging = _ComputedTableCls.get_staging_table(duckdb_session, staging_schema_tag=backend.staging_schema_tag)
+    duckdb_session.execute(sa.text(f"DROP TABLE {_STAGING_TABLE}"))
+    duckdb_session.commit()
+
+    backend.create_staging_table(_ComputedTableCls, duckdb_session)
+
+    assert sa.inspect(duckdb_session.get_bind()).has_table(_STAGING_TABLE)
+
+
+@pytest.mark.duckdb
+@pytest.mark.db_dialect
+def test_duckdb_backend_rownum_populates_monotonically_on_insert(duckdb_session):
+    backend = DuckDBBackend()
+    staging = backend.create_staging_table(_ComputedTableCls, duckdb_session)
 
     duckdb_session.execute(sa.insert(staging), [{"id": 1, "name": "a"}, {"id": 2, "name": "b"}])
 
@@ -243,43 +253,35 @@ def test_duckdb_backend_rownum_populates_monotonically_on_insert(duckdb_session)
     assert rownums == [1, 2]
 
 
-def test_duckdb_backend_fk_toggle_methods_raise():
+def test_duckdb_backend_has_nothing_to_relax():
     backend = DuckDBBackend()
+    session = cast("so.Session", None)
 
-    with pytest.raises(NotImplementedError, match="no foreign-key-toggle mechanism"):
-        backend.disable_fk_check(cast("so.Session", None))
-    with pytest.raises(NotImplementedError, match="no foreign-key-toggle mechanism"):
-        backend.enable_fk_check(cast("so.Session", None))
-    with pytest.raises(NotImplementedError, match="no foreign-key-toggle mechanism"):
-        backend.restore_fk_check(cast("so.Session", None), "ON")
-    with pytest.raises(NotImplementedError, match="no state to normalize"):
-        DuckDBBackend._normalize_fk_check_state("ON")
+    assert backend.disable_fk_check(session) is None
 
 
 @pytest.mark.duckdb
 @pytest.mark.db_dialect
-def test_duckdb_backend_merge_context_runs_without_toggling_fk(duckdb_session):
-    """merge_context() must not require supports_fk_toggle: DuckDB has none."""
+def test_duckdb_backend_relaxed_foreign_keys_runs_without_toggling_fk(duckdb_session):
+    """DuckDB has no foreign key toggle, so the context leaves its keys enforced."""
     backend = DuckDBBackend()
-    backend.create_staging_table(_ComputedTableCls, duckdb_session)
 
-    with backend.merge_context(_ComputedTableCls, duckdb_session):
+    with backend.relaxed_foreign_keys(duckdb_session, mapper=_ComputedTableCls):
         pass
 
 
 @pytest.mark.duckdb
 @pytest.mark.db_dialect
-def test_duckdb_backend_materialized_view_methods_raise(duckdb_session):
-    backend = DuckDBBackend()
-    selectable = sa.select(sa.literal(1).label("n"))
-    engine = duckdb_session.get_bind()
+def test_relaxed_foreign_keys_on_duckdb_does_not_log_toggling(duckdb_session, caplog):
+    with caplog.at_level("INFO", logger="orm_loader.backends.base"):
+        with DuckDBBackend().relaxed_foreign_keys(duckdb_session):
+            pass
 
-    with pytest.raises(NotImplementedError, match="does not support materialized views"):
-        backend.create_materialized_view(engine, "mv_test", selectable)
-    with pytest.raises(NotImplementedError, match="does not support materialized views"):
-        backend.refresh_materialized_view(engine, "mv_test")
-    with pytest.raises(NotImplementedError, match="does not support materialized views"):
-        backend.drop_materialized_view(engine, "mv_test")
+    assert "foreign key" not in caplog.text.lower()
+
+
+def test_duckdb_backend_has_no_materialized_views():
+    assert not isinstance(DuckDBBackend(), MaterializedViewBackend)
 
 
 @pytest.mark.duckdb
@@ -321,8 +323,7 @@ def test_duckdb_backend_merge_replace_updates_in_place(duckdb_session):
     staging rows for the follow-up merge_insert() call.
     """
     backend = DuckDBBackend()
-    backend.create_staging_table(_ComputedTableCls, duckdb_session)
-    staging = _ComputedTableCls.get_staging_table(duckdb_session, staging_schema_tag=backend.staging_schema_tag)
+    staging = backend.create_staging_table(_ComputedTableCls, duckdb_session)
 
     duckdb_session.execute(
         sa.insert(ComputedColumnTable),
@@ -332,8 +333,8 @@ def test_duckdb_backend_merge_replace_updates_in_place(duckdb_session):
         sa.insert(staging), [{"id": 1, "name": "alpha-staged"}, {"id": 3, "name": "gamma"}]
     )
 
-    backend.merge_replace(_ComputedTableCls, duckdb_session, ["id"])
-    backend.merge_insert(_ComputedTableCls, duckdb_session)
+    backend.merge_replace(_ComputedTableCls, duckdb_session, ["id"], staging)
+    backend.merge_insert(_ComputedTableCls, duckdb_session, staging)
 
     rows = {r.id: r.name for r in duckdb_session.execute(sa.select(ComputedColumnTable)).scalars().all()}
     assert rows == {1: "alpha-staged", 2: "beta", 3: "gamma"}
@@ -343,16 +344,15 @@ def test_duckdb_backend_merge_replace_updates_in_place(duckdb_session):
 @pytest.mark.db_dialect
 def test_duckdb_backend_merge_replace_paginated_updates_in_place(duckdb_session):
     backend = DuckDBBackend()
-    backend.create_staging_table(_ComputedTableCls, duckdb_session)
-    staging = _ComputedTableCls.get_staging_table(duckdb_session, staging_schema_tag=backend.staging_schema_tag)
+    staging = backend.create_staging_table(_ComputedTableCls, duckdb_session)
 
     duckdb_session.execute(
         sa.insert(ComputedColumnTable), [{"id": i, "name": f"orig{i}"} for i in range(10)]
     )
     duckdb_session.execute(sa.insert(staging), [{"id": i, "name": f"staged{i}"} for i in range(10)])
 
-    backend.merge_replace(_ComputedTableCls, duckdb_session, ["id"], merge_batch_size=3)
-    backend.merge_insert(_ComputedTableCls, duckdb_session, merge_batch_size=3)
+    backend.merge_replace(_ComputedTableCls, duckdb_session, ["id"], staging, merge_batch_size=3)
+    backend.merge_insert(_ComputedTableCls, duckdb_session, staging, merge_batch_size=3)
 
     rows = {r.id: r.name for r in duckdb_session.execute(sa.select(ComputedColumnTable)).scalars().all()}
     assert rows == {i: f"staged{i}" for i in range(10)}
@@ -364,10 +364,7 @@ def test_duckdb_backend_merge_replace_rejects_referenced_table_with_own_fk(duckd
     """merge_replace must reject a still-referenced row up front, before
     touching any data, rather than partway through a batch.
     """
-    duckdb_backend.create_staging_table(_ReferencedParentTableCls, duckdb_session)
-    staging = _ReferencedParentTableCls.get_staging_table(
-        duckdb_session, staging_schema_tag=duckdb_backend.staging_schema_tag
-    )
+    staging = duckdb_backend.create_staging_table(_ReferencedParentTableCls, duckdb_session)
 
     duckdb_session.execute(sa.insert(UnreferencedGrandparentTable), [{"id": 1, "name": "g1"}])
     duckdb_session.execute(
@@ -377,7 +374,7 @@ def test_duckdb_backend_merge_replace_rejects_referenced_table_with_own_fk(duckd
     duckdb_session.execute(sa.insert(staging), [{"id": 1, "grandparent_id": 1, "name": "p1-updated"}])
 
     with pytest.raises(ValueError, match="referenced_parent_table"):
-        duckdb_backend.merge_replace(_ReferencedParentTableCls, duckdb_session, ["id"])
+        duckdb_backend.merge_replace(_ReferencedParentTableCls, duckdb_session, ["id"], staging)
 
 
 @pytest.mark.duckdb
@@ -390,12 +387,11 @@ def test_duckdb_backend_merge_insert_batch_validation_prevents_partial_commit(
     already validated and committed in their own batches, survive.
     """
     session = duckdb_session_with_committed_schema
-    duckdb_backend.create_staging_table(_CycleATableCls, session)
-    staging = _CycleATableCls.get_staging_table(session, staging_schema_tag=duckdb_backend.staging_schema_tag)
+    staging = duckdb_backend.create_staging_table(_CycleATableCls, session)
     session.execute(sa.insert(staging), [{"id": 1, "b_id": None}, {"id": 2, "b_id": None}, {"id": 3, "b_id": 999}])
 
     with pytest.raises(DeferredForeignKeyViolationError, match="cycle_a_table"):
-        duckdb_backend.merge_insert(_CycleATableCls, session, merge_batch_size=1)
+        duckdb_backend.merge_insert(_CycleATableCls, session, staging, merge_batch_size=1)
 
     session.rollback()
     remaining = session.execute(sa.select(CycleATable.id).order_by(CycleATable.id)).scalars().all()
@@ -411,16 +407,13 @@ def test_duckdb_backend_merge_insert_loads_self_referential_rows_in_dependency_o
     row not yet committed); merge_insert must still load every row, in
     however many batches that takes, regardless of insertion order.
     """
-    duckdb_backend.create_staging_table(_SelfReferentialTableCls, duckdb_session)
-    staging = _SelfReferentialTableCls.get_staging_table(
-        duckdb_session, staging_schema_tag=duckdb_backend.staging_schema_tag
-    )
+    staging = duckdb_backend.create_staging_table(_SelfReferentialTableCls, duckdb_session)
     duckdb_session.execute(
         sa.insert(staging),
         [{"id": 3, "parent_id": 2}, {"id": 2, "parent_id": 1}, {"id": 1, "parent_id": None}],
     )
 
-    duckdb_backend.merge_insert(_SelfReferentialTableCls, duckdb_session, merge_batch_size=1)
+    duckdb_backend.merge_insert(_SelfReferentialTableCls, duckdb_session, staging, merge_batch_size=1)
 
     rows = {r.id: r.parent_id for r in duckdb_session.execute(sa.select(SelfReferentialTable)).scalars().all()}
     assert rows == {1: None, 2: 1, 3: 2}
@@ -431,13 +424,10 @@ def test_duckdb_backend_merge_insert_loads_self_referential_rows_in_dependency_o
 def test_duckdb_backend_merge_upsert_loads_self_referential_rows_in_dependency_order(
     duckdb_session, duckdb_backend,
 ):
-    duckdb_backend.create_staging_table(_SelfReferentialTableCls, duckdb_session)
-    staging = _SelfReferentialTableCls.get_staging_table(
-        duckdb_session, staging_schema_tag=duckdb_backend.staging_schema_tag
-    )
+    staging = duckdb_backend.create_staging_table(_SelfReferentialTableCls, duckdb_session)
     duckdb_session.execute(sa.insert(staging), [{"id": 2, "parent_id": 1}, {"id": 1, "parent_id": None}])
 
-    duckdb_backend.merge_upsert(_SelfReferentialTableCls, duckdb_session, ["id"], merge_batch_size=1)
+    duckdb_backend.merge_upsert(_SelfReferentialTableCls, duckdb_session, ["id"], staging, merge_batch_size=1)
 
     rows = {r.id: r.parent_id for r in duckdb_session.execute(sa.select(SelfReferentialTable)).scalars().all()}
     assert rows == {1: None, 2: 1}
@@ -453,21 +443,18 @@ def test_duckdb_backend_merge_replace_updates_and_inserts_self_referential_rows_
     exists; merge_replace must do both together, in dependency order.
     """
     duckdb_session.execute(sa.insert(SelfReferentialTable), [{"id": 1, "parent_id": None}])
-    duckdb_backend.create_staging_table(_SelfReferentialTableCls, duckdb_session)
-    staging = _SelfReferentialTableCls.get_staging_table(
-        duckdb_session, staging_schema_tag=duckdb_backend.staging_schema_tag
-    )
+    staging = duckdb_backend.create_staging_table(_SelfReferentialTableCls, duckdb_session)
     duckdb_session.execute(
         sa.insert(staging), [{"id": 1, "parent_id": 2}, {"id": 2, "parent_id": None}]
     )
 
-    duckdb_backend.merge_replace(_SelfReferentialTableCls, duckdb_session, ["id"], merge_batch_size=1)
+    duckdb_backend.merge_replace(_SelfReferentialTableCls, duckdb_session, ["id"], staging, merge_batch_size=1)
 
     rows = {r.id: r.parent_id for r in duckdb_session.execute(sa.select(SelfReferentialTable)).scalars().all()}
     assert rows == {1: 2, 2: None}
     assert duckdb_session.execute(sa.select(staging.c.id)).scalars().all() == []
 
-    duckdb_backend.merge_insert(_SelfReferentialTableCls, duckdb_session)
+    duckdb_backend.merge_insert(_SelfReferentialTableCls, duckdb_session, staging)
     rows_after_insert = {
         r.id: r.parent_id for r in duckdb_session.execute(sa.select(SelfReferentialTable)).scalars().all()
     }
@@ -486,14 +473,11 @@ def test_duckdb_backend_merge_replace_catches_a_genuine_orphan(
     """
     session = duckdb_session_with_committed_schema
     session.execute(sa.insert(SelfReferentialTable), [{"id": 1, "parent_id": None}])
-    duckdb_backend.create_staging_table(_SelfReferentialTableCls, session)
-    staging = _SelfReferentialTableCls.get_staging_table(
-        session, staging_schema_tag=duckdb_backend.staging_schema_tag
-    )
+    staging = duckdb_backend.create_staging_table(_SelfReferentialTableCls, session)
     session.execute(sa.insert(staging), [{"id": 1, "parent_id": 999}])
 
     with pytest.raises(DeferredForeignKeyViolationError, match="self_referential_table"):
-        duckdb_backend.merge_replace(_SelfReferentialTableCls, session, ["id"], merge_batch_size=1)
+        duckdb_backend.merge_replace(_SelfReferentialTableCls, session, ["id"], staging, merge_batch_size=1)
 
     session.rollback()
     assert session.execute(sa.select(SelfReferentialTable.parent_id)).scalars().all() == [None]
@@ -510,14 +494,11 @@ def test_duckdb_backend_merge_insert_catches_a_genuine_orphan_in_its_own_batch(
     already committed and survives rolling back the failed one.
     """
     session = duckdb_session_with_committed_schema
-    duckdb_backend.create_staging_table(_SelfReferentialTableCls, session)
-    staging = _SelfReferentialTableCls.get_staging_table(
-        session, staging_schema_tag=duckdb_backend.staging_schema_tag
-    )
+    staging = duckdb_backend.create_staging_table(_SelfReferentialTableCls, session)
     session.execute(sa.insert(staging), [{"id": 1, "parent_id": None}, {"id": 2, "parent_id": 999}])
 
     with pytest.raises(DeferredForeignKeyViolationError, match="self_referential_table"):
-        duckdb_backend.merge_insert(_SelfReferentialTableCls, session, merge_batch_size=1)
+        duckdb_backend.merge_insert(_SelfReferentialTableCls, session, staging, merge_batch_size=1)
 
     session.rollback()
     assert session.execute(sa.select(SelfReferentialTable.id)).scalars().all() == [1]
@@ -536,13 +517,10 @@ def test_duckdb_backend_merge_insert_unbatched_has_no_intermediate_commit(
     but with no batching requested at all.
     """
     session = duckdb_session_with_committed_schema
-    duckdb_backend.create_staging_table(_SelfReferentialTableCls, session)
-    staging = _SelfReferentialTableCls.get_staging_table(
-        session, staging_schema_tag=duckdb_backend.staging_schema_tag
-    )
+    staging = duckdb_backend.create_staging_table(_SelfReferentialTableCls, session)
     session.execute(sa.insert(staging), [{"id": 1, "parent_id": None}, {"id": 2, "parent_id": 999}])
 
-    duckdb_backend.merge_insert(_SelfReferentialTableCls, session, merge_batch_size=None)
+    duckdb_backend.merge_insert(_SelfReferentialTableCls, session, staging, merge_batch_size=None)
     with pytest.raises(DeferredForeignKeyViolationError, match="self_referential_table"):
         duckdb_backend.validate_deferred_fks(_SelfReferentialTableCls, session)
 
@@ -556,13 +534,10 @@ def test_duckdb_backend_merge_insert_accepts_a_self_link(duckdb_session, duckdb_
     """A row whose parent is itself is valid once it exists, not an orphan
     merely because the target was empty when it was considered.
     """
-    duckdb_backend.create_staging_table(_SelfReferentialTableCls, duckdb_session)
-    staging = _SelfReferentialTableCls.get_staging_table(
-        duckdb_session, staging_schema_tag=duckdb_backend.staging_schema_tag
-    )
+    staging = duckdb_backend.create_staging_table(_SelfReferentialTableCls, duckdb_session)
     duckdb_session.execute(sa.insert(staging), [{"id": 1, "parent_id": 1}])
 
-    duckdb_backend.merge_insert(_SelfReferentialTableCls, duckdb_session, merge_batch_size=1)
+    duckdb_backend.merge_insert(_SelfReferentialTableCls, duckdb_session, staging, merge_batch_size=1)
     duckdb_backend.validate_deferred_fks(_SelfReferentialTableCls, duckdb_session)
 
     rows = {r.id: r.parent_id for r in duckdb_session.execute(sa.select(SelfReferentialTable)).scalars().all()}
@@ -575,13 +550,10 @@ def test_duckdb_backend_merge_insert_accepts_a_two_row_cycle(duckdb_session, duc
     """Two rows referencing each other are valid once both exist. Neither
     can ever become ready on its own, which is not a reason to reject them.
     """
-    duckdb_backend.create_staging_table(_SelfReferentialTableCls, duckdb_session)
-    staging = _SelfReferentialTableCls.get_staging_table(
-        duckdb_session, staging_schema_tag=duckdb_backend.staging_schema_tag
-    )
+    staging = duckdb_backend.create_staging_table(_SelfReferentialTableCls, duckdb_session)
     duckdb_session.execute(sa.insert(staging), [{"id": 1, "parent_id": 2}, {"id": 2, "parent_id": 1}])
 
-    duckdb_backend.merge_insert(_SelfReferentialTableCls, duckdb_session, merge_batch_size=1)
+    duckdb_backend.merge_insert(_SelfReferentialTableCls, duckdb_session, staging, merge_batch_size=1)
     duckdb_backend.validate_deferred_fks(_SelfReferentialTableCls, duckdb_session)
 
     rows = {r.id: r.parent_id for r in duckdb_session.execute(sa.select(SelfReferentialTable)).scalars().all()}
@@ -598,13 +570,10 @@ def test_duckdb_backend_merge_upsert_ignores_a_duplicate_with_a_bad_reference(
     """
     session = duckdb_session_with_committed_schema
     session.execute(sa.insert(SelfReferentialTable), [{"id": 1, "parent_id": None}])
-    duckdb_backend.create_staging_table(_SelfReferentialTableCls, session)
-    staging = _SelfReferentialTableCls.get_staging_table(
-        session, staging_schema_tag=duckdb_backend.staging_schema_tag
-    )
+    staging = duckdb_backend.create_staging_table(_SelfReferentialTableCls, session)
     session.execute(sa.insert(staging), [{"id": 1, "parent_id": 999}])
 
-    duckdb_backend.merge_upsert(_SelfReferentialTableCls, session, ["id"], merge_batch_size=1)
+    duckdb_backend.merge_upsert(_SelfReferentialTableCls, session, ["id"], staging, merge_batch_size=1)
     duckdb_backend.validate_deferred_fks(_SelfReferentialTableCls, session)
 
     rows = {r.id: r.parent_id for r in session.execute(sa.select(SelfReferentialTable)).scalars().all()}
@@ -620,14 +589,11 @@ def test_duckdb_backend_merge_insert_respects_validate_deferred_fks_false(
     self-referential batching path.
     """
     session = duckdb_session_with_committed_schema
-    duckdb_backend.create_staging_table(_SelfReferentialTableCls, session)
-    staging = _SelfReferentialTableCls.get_staging_table(
-        session, staging_schema_tag=duckdb_backend.staging_schema_tag
-    )
+    staging = duckdb_backend.create_staging_table(_SelfReferentialTableCls, session)
     session.execute(sa.insert(staging), [{"id": 1, "parent_id": 999}])
 
     duckdb_backend.merge_insert(
-        _SelfReferentialTableCls, session, merge_batch_size=1, validate_deferred_fks=False
+        _SelfReferentialTableCls, session, staging, merge_batch_size=1, validate_deferred_fks=False
     )
 
     rows = {r.id: r.parent_id for r in session.execute(sa.select(SelfReferentialTable)).scalars().all()}
@@ -699,11 +665,10 @@ def test_duckdb_backend_merge_insert_batch_validation_is_a_no_op_without_deferre
     query on every batch commit.
     """
     backend = DuckDBBackend()
-    backend.create_staging_table(_ComputedTableCls, duckdb_session)
-    staging = _ComputedTableCls.get_staging_table(duckdb_session, staging_schema_tag=backend.staging_schema_tag)
+    staging = backend.create_staging_table(_ComputedTableCls, duckdb_session)
     duckdb_session.execute(sa.insert(staging), [{"id": i, "name": f"n{i}"} for i in range(5)])
 
-    backend.merge_insert(_ComputedTableCls, duckdb_session, merge_batch_size=1)
+    backend.merge_insert(_ComputedTableCls, duckdb_session, staging, merge_batch_size=1)
 
     rows = duckdb_session.execute(sa.select(ComputedColumnTable.id)).scalars().all()
     assert sorted(rows) == list(range(5))

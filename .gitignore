@@ -213,3 +213,5 @@ OMOP_CDM*.csv
 .DS_Store
 _temp/
 notebooks/
+# Local benchmarks
+benchmarks/

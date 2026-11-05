@@ -11,7 +11,6 @@ requires-python = ">=3.12"
 dependencies = [
     "chardet>=5.2.0",
     "oa-configurator>=2.1.0,<3",
-    "pandas>=2.3.3",
     "pyarrow>=23.0.1",
     "sqlalchemy>=2.0.45",
 ]
@@ -54,6 +53,7 @@ duckdb = [
 ]
 dev = [
     "oa-configurator[postgres,duckdb]>=2.0.0,<3",
+    "pandas>=2.3.3",
     "pytest>=9.0.3",
     "ty>=0.0.59",
     "ruff>=0.14.11",
@@ -89,3 +89,15 @@ addopts = "-ra -m 'not db_dialect'"
 
 [tool.pyright]
 reportMissingTypeStubs = false
+
+# Temporary ty override until #43 picks it up in a follow-up
+# with pyarrow-stubs, which type the compute functions too narrowly
+[[tool.ty.overrides]]
+include = ["src/orm_loader/conversion/**", "src/orm_loader/loaders/processor.py", "src/orm_loader/loaders/readers/**"]
+
+[tool.ty.overrides.rules]
+unresolved-attribute = "ignore"
+invalid-argument-type = "ignore"
+invalid-return-type = "ignore"
+invalid-assignment = "ignore"
+no-matching-overload = "ignore"

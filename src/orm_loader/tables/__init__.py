@@ -1,14 +1,14 @@
 from .allocators import IdAllocator
-from .loadable_table import CSVLoadableTableInterface
+from .loadable_table import FileLoadableTableInterface
 from .orm_table import ORMTableBase
 from .serialisable_table import SerialisableTableInterface
-from .typing import ORMTableProtocol, CSVTableProtocol
+from .typing import ORMTableProtocol, FileTableProtocol
 
 __all__ = [
     "ORMTableBase",
-    "CSVLoadableTableInterface",
+    "FileLoadableTableInterface",
     "SerialisableTableInterface",
     "IdAllocator",
     "ORMTableProtocol",
-    "CSVTableProtocol",
+    "FileTableProtocol",
 ]

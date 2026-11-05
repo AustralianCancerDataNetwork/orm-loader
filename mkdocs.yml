@@ -40,6 +40,8 @@ plugins:
             - src
           options:
             show_source: false
+            show_root_heading: false
+            show_root_toc_entry: false
             docstring_style: numpy
 
 nav:
@@ -61,6 +63,7 @@ nav:
       - Model Descriptors: registry/descriptors.md
   - Loaders:
       - Overview: loaders/index.md
-      - Loader Context & Diagnostics: loaders/context.md
-      - Loader Implementations: loaders/loaders.md
-      - Loader Helpers: loaders/helpers.md
+      - Readers: loaders/readers.md
+      - Conversion: loaders/conversion.md
+      - Staging and Sinks: loaders/staging.md
+      - Context and Report: loaders/context.md

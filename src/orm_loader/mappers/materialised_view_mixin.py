@@ -1,3 +1,4 @@
+from abc import ABC, abstractmethod
 from collections import defaultdict, deque
 from typing import Any
 
@@ -76,6 +77,69 @@ def _create_view(
     existence = "IF NOT EXISTS " if element.if_not_exists else ""
     population = "" if element.with_data else " WITH NO DATA"
     return f"CREATE MATERIALIZED VIEW {existence}{element.name} as {compiled}{population}"
+
+
+class MaterializedViewBackend(ABC):
+    """Interface of a database backend that supports materialized views.
+
+    A backend without materialized views does not inherit this class.
+    ``schema`` arguments are the view's already-resolved physical schema, or
+    None for the connection's own default.
+    """
+
+    @abstractmethod
+    def create_materialized_view(
+        self,
+        bind: "sa.engine.Engine | sa.engine.Connection",
+        name: str,
+        selectable: sa.sql.Select[Any],
+        *,
+        schema: str | None = None,
+        with_data: bool = True,
+        if_not_exists: bool = True,
+    ) -> None:
+        """Create a materialized view for the supplied selectable."""
+
+    @abstractmethod
+    def refresh_materialized_view(
+        self,
+        bind: "sa.engine.Engine | sa.engine.Connection",
+        name: str,
+        *,
+        schema: str | None = None,
+        concurrently: bool = False,
+        declared_indexes: tuple[MaterializedViewIndex, ...] = (),
+    ) -> None:
+        """Refresh a materialized view.
+
+        ``declared_indexes`` lets the backend validate a concurrent refresh
+        request against the view's declared unique index.
+        """
+
+    @abstractmethod
+    def drop_materialized_view(
+        self,
+        bind: "sa.engine.Engine | sa.engine.Connection",
+        name: str,
+        *,
+        schema: str | None = None,
+        if_exists: bool = True,
+        cascade: bool = False,
+    ) -> None:
+        """Drop a materialized view."""
+
+    @abstractmethod
+    def create_materialized_view_index(
+        self,
+        bind: "sa.engine.Engine | sa.engine.Connection",
+        name: str,
+        index: MaterializedViewIndex,
+        *,
+        schema: str | None = None,
+        if_not_exists: bool = True,
+    ) -> None:
+        """Create an index on a materialized view."""
+
 
 class MaterializedViewMixin:
 
@@ -203,6 +267,16 @@ class MaterializedViewMixin:
             return table.schema
         return cls.__mv_schema_tag__
 
+    @staticmethod
+    def _materialized_view_backend(bind: "sa.engine.Connection | sa.engine.Engine") -> MaterializedViewBackend:
+        """Return the bind's backend, or raise when it has no materialized views."""
+        from ..backends.resolve import resolve_backend
+
+        backend = resolve_backend(bind)
+        if not isinstance(backend, MaterializedViewBackend):
+            raise NotImplementedError(f"Backend '{backend.name}' does not support materialized views")
+        return backend
+
     @classmethod
     def create_mv(
         cls,
@@ -261,9 +335,7 @@ class MaterializedViewMixin:
         if not isinstance(bind, (sa.engine.Engine, sa.engine.Connection)):
             raise TypeError("bind must be a SQLAlchemy Engine or Connection")
 
-        from ..backends.resolve import resolve_backend
-
-        backend = resolve_backend(bind)
+        backend = cls._materialized_view_backend(bind)
         tag = cls._resolve_schema_tag(schema_tag)
         schema = physical_schema_of(bind, schema_tag=tag)
 
@@ -323,9 +395,7 @@ class MaterializedViewMixin:
             RecentObservationMV.refresh_mv(conn)
         ```
         """
-        from ..backends.resolve import resolve_backend
-
-        backend = resolve_backend(bind)
+        backend = cls._materialized_view_backend(bind)
         tag = cls._resolve_schema_tag(schema_tag)
         backend.refresh_materialized_view(
             bind,
@@ -354,9 +424,7 @@ class MaterializedViewMixin:
             schema_translate_map key the view's own physical schema resolves
             through; see :meth:`_resolve_schema_tag` for the default.
         """
-        from ..backends.resolve import resolve_backend
-
-        backend = resolve_backend(bind)
+        backend = cls._materialized_view_backend(bind)
         tag = cls._resolve_schema_tag(schema_tag)
         backend.drop_materialized_view(
             bind, cls.__mv_name__, schema=physical_schema_of(bind, schema_tag=tag),

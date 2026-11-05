@@ -2,8 +2,7 @@
 
 Structural protocols defining the expected interfaces for:
 - ORM table classes
-- CSV-loadable tables
-- Parquet-loadable tables
+- file-loadable tables
 - serialisable row instances
 
 Protocols allow infrastructure to remain decoupled from
@@ -17,9 +16,9 @@ concrete base classes.
 
 ---
 
-## CSVTableProtocol
+## FileTableProtocol
 
-::: orm_loader.tables.typing.CSVTableProtocol
+::: orm_loader.tables.typing.FileTableProtocol
 
 ---
 
