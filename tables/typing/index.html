@@ -518,32 +518,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#orm_loader.tables.typing.ORMTableProtocol" class="md-nav__link">
+  <a href="#filetableprotocol" class="md-nav__link">
     <span class="md-ellipsis">
       
-        ORMTableProtocol
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#csvtableprotocol" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        CSVTableProtocol
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#orm_loader.tables.typing.CSVTableProtocol" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        CSVTableProtocol
+        FileTableProtocol
       
     </span>
   </a>
@@ -552,17 +530,6 @@
       
         <li class="md-nav__item">
   <a href="#serializedtableprotocol" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        SerializedTableProtocol
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#orm_loader.tables.typing.SerializedTableProtocol" class="md-nav__link">
     <span class="md-ellipsis">
       
         SerializedTableProtocol
@@ -934,6 +901,90 @@
   
   
     <li class="md-nav__item">
+      <a href="../../loaders/readers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Readers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../loaders/conversion/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Conversion
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../loaders/staging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Staging and Sinks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../loaders/context/" class="md-nav__link">
         
   
@@ -941,63 +992,7 @@
   <span class="md-ellipsis">
     
   
-    Loader Context & Diagnostics
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../loaders/loaders/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Loader Implementations
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../loaders/helpers/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Loader Helpers
+    Context and Report
   
 
     
@@ -1056,32 +1051,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#orm_loader.tables.typing.ORMTableProtocol" class="md-nav__link">
+  <a href="#filetableprotocol" class="md-nav__link">
     <span class="md-ellipsis">
       
-        ORMTableProtocol
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#csvtableprotocol" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        CSVTableProtocol
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#orm_loader.tables.typing.CSVTableProtocol" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        CSVTableProtocol
+        FileTableProtocol
       
     </span>
   </a>
@@ -1090,17 +1063,6 @@
       
         <li class="md-nav__item">
   <a href="#serializedtableprotocol" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        SerializedTableProtocol
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#orm_loader.tables.typing.SerializedTableProtocol" class="md-nav__link">
     <span class="md-ellipsis">
       
         SerializedTableProtocol
@@ -1181,8 +1143,7 @@
 <h1 id="typing-protocols">Typing Protocols<a class="headerlink" href="#typing-protocols" title="Permanent link">&para;</a></h1>
 <p>Structural protocols defining the expected interfaces for:
 - ORM table classes
-- CSV-loadable tables
-- Parquet-loadable tables
+- file-loadable tables
 - serialisable row instances</p>
 <p>Protocols allow infrastructure to remain decoupled from
 concrete base classes.</p>
@@ -1194,7 +1155,7 @@ concrete base classes.</p>
 
 
 
-<a id="orm_loader.tables.typing.ORMTableProtocol"></a>
+
     <div class="doc doc-contents first">
             <p class="doc doc-class-bases">
               Bases: <code><span title="typing.Protocol">Protocol</span></code></p>
@@ -1239,27 +1200,27 @@ decouple higher-level infrastructure from concrete base classes.</p>
     </div>
 
 </div><hr />
-<h2 id="csvtableprotocol">CSVTableProtocol<a class="headerlink" href="#csvtableprotocol" title="Permanent link">&para;</a></h2>
+<h2 id="filetableprotocol">FileTableProtocol<a class="headerlink" href="#filetableprotocol" title="Permanent link">&para;</a></h2>
 
 
 <div class="doc doc-object doc-class">
 
 
 
-<a id="orm_loader.tables.typing.CSVTableProtocol"></a>
+
     <div class="doc doc-contents first">
             <p class="doc doc-class-bases">
-              Bases: <code><a class="autorefs autorefs-internal" title="orm_loader.tables.typing.ORMTableProtocol" href="#orm_loader.tables.typing.ORMTableProtocol">ORMTableProtocol</a></code>, <code><span title="typing.Protocol">Protocol</span></code></p>
+              Bases: <code><span title="orm_loader.tables.typing.ORMTableProtocol">ORMTableProtocol</span></code>, <code><span title="typing.Protocol">Protocol</span></code></p>
 
 
 
-        <p>Structural protocol for ORM tables that support CSV-based ingestion.</p>
+        <p>Structural protocol for ORM tables that load from files.</p>
 <p>This protocol captures the expected interface for tables that can
-participate in staged, file-based loading workflows using CSV input.</p>
+participate in staged, file-based loading workflows.</p>
 <p>It defines the contract for:
 - staging table management
-- loader selection
-- CSV ingestion and merging semantics</p>
+- reader selection
+- file ingestion and merging semantics</p>
 <p>No assumptions are made about the underlying database or schema.</p>
 
 
@@ -1297,7 +1258,7 @@ participate in staged, file-based loading workflows using CSV input.</p>
 
 
 
-<a id="orm_loader.tables.typing.SerializedTableProtocol"></a>
+
     <div class="doc doc-contents first">
             <p class="doc doc-class-bases">
               Bases: <code><span title="typing.Protocol">Protocol</span></code></p>

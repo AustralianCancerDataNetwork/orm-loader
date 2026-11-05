@@ -13,10 +13,8 @@
         <link rel="canonical" href="https://AustralianCancerDataNetwork.github.io/orm-loader/loaders/context/">
       
       
-        <link rel="prev" href="../">
+        <link rel="prev" href="../staging/">
       
-      
-        <link rel="next" href="../loaders/">
       
       
         
@@ -27,7 +25,7 @@
     
     
       
-        <title>Loader Context & Diagnostics - orm-loader</title>
+        <title>Context and Report - orm-loader</title>
       
     
     
@@ -70,7 +68,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#loader-context-and-diagnostics" class="md-skip">
+        <a href="#loader-context-and-report" class="md-skip">
           Skip to content
         </a>
       
@@ -106,7 +104,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Loader Context & Diagnostics
+              Context and Report
             
           </span>
         </div>
@@ -818,6 +816,90 @@
                 
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../readers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Readers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../conversion/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Conversion
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../staging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Staging and Sinks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
     
   
   
@@ -837,7 +919,7 @@
   <span class="md-ellipsis">
     
   
-    Loader Context & Diagnostics
+    Context and Report
   
 
     
@@ -855,7 +937,7 @@
   <span class="md-ellipsis">
     
   
-    Loader Context & Diagnostics
+    Context and Report
   
 
     
@@ -909,10 +991,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#orm_loader.loaders.data_classes.LoaderContext" class="md-nav__link">
+  <a href="#loadreport" class="md-nav__link">
     <span class="md-ellipsis">
       
-        LoaderContext
+        LoadReport
       
     </span>
   </a>
@@ -920,49 +1002,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#casting-statistics" class="md-nav__link">
+  <a href="#orm_loader.loaders.loader.LoadReport.accounted" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Casting statistics
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Casting statistics">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#columncastingstats" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ColumnCastingStats
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#tablecastingstats" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        TableCastingStats
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#orm_loader.loaders.data_classes.ColumnCastingStats" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ColumnCastingStats
+        accounted
       
     </span>
   </a>
@@ -970,10 +1013,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#orm_loader.loaders.data_classes.TableCastingStats" class="md-nav__link">
+  <a href="#orm_loader.loaders.loader.LoadReport.rows_deduplicated" class="md-nav__link">
     <span class="md-ellipsis">
       
-        TableCastingStats
+        rows_deduplicated
       
     </span>
   </a>
@@ -981,43 +1024,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#orm_loader.loaders.data_classes.TableCastingStats.total_failures" class="md-nav__link">
+  <a href="#orm_loader.backends.base.DedupeResult.rows_after" class="md-nav__link">
     <span class="md-ellipsis">
       
-        total_failures
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#orm_loader.loaders.data_classes.TableCastingStats.has_failures" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        has_failures
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#orm_loader.loaders.data_classes.TableCastingStats.record" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        record
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#orm_loader.loaders.data_classes.TableCastingStats.to_dict" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        to_dict
+        rows_after
       
     </span>
   </a>
@@ -1039,62 +1049,6 @@
   
 </nav>
       
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../loaders/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Loader Implementations
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../helpers/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Loader Helpers
-  
-
-    
-  </span>
-  
-  
-
-      </a>
     </li>
   
 
@@ -1162,10 +1116,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#orm_loader.loaders.data_classes.LoaderContext" class="md-nav__link">
+  <a href="#loadreport" class="md-nav__link">
     <span class="md-ellipsis">
       
-        LoaderContext
+        LoadReport
       
     </span>
   </a>
@@ -1173,49 +1127,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#casting-statistics" class="md-nav__link">
+  <a href="#orm_loader.loaders.loader.LoadReport.accounted" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Casting statistics
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Casting statistics">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#columncastingstats" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ColumnCastingStats
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#tablecastingstats" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        TableCastingStats
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#orm_loader.loaders.data_classes.ColumnCastingStats" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ColumnCastingStats
+        accounted
       
     </span>
   </a>
@@ -1223,10 +1138,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#orm_loader.loaders.data_classes.TableCastingStats" class="md-nav__link">
+  <a href="#orm_loader.loaders.loader.LoadReport.rows_deduplicated" class="md-nav__link">
     <span class="md-ellipsis">
       
-        TableCastingStats
+        rows_deduplicated
       
     </span>
   </a>
@@ -1234,43 +1149,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#orm_loader.loaders.data_classes.TableCastingStats.total_failures" class="md-nav__link">
+  <a href="#orm_loader.backends.base.DedupeResult.rows_after" class="md-nav__link">
     <span class="md-ellipsis">
       
-        total_failures
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#orm_loader.loaders.data_classes.TableCastingStats.has_failures" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        has_failures
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#orm_loader.loaders.data_classes.TableCastingStats.record" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        record
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#orm_loader.loaders.data_classes.TableCastingStats.to_dict" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        to_dict
+        rows_after
       
     </span>
   </a>
@@ -1356,7 +1238,7 @@
   
 
 
-<h1 id="loader-context-and-diagnostics">Loader Context and Diagnostics<a class="headerlink" href="#loader-context-and-diagnostics" title="Permanent link">&para;</a></h1>
+<h1 id="loader-context-and-report">Loader Context and Report<a class="headerlink" href="#loader-context-and-report" title="Permanent link">&para;</a></h1>
 <p>This page documents the shared data structures used by the loaders
 subsystem.</p>
 <hr />
@@ -1387,24 +1269,28 @@ on globals or implicit configuration.</p>
 <td>Path to the input file</td>
 </tr>
 <tr>
-<td><code>staging_table</code></td>
-<td>SQLAlchemy Table used for staging</td>
-</tr>
-<tr>
-<td><code>chunksize</code></td>
-<td>Optional chunk size</td>
+<td><code>backend</code></td>
+<td>The session's database backend, resolved once for the load</td>
 </tr>
 <tr>
 <td><code>normalise</code></td>
-<td>Whether to cast values to ORM types</td>
+<td>Whether to interpret values under the policy; when false, values are written as read</td>
 </tr>
 <tr>
 <td><code>dedupe</code></td>
-<td>Whether to deduplicate incoming data</td>
+<td>Whether the staging table keeps only the first row for each primary key</td>
 </tr>
 <tr>
-<td><code>quote_mode</code></td>
-<td>CSV quoting mode, resolved to the same concrete mode on both the PostgreSQL COPY fast-path and the pandas ORM fallback</td>
+<td><code>policy</code></td>
+<td><code>ConversionPolicy</code>: how values are interpreted and what happens to unreadable ones</td>
+</tr>
+<tr>
+<td><code>rejects_dir</code></td>
+<td>Directory that rejected rows are written to</td>
+</tr>
+<tr>
+<td><code>report</code></td>
+<td><code>LoadReport</code> row accounting</td>
 </tr>
 </tbody>
 </table>
@@ -1414,14 +1300,14 @@ on globals or implicit configuration.</p>
 
 
 
-<a id="orm_loader.loaders.data_classes.LoaderContext"></a>
+
     <div class="doc doc-contents first">
 
 
 
-        <p>Immutable context object passed through loader operations.</p>
-<p>The LoaderContext encapsulates all state required to load a file
-into a staging table, without relying on global variables.</p>
+        <p>Immutable context passed through a load.</p>
+<p>The context holds all state required to load a file into a staging
+table, without relying on global variables.</p>
 
 
 <p><span class="doc-section-title">Attributes:</span></p>
@@ -1435,9 +1321,9 @@ into a staging table, without relying on global variables.</p>
       </thead>
       <tbody>
           <tr class="doc-section-item">
-            <td><code><span title="orm_loader.loaders.data_classes.LoaderContext.tableclass">tableclass</span></code></td>
+            <td><code><span title="orm_loader.loaders.loader.LoaderContext.tableclass">tableclass</span></code></td>
             <td>
-                  <code><span title="typing.Type">Type</span>[<a class="autorefs autorefs-internal" title="orm_loader.tables.typing.CSVTableProtocol" href="../../tables/typing/#orm_loader.tables.typing.CSVTableProtocol">CSVTableProtocol</a>]</code>
+                  <code><span title="type">type</span>[<span title="orm_loader.tables.typing.FileTableProtocol">FileTableProtocol</span>]</code>
             </td>
             <td>
               <div class="doc-md-description">
@@ -1446,7 +1332,7 @@ into a staging table, without relying on global variables.</p>
             </td>
           </tr>
           <tr class="doc-section-item">
-            <td><code><span title="orm_loader.loaders.data_classes.LoaderContext.session">session</span></code></td>
+            <td><code><span title="orm_loader.loaders.loader.LoaderContext.session">session</span></code></td>
             <td>
                   <code><span title="sqlalchemy.orm.Session">Session</span></code>
             </td>
@@ -1457,7 +1343,7 @@ into a staging table, without relying on global variables.</p>
             </td>
           </tr>
           <tr class="doc-section-item">
-            <td><code><span title="orm_loader.loaders.data_classes.LoaderContext.path">path</span></code></td>
+            <td><code><span title="orm_loader.loaders.loader.LoaderContext.path">path</span></code></td>
             <td>
                   <code><span title="pathlib.Path">Path</span></code>
             </td>
@@ -1468,71 +1354,69 @@ into a staging table, without relying on global variables.</p>
             </td>
           </tr>
           <tr class="doc-section-item">
-            <td><code><span title="orm_loader.loaders.data_classes.LoaderContext.staging_table">staging_table</span></code></td>
+            <td><code><span title="orm_loader.loaders.loader.LoaderContext.backend">backend</span></code></td>
             <td>
-                  <code><span title="sqlalchemy.Table">Table</span></code>
+                  <code><span title="orm_loader.backends.base.DatabaseBackend">DatabaseBackend</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>SQLAlchemy Table object representing the staging table.</p>
+                <p>Backend of the session's database, resolved once for the load.</p>
               </div>
             </td>
           </tr>
           <tr class="doc-section-item">
-            <td><code><span title="orm_loader.loaders.data_classes.LoaderContext.chunksize">chunksize</span></code></td>
-            <td>
-                  <code><span title="int">int</span> | None</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>Optional chunk size for incremental loading.</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td><code><span title="orm_loader.loaders.data_classes.LoaderContext.normalise">normalise</span></code></td>
+            <td><code><span title="orm_loader.loaders.loader.LoaderContext.normalise">normalise</span></code></td>
             <td>
                   <code><span title="bool">bool</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Whether to apply type casting / normalisation.</p>
+                <p>Whether to interpret values under the policy.</p>
               </div>
             </td>
           </tr>
           <tr class="doc-section-item">
-            <td><code><span title="orm_loader.loaders.data_classes.LoaderContext.dedupe">dedupe</span></code></td>
+            <td><code><span title="orm_loader.loaders.loader.LoaderContext.dedupe">dedupe</span></code></td>
             <td>
                   <code><span title="bool">bool</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Whether to perform deduplication (pre-insertion for source issues)</p>
+                <p>Whether the staging table keeps only the first row for each primary key.</p>
               </div>
             </td>
           </tr>
           <tr class="doc-section-item">
-            <td><code><span title="orm_loader.loaders.data_classes.LoaderContext.quote_mode">quote_mode</span></code></td>
+            <td><code><span title="orm_loader.loaders.loader.LoaderContext.policy">policy</span></code></td>
             <td>
-                  <code><span title="str">str</span></code>
+                  <code><span title="orm_loader.conversion.ConversionPolicy">ConversionPolicy</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Quoting mode, resolved to the same concrete mode on both the
-PostgreSQL COPY fast-path and the pandas ORM fallback.</p>
+                <p>How values are interpreted and what happens to unreadable ones.</p>
               </div>
             </td>
           </tr>
           <tr class="doc-section-item">
-            <td><code><span title="orm_loader.loaders.data_classes.LoaderContext.staging_schema_tag">staging_schema_tag</span></code></td>
+            <td><code><span title="orm_loader.loaders.loader.LoaderContext.rejects_dir">rejects_dir</span></code></td>
             <td>
-                  <code><span title="str">str</span> | None</code>
+                  <code><span title="pathlib.Path">Path</span> | None</code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>schema_translate_map tag the staging table lives in, passed to
-resolve_backend() so every backend resolution within this load
-resolves the same schema.</p>
+                <p>Directory that rejected rows are written to. Defaults to a
+<code>rejects</code> directory inside the source file's directory.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="orm_loader.loaders.loader.LoaderContext.report">report</span></code></td>
+            <td>
+                  <code><span title="orm_loader.loaders.loader.LoadReport">LoadReport</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Row accounting, filled in as the load runs.</p>
               </div>
             </td>
           </tr>
@@ -1567,75 +1451,91 @@ resolves the same schema.</p>
     </div>
 
 </div><hr />
-<h2 id="casting-statistics">Casting statistics<a class="headerlink" href="#casting-statistics" title="Permanent link">&para;</a></h2>
-<p>Loaders track <strong>casting failures</strong> during normalisation to support
-debugging and auditability.</p>
-<h3 id="columncastingstats">ColumnCastingStats<a class="headerlink" href="#columncastingstats" title="Permanent link">&para;</a></h3>
-<p>Tracks casting failures for a single column:</p>
-<ul>
-<li>total failure count</li>
-<li>representative example values</li>
-</ul>
-<h3 id="tablecastingstats">TableCastingStats<a class="headerlink" href="#tablecastingstats" title="Permanent link">&para;</a></h3>
-<p>Aggregates column-level statistics for a table.</p>
-<p>This enables loaders to emit warnings such as:</p>
-<ul>
-<li>unexpected nulls in required columns</li>
-<li>values that could not be cast to target types</li>
-</ul>
-<p>Statistics are logged, not raised as exceptions.</p>
+<h2 id="loadreport">LoadReport<a class="headerlink" href="#loadreport" title="Permanent link">&para;</a></h2>
+<p><code>LoadReport</code> accounts for every row of a load: rows read, loaded, rejected and removed as duplicates. <code>DedupeResult</code> holds the key columns and the rows removed. A load that cannot account for every row raises.</p>
 
 
 <div class="doc doc-object doc-class">
 
 
 
-<a id="orm_loader.loaders.data_classes.ColumnCastingStats"></a>
+
     <div class="doc doc-contents first">
 
 
 
-        <p>Casting statistics for a single column.</p>
+        <p>Row accounting for one load.</p>
 
 
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<a id="orm_loader.loaders.data_classes.TableCastingStats"></a>
-    <div class="doc doc-contents first">
-
-
-
-        <p>Aggregated casting statistics for a table, keyed by column.</p>
+<p><span class="doc-section-title">Attributes:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td><code><span title="orm_loader.loaders.loader.LoadReport.rows_read">rows_read</span></code></td>
+            <td>
+                  <code><span title="int">int</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Data rows read from the file.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="orm_loader.loaders.loader.LoadReport.rows_loaded">rows_loaded</span></code></td>
+            <td>
+                  <code><span title="int">int</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Rows written to the staging table.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="orm_loader.loaders.loader.LoadReport.rows_rejected">rows_rejected</span></code></td>
+            <td>
+                  <code><span title="int">int</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Rows dropped because a value was unreadable, a required value was
+missing or a line was malformed, with <code>ErrorPolicy.on_error</code> set to
+<code>"reject_row"</code>.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="orm_loader.loaders.loader.LoadReport.dedupe">dedupe</span></code></td>
+            <td>
+                  <code><span title="orm_loader.backends.base.DedupeResult">DedupeResult</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Result of deduplicating the staging table, if it was requested.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="orm_loader.loaders.loader.LoadReport.rejects_path">rejects_path</span></code></td>
+            <td>
+                  <code><span title="pathlib.Path">Path</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>File the rejected rows were written to, if any.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
 
 
 
@@ -1659,19 +1559,41 @@ debugging and auditability.</p>
 
 
 
-<h2 id="orm_loader.loaders.data_classes.TableCastingStats.total_failures" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">total_failures</span></code>
+<h2 id="orm_loader.loaders.loader.LoadReport.accounted" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">accounted</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-property"><code>property</code></small>
   </span>
 
-<a href="#orm_loader.loaders.data_classes.TableCastingStats.total_failures" class="headerlink" title="Permanent link">&para;</a></h2>
+<a href="#orm_loader.loaders.loader.LoadReport.accounted" class="headerlink" title="Permanent link">&para;</a></h2>
 
 
     <div class="doc doc-contents ">
 
-        <p>Total number of casting failures.</p>
+        <p>Whether every row read was loaded, rejected or dropped as a duplicate.</p>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h2 id="orm_loader.loaders.loader.LoadReport.rows_deduplicated" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">rows_deduplicated</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#orm_loader.loaders.loader.LoadReport.rows_deduplicated" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Rows removed as duplicates, zero when deduplication did not run.</p>
 
     </div>
 
@@ -1680,59 +1602,114 @@ debugging and auditability.</p>
 
 
 
-<div class="doc doc-object doc-function">
 
 
-<h2 id="orm_loader.loaders.data_classes.TableCastingStats.has_failures" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">has_failures</span><span class="p">()</span></code>
-
-<a href="#orm_loader.loaders.data_classes.TableCastingStats.has_failures" class="headerlink" title="Permanent link">&para;</a></h2>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Whether any casting failures occurred.</p>
-
+  </div>
 
     </div>
 
 </div>
 
-<div class="doc doc-object doc-function">
+<div class="doc doc-object doc-class">
 
 
-<h2 id="orm_loader.loaders.data_classes.TableCastingStats.record" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">record</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">column</span><span class="p">,</span> <span class="n">value</span><span class="p">,</span> <span class="n">example_limit</span><span class="o">=</span><span class="mi">3</span><span class="p">)</span></code>
 
-<a href="#orm_loader.loaders.data_classes.TableCastingStats.record" class="headerlink" title="Permanent link">&para;</a></h2>
+
+    <div class="doc doc-contents first">
+
+
+
+        <p>What deduplicating a staging table removed.</p>
+
+
+<p><span class="doc-section-title">Attributes:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td><code><span title="orm_loader.backends.base.DedupeResult.key_columns">key_columns</span></code></td>
+            <td>
+                  <code><span title="tuple">tuple</span>[<span title="str">str</span>, ...]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Primary key columns that identify a duplicate.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="orm_loader.backends.base.DedupeResult.rows_before">rows_before</span></code></td>
+            <td>
+                  <code><span title="int">int</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Rows in the staging table before deduplication.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="orm_loader.backends.base.DedupeResult.rows_removed">rows_removed</span></code></td>
+            <td>
+                  <code><span title="int">int</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Rows removed because an earlier row had the same key.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h2 id="orm_loader.backends.base.DedupeResult.rows_after" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">rows_after</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#orm_loader.backends.base.DedupeResult.rows_after" class="headerlink" title="Permanent link">&para;</a></h2>
 
 
     <div class="doc doc-contents ">
 
-        <p>Record a casting failure for a column.</p>
-
+        <p>Rows left in the staging table.</p>
 
     </div>
 
 </div>
 
-<div class="doc doc-object doc-function">
 
 
-<h2 id="orm_loader.loaders.data_classes.TableCastingStats.to_dict" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">to_dict</span><span class="p">()</span></code>
-
-<a href="#orm_loader.loaders.data_classes.TableCastingStats.to_dict" class="headerlink" title="Permanent link">&para;</a></h2>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Return a dictionary representation of casting statistics.</p>
-
-
-    </div>
-
-</div>
 
 
 
@@ -1743,11 +1720,9 @@ debugging and auditability.</p>
 </div><hr />
 <h2 id="design-notes">Design notes<a class="headerlink" href="#design-notes" title="Permanent link">&para;</a></h2>
 <ul>
-<li>Casting failures do <strong>not</strong> abort loads</li>
-<li>Rows violating required constraints are dropped explicitly</li>
-<li>Examples are capped to avoid log flooding</li>
+<li>Unreadable values and missing required values raise by default, so no row disappears without a trace</li>
+<li>With <code>ErrorPolicy(on_error="reject_row")</code> each rejected row is written to a rejects file with its raw text and the reason</li>
 </ul>
-<p>This design favours <strong>observability over strict enforcement</strong>.</p>
 
 
 

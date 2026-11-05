@@ -16,7 +16,7 @@
         <link rel="prev" href="../registry/descriptors/">
       
       
-        <link rel="next" href="context/">
+        <link rel="next" href="readers/">
       
       
         
@@ -853,71 +853,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#core-concepts" class="md-nav__link">
+  <a href="#lifecycle" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Core concepts
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Core concepts">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#loadercontext" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        LoaderContext
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#loaderinterface" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        LoaderInterface
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#staging-tables" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Staging tables
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#provided-loaders" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Provided loaders
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#loader-lifecycle" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Loader lifecycle
+        Lifecycle
       
     </span>
   </a>
@@ -951,6 +890,90 @@
   
   
     <li class="md-nav__item">
+      <a href="readers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Readers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="conversion/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Conversion
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="staging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Staging and Sinks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="context/" class="md-nav__link">
         
   
@@ -958,63 +981,7 @@
   <span class="md-ellipsis">
     
   
-    Loader Context & Diagnostics
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="loaders/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Loader Implementations
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="helpers/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Loader Helpers
+    Context and Report
   
 
     
@@ -1062,71 +1029,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#core-concepts" class="md-nav__link">
+  <a href="#lifecycle" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Core concepts
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Core concepts">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#loadercontext" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        LoaderContext
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#loaderinterface" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        LoaderInterface
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#staging-tables" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Staging tables
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#provided-loaders" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Provided loaders
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#loader-lifecycle" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Loader lifecycle
+        Lifecycle
       
     </span>
   </a>
@@ -1213,94 +1119,59 @@
 
 
 <h1 id="loaders">Loaders<a class="headerlink" href="#loaders" title="Permanent link">&para;</a></h1>
-<p>The <code>orm_loader.loaders</code> module provides conservative, schema-aware file
-loading into ORM-backed staging tables.</p>
-<p>This subsystem is designed to handle:</p>
-<ul>
-<li>untrusted or messy source files</li>
-<li>large datasets requiring chunked processing</li>
-<li>repeatable staged loads</li>
-<li>dialect-specific optimisations (e.g. PostgreSQL COPY)</li>
-<li>explicit, inspectable failure modes</li>
-</ul>
-<p>Loaders are intentionally <strong>infrastructure-only</strong>:
-they do not embed domain rules or business semantics.</p>
-<hr />
-<h2 id="core-concepts">Core concepts<a class="headerlink" href="#core-concepts" title="Permanent link">&para;</a></h2>
-<h3 id="loadercontext">LoaderContext<a class="headerlink" href="#loadercontext" title="Permanent link">&para;</a></h3>
-<p><a href="context/"><code>LoaderContext</code></a></p>
-<p>A <code>LoaderContext</code> object carries the state required to load one file:</p>
-<ul>
-<li>target ORM table</li>
-<li>database session</li>
-<li>staging table</li>
-<li>file path</li>
-<li>operational flags (chunking, deduplication, normalisation)</li>
-</ul>
-<p>This makes loader behaviour explicit, testable, and side-effect free.</p>
-<hr />
-<h3 id="loaderinterface">LoaderInterface<a class="headerlink" href="#loaderinterface" title="Permanent link">&para;</a></h3>
-<p><a href="loaders/"><code>LoaderInterface</code></a></p>
-<p>All loaders implement a common interface:</p>
-<ul>
-<li><code>orm_file_load(ctx)</code> — orchestrates file ingestion</li>
-<li><code>dedupe(data, ctx)</code> — defines deduplication semantics</li>
-</ul>
-<p>Concrete implementations mainly differ in how they read and transform incoming data.</p>
-<hr />
-<h3 id="staging-tables">Staging tables<a class="headerlink" href="#staging-tables" title="Permanent link">&para;</a></h3>
-<p>Loaders always write to <strong>staging tables</strong>, never directly to production
-tables.</p>
-<p>This gives you:</p>
-<ul>
-<li>safe rollback</li>
-<li>repeatable merges</li>
-<li>bulk loading optimisations</li>
-</ul>
-<p>Final merge semantics are handled by the table mixins, not by loaders.</p>
-<hr />
-<h2 id="provided-loaders">Provided loaders<a class="headerlink" href="#provided-loaders" title="Permanent link">&para;</a></h2>
+<p><code>orm_loader.loaders</code> loads files into staging tables. A file takes the same path on every backend and in every format:</p>
+<div  class="mermaid">flowchart LR
+    A[File] --> B[FileReader]
+    B --> C[Arrow record batches]
+    C --> D[BatchProcessor with the ConversionPolicy]
+    D --> E[Backend sink]
+    E --> F[Staging table]
+</div>
+<p>Loading is infrastructure only. It carries no domain rules, streams files in bounded batches, and fails visibly instead of changing data.</p>
 <table>
 <thead>
 <tr>
-<th>Loader</th>
-<th>Use case</th>
+<th>Page</th>
+<th>Covers</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>PandasLoader</code></td>
-<td>Flexible CSV and TSV ingestion</td>
+<td><a href="readers/">Readers</a></td>
+<td><code>FileReader</code>, the provided readers, format detection and how to add a format</td>
 </tr>
 <tr>
-<td><code>ParquetLoader</code></td>
-<td>Columnar or batch-oriented ingestion</td>
+<td><a href="conversion/">Conversion</a></td>
+<td>The policy that turns raw values into column types, and the column handlers</td>
+</tr>
+<tr>
+<td><a href="staging/">Staging and sinks</a></td>
+<td><code>stage_file</code>, the backend sinks, deduplication and <code>normalise</code></td>
+</tr>
+<tr>
+<td><a href="context/">Context and report</a></td>
+<td><code>LoaderContext</code>, <code>LoadReport</code> and row accounting</td>
 </tr>
 </tbody>
 </table>
-<p>Both loaders share the same lifecycle and guarantees.</p>
 <hr />
-<h2 id="loader-lifecycle">Loader lifecycle<a class="headerlink" href="#loader-lifecycle" title="Permanent link">&para;</a></h2>
+<h2 id="lifecycle">Lifecycle<a class="headerlink" href="#lifecycle" title="Permanent link">&para;</a></h2>
 <ol>
-<li>Detect file format and encoding  </li>
-<li>Read data in chunks or batches  </li>
-<li>Optionally normalise to ORM column types  </li>
-<li>Optionally deduplicate within the incoming data  </li>
-<li>Insert into staging table  </li>
-<li>Return row count  </li>
+<li>A reader is chosen from the file suffix, or passed explicitly, and yields the file as batches.</li>
+<li>Each batch is converted to the ORM column types under the conversion policy. With <code>normalise=False</code> values are written as read.</li>
+<li>The backend's bulk sink writes the batch into the staging table.</li>
+<li>The staging table is optionally deduplicated.</li>
+<li>The number of rows left in staging is returned, and the table layer merges them into the target.</li>
 </ol>
-<p>Final merge behaviour belongs to the table mixins and backend layer, not to the loader itself.</p>
+<p>Staging tables isolate a load from the production table, which makes rollback safe and merges repeatable. Merge behaviour belongs to the table mixins and the backend layer, not to the loader.</p>
 <hr />
 <h2 id="guarantees">Guarantees<a class="headerlink" href="#guarantees" title="Permanent link">&para;</a></h2>
-<p>The loaders subsystem guarantees:</p>
 <ul>
-<li>deterministic ingestion behaviour</li>
-<li>no silent data loss</li>
-<li>explicit logging of dropped or malformed rows</li>
-<li>isolation from domain-specific rules</li>
+<li>Ingestion is deterministic and no value is silently changed or lost.</li>
+<li>Every row read is loaded, rejected to a rejects file, or dropped as a duplicate. A load that cannot account for every row raises.</li>
+<li>Domain rules stay outside the loader.</li>
 </ul>
-<p>It does <strong>not</strong> guarantee correctness of the source data.</p>
-<p><a href="helpers/"><code>Helpers</code></a></p>
+<p>The loader does not guarantee the correctness of the source data.</p>
 
 
 

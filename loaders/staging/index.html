@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://AustralianCancerDataNetwork.github.io/orm-loader/loaders/loaders/">
+        <link rel="canonical" href="https://AustralianCancerDataNetwork.github.io/orm-loader/loaders/staging/">
       
       
-        <link rel="prev" href="../context/">
+        <link rel="prev" href="../conversion/">
       
       
-        <link rel="next" href="../helpers/">
+        <link rel="next" href="../context/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Loader Implementations - orm-loader</title>
+        <title>Staging and Sinks - orm-loader</title>
       
     
     
@@ -70,7 +70,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#loader-implementations" class="md-skip">
+        <a href="#staging-and-sinks" class="md-skip">
           Skip to content
         </a>
       
@@ -106,7 +106,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Loader Implementations
+              Staging and Sinks
             
           </span>
         </div>
@@ -821,14 +821,42 @@
   
   
     <li class="md-nav__item">
-      <a href="../context/" class="md-nav__link">
+      <a href="../readers/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Loader Context & Diagnostics
+    Readers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../conversion/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Conversion
   
 
     
@@ -865,7 +893,7 @@
   <span class="md-ellipsis">
     
   
-    Loader Implementations
+    Staging and Sinks
   
 
     
@@ -883,7 +911,7 @@
   <span class="md-ellipsis">
     
   
-    Loader Implementations
+    Staging and Sinks
   
 
     
@@ -909,149 +937,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#loaderinterface" class="md-nav__link">
+  <a href="#interpretation" class="md-nav__link">
     <span class="md-ellipsis">
       
-        LoaderInterface
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="LoaderInterface">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#required-methods" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Required methods
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#shared-behaviour" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Shared behaviour
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#pandasloader" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        PandasLoader
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="PandasLoader">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#characteristics" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Characteristics
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#trade-offs" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Trade-offs
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#best-suited-for" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Best suited for
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#parquetloader" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ParquetLoader
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="ParquetLoader">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#characteristics_1" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Characteristics
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#trade-offs_1" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Trade-offs
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#best-suited-for_1" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Best suited for
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#deduplication-behaviour" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Deduplication behaviour
+        Interpretation
       
     </span>
   </a>
@@ -1059,10 +948,54 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#normalisation-behaviour" class="md-nav__link">
+  <a href="#staging-table" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Normalisation behaviour
+        Staging table
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sinks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sinks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deduplication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deduplication
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#merge-strategies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Merge strategies
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#referential-integrity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Referential integrity
       
     </span>
   </a>
@@ -1085,14 +1018,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../helpers/" class="md-nav__link">
+      <a href="../context/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Loader Helpers
+    Context and Report
   
 
     
@@ -1140,149 +1073,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#loaderinterface" class="md-nav__link">
+  <a href="#interpretation" class="md-nav__link">
     <span class="md-ellipsis">
       
-        LoaderInterface
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="LoaderInterface">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#required-methods" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Required methods
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#shared-behaviour" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Shared behaviour
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#pandasloader" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        PandasLoader
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="PandasLoader">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#characteristics" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Characteristics
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#trade-offs" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Trade-offs
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#best-suited-for" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Best suited for
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#parquetloader" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ParquetLoader
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="ParquetLoader">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#characteristics_1" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Characteristics
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#trade-offs_1" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Trade-offs
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#best-suited-for_1" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Best suited for
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#deduplication-behaviour" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Deduplication behaviour
+        Interpretation
       
     </span>
   </a>
@@ -1290,10 +1084,54 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#normalisation-behaviour" class="md-nav__link">
+  <a href="#staging-table" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Normalisation behaviour
+        Staging table
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sinks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sinks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deduplication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deduplication
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#merge-strategies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Merge strategies
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#referential-integrity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Referential integrity
       
     </span>
   </a>
@@ -1368,80 +1206,249 @@
   
 
 
-<h1 id="loader-implementations">Loader Implementations<a class="headerlink" href="#loader-implementations" title="Permanent link">&para;</a></h1>
-<p>This page documents the concrete loader implementations provided by
-<code>orm_loader</code>.</p>
-<p>All loaders implement the same interface. The difference is in how they read data and how much work they do before rows reach the staging table.</p>
+<h1 id="staging-and-sinks">Staging and Sinks<a class="headerlink" href="#staging-and-sinks" title="Permanent link">&para;</a></h1>
+<p><code>stage_file(ctx, reader, staging)</code> connects a reader, the batch processor and the sink of the session's backend. It loads into the given staging table, respects the <code>LoaderContext</code> flags, returns the number of rows left in staging, and leaves the merge to the table layer.</p>
+
+
+<div class="doc doc-object doc-function">
+
+
+
+
+    <div class="doc doc-contents first">
+
+        <p>Load a file into the staging table.</p>
+<p>The reader streams the file in bounded batches, so memory does not grow
+with the row count. A file without data rows loads nothing and is not
+checked for required columns. With <code>ctx.dedupe</code> set, the staging table keeps the
+first row for each primary key. A failure after the first write rolls
+the session back; DuckDB commits every few batches, so earlier batches
+stay committed there.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>ctx</code>
+            </td>
+            <td>
+                  <code><span title="orm_loader.loaders.loader.LoaderContext">LoaderContext</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Loader context.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>reader</code>
+            </td>
+            <td>
+                  <code><span title="orm_loader.loaders.readers.FileReader">FileReader</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Reader that yields the file as Arrow batches.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>staging</code>
+            </td>
+            <td>
+                  <code><span title="sqlalchemy.Table">Table</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Staging table the rows are written to.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="int">int</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Number of rows left in the staging table.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="orm_loader.helpers.IngestError">IngestError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The file cannot be read, is missing a required column, or the rows
+read are not all accounted for.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="ConversionError">ConversionError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A value cannot be read as its column type.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="RequiredValueError">RequiredValueError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A required column has no value.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="RejectLimitError">RejectLimitError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Rejected rows exceed <code>ErrorPolicy.max_rejects</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div><hr />
+<h2 id="interpretation">Interpretation<a class="headerlink" href="#interpretation" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Values are interpreted by column type, as described in <a href="../conversion/">Conversion</a>.</li>
+<li>With the default policy an unreadable value or a missing required value raises and nothing is loaded.</li>
+<li>With <code>ErrorPolicy(on_error="reject_row")</code> those rows, and delimited lines with the wrong number of fields, are written to <code>&lt;rejects_dir&gt;/&lt;file name&gt;.rejects.csv</code> and the rest load. A malformed line is listed with its row number in the file, and its text is in the reason. <code>rejects_dir</code> defaults to a <code>rejects</code> directory inside the input file's directory, and the file of an earlier load is removed. <code>LoadReport</code> accounts for every row read, checked against the rows counted in the staging table.</li>
+<li>With <code>normalise=False</code> raw text is passed to the staging table unchanged, empty fields included, without literal defaults, non-key required checks or type conversion. SQL-expression defaults still apply to null staging values during merge. Primary-key columns must still be present. What the database does with a value that does not fit its column then depends on the dialect.</li>
+<li>A blank value, and a column the file lacks, take the column's default when it has one: a server default written as text, a scalar Python default, or a SQL expression such as <code>current_date</code>. Literal defaults are converted by the column's handler. SQL expressions are applied in the merge with <code>COALESCE</code>, so the database evaluates them once for each row that needs a default. A column with a callable default stays required.</li>
+</ul>
 <hr />
-<h2 id="loaderinterface">LoaderInterface<a class="headerlink" href="#loaderinterface" title="Permanent link">&para;</a></h2>
-<p><code>LoaderInterface</code> defines the contract for all loaders.</p>
-<h3 id="required-methods">Required methods<a class="headerlink" href="#required-methods" title="Permanent link">&para;</a></h3>
-<ul>
-<li><code>orm_file_load(ctx)</code></li>
-<li><code>dedupe(data, ctx)</code></li>
-</ul>
-<h3 id="shared-behaviour">Shared behaviour<a class="headerlink" href="#shared-behaviour" title="Permanent link">&para;</a></h3>
-<p>All loaders:</p>
-<ul>
-<li>load into staging tables only</li>
-<li>respect <code>LoaderContext</code> flags</li>
-<li>return row counts</li>
-<li>leave final merge behaviour to the table layer</li>
-</ul>
+<h2 id="staging-table">Staging table<a class="headerlink" href="#staging-table" title="Permanent link">&para;</a></h2>
+<p>Staging mirrors the target’s loadable columns and types, excluding computed columns, with no key, index, default or constraint, and a <code>_rownum</code> column that orders the rows (SQLite uses its rowid). Columns with SQL-expression defaults allow NULL in staging so the merge can apply their defaults. Other columns preserve the target’s nullability. Every column that is required and has no default must be in the file, primary key columns included, so a file without its key fails before anything is loaded.</p>
 <hr />
-<h2 id="pandasloader">PandasLoader<a class="headerlink" href="#pandasloader" title="Permanent link">&para;</a></h2>
-<p><code>PandasLoader</code> uses pandas to read and process files.</p>
-<h3 id="characteristics">Characteristics<a class="headerlink" href="#characteristics" title="Permanent link">&para;</a></h3>
-<ul>
-<li>Works well with CSV and TSV inputs</li>
-<li>Easy to debug and inspect</li>
-<li>Supports chunked loading</li>
-<li>Flexible transformation pipeline</li>
-</ul>
-<h3 id="trade-offs">Trade-offs<a class="headerlink" href="#trade-offs" title="Permanent link">&para;</a></h3>
-<ul>
-<li>Slower for very large datasets</li>
-<li>Higher memory overhead than columnar approaches</li>
-</ul>
-<h3 id="best-suited-for">Best suited for<a class="headerlink" href="#best-suited-for" title="Permanent link">&para;</a></h3>
-<ul>
-<li>initial data exploration</li>
-<li>messy or inconsistent files</li>
-<li>pipelines requiring heavy cleaning or inspection</li>
-</ul>
+<h2 id="sinks">Sinks<a class="headerlink" href="#sinks" title="Permanent link">&para;</a></h2>
+<p>Each backend uses the fastest bulk interface its engine offers.</p>
+<table>
+<thead>
+<tr>
+<th>Backend</th>
+<th>Sink</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>PostgreSQL</td>
+<td>One <code>COPY</code> from Arrow-written CSV</td>
+</tr>
+<tr>
+<td>DuckDB</td>
+<td>Insert from a temporary view over the Arrow batch, committed every five batches</td>
+</tr>
+<tr>
+<td>SQLite</td>
+<td>Native <code>executemany</code> per batch</td>
+</tr>
+</tbody>
+</table>
+<p>A failure in the sink is raised. There is no fallback to another loading path.</p>
 <hr />
-<h2 id="parquetloader">ParquetLoader<a class="headerlink" href="#parquetloader" title="Permanent link">&para;</a></h2>
-<p><code>ParquetLoader</code> uses PyArrow for columnar ingestion.</p>
-<h3 id="characteristics_1">Characteristics<a class="headerlink" href="#characteristics_1" title="Permanent link">&para;</a></h3>
-<ul>
-<li>Efficient for very large datasets</li>
-<li>Supports Parquet and CSV inputs</li>
-<li>Batch-oriented processing</li>
-<li>Lower memory overhead</li>
-</ul>
-<h3 id="trade-offs_1">Trade-offs<a class="headerlink" href="#trade-offs_1" title="Permanent link">&para;</a></h3>
-<ul>
-<li>More complex pipeline</li>
-<li>Less flexible row-wise transformations</li>
-</ul>
-<h3 id="best-suited-for_1">Best suited for<a class="headerlink" href="#best-suited-for_1" title="Permanent link">&para;</a></h3>
-<ul>
-<li>high-volume ingestion</li>
-<li>repeated production loads</li>
-<li>columnar data sources</li>
-</ul>
+<h2 id="deduplication">Deduplication<a class="headerlink" href="#deduplication" title="Permanent link">&para;</a></h2>
+<p>With <code>dedupe</code> set, the staging table keeps the first row for each primary key, in source order. The backend removes the others after the load and reports a <code>DedupeResult</code> on <code>LoadReport</code> with the rows before and the rows removed. The merge step decides what happens when incoming rows overlap with existing target rows.</p>
 <hr />
-<h2 id="deduplication-behaviour">Deduplication behaviour<a class="headerlink" href="#deduplication-behaviour" title="Permanent link">&para;</a></h2>
-<p>Deduplication here means deduplicating within the incoming data before it is inserted into staging. The merge step is what decides what happens when incoming rows overlap with existing target rows.</p>
-<hr />
-<h2 id="normalisation-behaviour">Normalisation behaviour<a class="headerlink" href="#normalisation-behaviour" title="Permanent link">&para;</a></h2>
-<p>When enabled, loaders:</p>
-<ul>
-<li>cast values to ORM column types</li>
-<li>drop rows violating required constraints</li>
-<li>log casting failures with examples</li>
-</ul>
+<h2 id="merge-strategies">Merge strategies<a class="headerlink" href="#merge-strategies" title="Permanent link">&para;</a></h2>
+<p>Each strategy does what its name says, whatever the target already holds.</p>
+<table>
+<thead>
+<tr>
+<th>Strategy</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>replace</code></td>
+<td>Deletes target rows whose primary key is in the file, then inserts the file</td>
+</tr>
+<tr>
+<td><code>upsert</code></td>
+<td>Inserts the file and skips rows whose primary key already exists, keeping the first of a repeated key</td>
+</tr>
+<tr>
+<td><code>insert</code></td>
+<td>Inserts the file without any key check, so a key that already exists fails with the database's duplicate key error</td>
+</tr>
+</tbody>
+</table>
+<p><code>insert</code> suits a first load into an empty table, or any file whose keys are new. With <code>dedupe=True</code> it is several times faster than <code>upsert</code>, because <code>upsert</code> checks every row against the key index. A load with <code>upsert</code> into an empty table logs this hint and runs unchanged.</p>
+<p>With <code>merge_batch_size</code> set, PostgreSQL and DuckDB commit the session after each merge batch. If a later batch or deferred-key validation fails, earlier target batches stay committed, along with any other pending session work. A <code>replace</code> failure can leave some rows deleted or updated. SQLite keeps the batches in the caller's transaction. Use batching only when you can accept partial results and the session has no unrelated pending work.</p>
 <p>No schema changes are performed at the loader layer.</p>
+<hr />
+<h2 id="referential-integrity">Referential integrity<a class="headerlink" href="#referential-integrity" title="Permanent link">&para;</a></h2>
+<p>On PostgreSQL and SQLite a load relaxes foreign keys from before it writes staging until it has merged, so the caller needs no foreign key handling and a row loaded before the row it references is accepted. SQLite ignores <code>PRAGMA foreign_keys</code> inside a transaction, so a session with uncommitted writes cannot start a load there and <code>load_file</code> raises before touching anything. To verify the result, call <code>Table.validate_foreign_keys(session)</code> after every table is loaded. It checks every foreign key of the table with an anti-join and raises <code>ForeignKeyViolationError</code> with up to five unmatched keys. Null references are not violations, and the load order does not matter.</p>
+<p>To insert ORM objects built in Python that reference each other, wrap the inserts in <code>backend.relaxed_foreign_keys(session)</code>, which relaxes the keys on PostgreSQL and SQLite and leaves them enforced on DuckDB.</p>
+<p>Autoflush is suspended by default. Flush the pending inserts inside the block so they run while checks are relaxed:</p>
+<div class="highlight"><pre><span></span><code><span class="k">with</span> <span class="n">backend</span><span class="o">.</span><span class="n">relaxed_foreign_keys</span><span class="p">(</span><span class="n">session</span><span class="p">):</span>
+    <span class="n">session</span><span class="o">.</span><span class="n">add_all</span><span class="p">(</span><span class="n">objects</span><span class="p">)</span>
+    <span class="n">session</span><span class="o">.</span><span class="n">flush</span><span class="p">()</span>
+<span class="n">session</span><span class="o">.</span><span class="n">commit</span><span class="p">()</span>
+</code></pre></div>
+<p>On PostgreSQL, relaxation is transaction-local and is reapplied when a new transaction begins, even if the session switches pooled connections. Exiting the scope restores the prior role on any transaction still active.</p>
+<p>DuckDB enforces the keys it creates, so load parent tables first. <code>load_file</code> already validates the keys DuckDB never enforces (cross-schema, cyclic and self-referential) after each table's merge, and <code>validate_foreign_keys</code> repeats that check, so it works the same way on every backend. A DuckDB table with foreign keys needs <code>resolved=</code> for both.</p>
 
 
 

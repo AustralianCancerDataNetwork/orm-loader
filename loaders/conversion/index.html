@@ -1,0 +1,2782 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Infrastructure primitives for SQLAlchemy-based data models">
+      
+      
+      
+        <link rel="canonical" href="https://AustralianCancerDataNetwork.github.io/orm-loader/loaders/conversion/">
+      
+      
+        <link rel="prev" href="../readers/">
+      
+      
+        <link rel="next" href="../staging/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Conversion - orm-loader</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#conversion" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="orm-loader" class="md-header__button md-logo" aria-label="orm-loader" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            orm-loader
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Conversion
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/AustralianCancerDataNetwork/orm-loader" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    orm-loader
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="orm-loader" class="md-nav__button md-logo" aria-label="orm-loader" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    orm-loader
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/AustralianCancerDataNetwork/orm-loader" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    orm-loader
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tables
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tables
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tables/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tables/orm_table/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ORMTableBase
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tables/serialisable_table/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SerialisableTableInterface
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tables/loadable_table/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Loadable Tables
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tables/allocators/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    IdAllocator
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tables/typing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Typing Protocols
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tables/mat_view/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Materialized Views
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Registry & Validation
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Registry & Validation
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../registry/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../registry/registry/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model Registry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../registry/validation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Validation Rules
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../registry/validation_runner/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Validation Runner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../registry/validation_report/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Validation Report
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../registry/descriptors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model Descriptors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Loaders
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Loaders
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../readers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Readers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Conversion
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Conversion
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#conversionpolicy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ConversionPolicy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#orm_loader.conversion.ConversionPolicy.for_column" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        for_column
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#nullpolicy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NullPolicy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#orm_loader.conversion.NullPolicy.text_missing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        text_missing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#orm_loader.conversion.NullPolicy.typed_missing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        typed_missing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#errorpolicy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ErrorPolicy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#handlers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Handlers
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Handlers">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#time-zones" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Time zones
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#typed-input" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Typed input
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#numeric-columns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Numeric columns
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#adding-a-column-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adding a column type
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#convertinghandler" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ConvertingHandler
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#orm_loader.conversion.ConvertingHandler.arrow_type" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        arrow_type
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#orm_loader.conversion.ConvertingHandler.check" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        check
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#orm_loader.conversion.ConvertingHandler.clean" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        clean
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#orm_loader.conversion.ConvertingHandler.missing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        missing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#orm_loader.conversion.ConvertingHandler.parse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        parse
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="parse">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#columnhandler" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ColumnHandler
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#orm_loader.conversion.ColumnHandler.expected" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        expected
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#orm_loader.conversion.ColumnHandler.interpret" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        interpret
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#orm_loader.conversion.ColumnHandler.validate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        validate
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../staging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Staging and Sinks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../context/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Context and Report
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#conversionpolicy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ConversionPolicy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#orm_loader.conversion.ConversionPolicy.for_column" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        for_column
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#nullpolicy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NullPolicy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#orm_loader.conversion.NullPolicy.text_missing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        text_missing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#orm_loader.conversion.NullPolicy.typed_missing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        typed_missing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#errorpolicy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ErrorPolicy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#handlers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Handlers
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Handlers">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#time-zones" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Time zones
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#typed-input" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Typed input
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#numeric-columns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Numeric columns
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#adding-a-column-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adding a column type
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#convertinghandler" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ConvertingHandler
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#orm_loader.conversion.ConvertingHandler.arrow_type" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        arrow_type
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#orm_loader.conversion.ConvertingHandler.check" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        check
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#orm_loader.conversion.ConvertingHandler.clean" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        clean
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#orm_loader.conversion.ConvertingHandler.missing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        missing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#orm_loader.conversion.ConvertingHandler.parse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        parse
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="parse">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#columnhandler" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ColumnHandler
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#orm_loader.conversion.ColumnHandler.expected" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        expected
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#orm_loader.conversion.ColumnHandler.interpret" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        interpret
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#orm_loader.conversion.ColumnHandler.validate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        validate
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+                
+
+
+
+  
+
+
+  <nav class="md-path" aria-label="Navigation" >
+    <ol class="md-path__list">
+      
+        
+  
+  
+    <li class="md-path__item">
+      <a href="../.." class="md-path__link">
+        
+  <span class="md-ellipsis">
+    Home
+  </span>
+
+      </a>
+    </li>
+  
+
+      
+      
+        
+  
+  
+    
+    
+      <li class="md-path__item">
+        <a href="../" class="md-path__link">
+          
+  <span class="md-ellipsis">
+    Loaders
+  </span>
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ol>
+  </nav>
+
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="conversion">Conversion<a class="headerlink" href="#conversion" title="Permanent link">&para;</a></h1>
+<p><code>orm_loader.conversion</code> interprets raw values for every file load, whatever the file format.</p>
+<div  class="mermaid">flowchart LR
+    A[Arrow column] --> B[Policy picks the column's handler]
+    B --> C[clean]
+    C --> D[detect missing]
+    D --> E[parse]
+    E --> F[check]
+    F --> G[values and invalid mask]
+</div>
+<hr />
+<h2 id="conversionpolicy">ConversionPolicy<a class="headerlink" href="#conversionpolicy" title="Permanent link">&para;</a></h2>
+<p><code>ConversionPolicy</code> is a frozen settings object passed to <code>load_file(policy=...)</code>. It holds the settings shared by every column and one handler for each kind of column type.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nulls</code></td>
+<td><code>NullPolicy</code>: what counts as a missing value</td>
+</tr>
+<tr>
+<td><code>errors</code></td>
+<td><code>ErrorPolicy</code>: what happens to unreadable and missing required values</td>
+</tr>
+<tr>
+<td><code>text</code>, <code>integer</code>, <code>floating</code>, <code>numeric</code>, <code>boolean</code>, <code>date</code>, <code>datetime</code></td>
+<td>The handler for that kind of column, each with its own settings</td>
+</tr>
+<tr>
+<td><code>handlers</code></td>
+<td>Handlers for further column types, or replacements, by SQLAlchemy type class</td>
+</tr>
+<tr>
+<td><code>columns</code></td>
+<td>Handlers for single columns by <code>(table_name, column_name)</code></td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="n">policy</span> <span class="o">=</span> <span class="n">ConversionPolicy</span><span class="p">(</span>
+    <span class="n">nulls</span><span class="o">=</span><span class="n">NullPolicy</span><span class="p">(</span><span class="n">text_markers</span><span class="o">=</span><span class="nb">frozenset</span><span class="p">({</span><span class="s2">&quot;NULL&quot;</span><span class="p">})),</span>
+    <span class="n">errors</span><span class="o">=</span><span class="n">ErrorPolicy</span><span class="p">(</span><span class="n">on_error</span><span class="o">=</span><span class="s2">&quot;reject_row&quot;</span><span class="p">,</span> <span class="n">max_rejects</span><span class="o">=</span><span class="mf">0.01</span><span class="p">),</span>
+    <span class="n">date</span><span class="o">=</span><span class="n">DateHandler</span><span class="p">(</span><span class="n">formats</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;dd/mm/yyyy&quot;</span><span class="p">,)),</span>
+    <span class="n">columns</span><span class="o">=</span><span class="p">{(</span><span class="s2">&quot;concept&quot;</span><span class="p">,</span> <span class="s2">&quot;concept_code&quot;</span><span class="p">):</span> <span class="n">TextHandler</span><span class="p">(</span><span class="n">strip</span><span class="o">=</span><span class="kc">False</span><span class="p">)},</span>
+<span class="p">)</span>
+</code></pre></div>
+
+
+<div class="doc doc-object doc-class">
+
+
+
+
+    <div class="doc doc-contents first">
+
+
+
+        <p>The settings of one load, shared by every column.</p>
+<p>The handler for a column is, in order, the entry in <code>columns</code> and the
+handler for the most specific class of the column type (the stored type
+of a <code>TypeDecorator</code>) among <code>handlers</code> and the built-in fields. A
+column type with no handler is an error.</p>
+
+
+<p><span class="doc-section-title">Attributes:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td><code><span title="orm_loader.conversion.ConversionPolicy.nulls">nulls</span></code></td>
+            <td>
+                  <code><span title="orm_loader.conversion.policy.NullPolicy">NullPolicy</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>What counts as a missing value.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="orm_loader.conversion.ConversionPolicy.errors">errors</span></code></td>
+            <td>
+                  <code><span title="orm_loader.conversion.policy.ErrorPolicy">ErrorPolicy</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>What happens to unreadable and missing required values.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="orm_loader.conversion.ConversionPolicy.text">text</span></code></td>
+            <td>
+                  <code><span title="orm_loader.conversion.handlers.TextHandler">TextHandler</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Handler for string and text columns.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="orm_loader.conversion.ConversionPolicy.enum">enum</span></code></td>
+            <td>
+                  <code><span title="orm_loader.conversion.handlers.EnumHandler">EnumHandler</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Handler for enumerated columns.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="orm_loader.conversion.ConversionPolicy.integer">integer</span></code></td>
+            <td>
+                  <code><span title="orm_loader.conversion.handlers.IntegerHandler">IntegerHandler</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Handler for integer columns.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="orm_loader.conversion.ConversionPolicy.floating">floating</span></code></td>
+            <td>
+                  <code><span title="orm_loader.conversion.handlers.FloatHandler">FloatHandler</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Handler for floating point columns.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="orm_loader.conversion.ConversionPolicy.numeric">numeric</span></code></td>
+            <td>
+                  <code><span title="orm_loader.conversion.handlers.NumericHandler">NumericHandler</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Handler for fixed precision columns.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="orm_loader.conversion.ConversionPolicy.boolean">boolean</span></code></td>
+            <td>
+                  <code><span title="orm_loader.conversion.handlers.BooleanHandler">BooleanHandler</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Handler for boolean columns.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="orm_loader.conversion.ConversionPolicy.date">date</span></code></td>
+            <td>
+                  <code><span title="orm_loader.conversion.handlers.DateHandler">DateHandler</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Handler for date columns.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="orm_loader.conversion.ConversionPolicy.datetime">datetime</span></code></td>
+            <td>
+                  <code><span title="orm_loader.conversion.handlers.DateTimeHandler">DateTimeHandler</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Handler for timestamp columns.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="orm_loader.conversion.ConversionPolicy.handlers">handlers</span></code></td>
+            <td>
+                  <code><span title="collections.abc.Mapping">Mapping</span>[<span title="type">type</span>, <span title="orm_loader.conversion.handlers.ColumnHandler">ColumnHandler</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Handlers for further column types, or replacements for the built-in
+ones, by SQLAlchemy type class.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="orm_loader.conversion.ConversionPolicy.columns">columns</span></code></td>
+            <td>
+                  <code><span title="collections.abc.Mapping">Mapping</span>[<span title="tuple">tuple</span>[<span title="str">str</span>, <span title="str">str</span>], <span title="orm_loader.conversion.handlers.ColumnHandler">ColumnHandler</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Handlers for single columns by <code>(table_name, column_name)</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="orm_loader.conversion.ConversionPolicy.for_column" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">for_column</span><span class="p">(</span><span class="n">sa_type</span><span class="p">,</span> <span class="n">table_name</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">column_name</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+<a href="#orm_loader.conversion.ConversionPolicy.for_column" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return the handler that interprets a column.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>sa_type</code>
+            </td>
+            <td>
+                  <code><span title="sqlalchemy.types.TypeEngine">TypeEngine</span>[<span title="typing.Any">Any</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Column type.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>table_name</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Table the column belongs to.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>column_name</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The column.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="orm_loader.conversion.handlers.ColumnHandler">ColumnHandler</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The handler for the column.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="orm_loader.helpers.PolicyError">PolicyError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>No handler matches the column type. Passthrough is chosen
+explicitly with <code>columns</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div><hr />
+<h2 id="nullpolicy">NullPolicy<a class="headerlink" href="#nullpolicy" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Text columns keep every nonempty value verbatim. Only empty and whitespace-only text is null.</li>
+<li>Words such as <code>NULL</code>, <code>None</code>, <code>N/A</code> and <code>NaN</code> stay as text in text columns. Version 2 turned them into NULL, which dropped concepts with those names. To treat words as missing again, list them in <code>text_markers</code>, for example <code>NullPolicy(text_markers=frozenset({"NULL", "None", "N/A", "NaN", "nan", "null", "NA", "n/a"}))</code>. Set operations add or remove words from a set you keep.</li>
+<li><code>text_markers</code> are exact, case-sensitive words that are null in every text column of the load. Matching ignores surrounding whitespace and applies the same way to every file format. To treat a word as missing in some columns only, subclass <code>TextHandler</code>, override <code>missing()</code> and register it in <code>ConversionPolicy.columns</code>.</li>
+<li><code>empty_is_null=False</code> keeps empty text fields as empty strings. Typed columns still treat empty fields as missing.</li>
+<li>Typed columns accept a valid value, a missing word (<code>null</code>, <code>none</code>, <code>na</code>, <code>n/a</code>, <code>nan</code> and similar) or a real null, and fail otherwise.</li>
+</ul>
+
+
+<div class="doc doc-object doc-class">
+
+
+
+
+    <div class="doc doc-contents first">
+
+
+
+        <p>What counts as a missing value, shared by every column handler.</p>
+<p>Text columns keep every nonempty value verbatim apart from the markers.
+Typed columns treat empty text and the typed missing words as missing.</p>
+
+
+<p><span class="doc-section-title">Attributes:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td><code><span title="orm_loader.conversion.NullPolicy.empty_is_null">empty_is_null</span></code></td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Empty and whitespace-only text becomes null in text columns.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="orm_loader.conversion.NullPolicy.text_markers">text_markers</span></code></td>
+            <td>
+                  <code><span title="frozenset">frozenset</span>[<span title="str">str</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Exact, case-sensitive text values treated as missing in text columns.
+Matching ignores surrounding whitespace.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="orm_loader.conversion.NullPolicy.typed_missing_words">typed_missing_words</span></code></td>
+            <td>
+                  <code><span title="frozenset">frozenset</span>[<span title="str">str</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Lowercase words treated as missing in non-text columns.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="orm_loader.conversion.NullPolicy.text_missing" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">text_missing</span><span class="p">(</span><span class="n">trimmed</span><span class="p">)</span></code>
+
+<a href="#orm_loader.conversion.NullPolicy.text_missing" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return a mask of trimmed text values that are missing in a text column.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>trimmed</code>
+            </td>
+            <td>
+                  <code><span title="pyarrow.Array">Array</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>String array without surrounding whitespace.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="pyarrow.Array">Array</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Boolean array that is true where the value is missing.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="orm_loader.conversion.NullPolicy.typed_missing" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">typed_missing</span><span class="p">(</span><span class="n">trimmed</span><span class="p">)</span></code>
+
+<a href="#orm_loader.conversion.NullPolicy.typed_missing" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return a mask of trimmed text values that are missing in a typed column.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div><hr />
+<h2 id="errorpolicy">ErrorPolicy<a class="headerlink" href="#errorpolicy" title="Permanent link">&para;</a></h2>
+<p><code>on_error</code> is <code>raise</code> (default) or <code>reject_row</code>. <code>max_rejects</code> stops a <code>reject_row</code> load before the merge. A count stops the load as soon as it is passed, and a fraction is checked once all rows have been read, against the total number of rows read. A load that rejected rows logs a warning with their number and the rejects file.</p>
+
+
+<div class="doc doc-object doc-class">
+
+
+
+
+    <div class="doc doc-contents first">
+
+
+
+        <p>What happens to a row with an unreadable value or a missing required value.</p>
+
+
+<p><span class="doc-section-title">Attributes:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td><code><span title="orm_loader.conversion.ErrorPolicy.on_error">on_error</span></code></td>
+            <td>
+                  <code><span title="typing.Literal">Literal</span>[&#39;raise&#39;, &#39;reject_row&#39;]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p><code>"raise"</code> aborts on the first batch containing such a row.
+<code>"reject_row"</code> drops those rows and writes them to a rejects file.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="orm_loader.conversion.ErrorPolicy.max_rejects">max_rejects</span></code></td>
+            <td>
+                  <code><span title="float">float</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>With <code>reject_row</code>, abort once rejected rows exceed this count, or
+this fraction of rows read when it is a float between 0 and 1.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div><hr />
+<h2 id="handlers">Handlers<a class="headerlink" href="#handlers" title="Permanent link">&para;</a></h2>
+<p>The handler for a column is the first match of: the entry in <code>ConversionPolicy.columns</code> and the handler for the most specific class of the column type. A <code>TypeDecorator</code> is handled as the type it stores. A column type with no handler is an error that names the table, column and type, raised before any row is processed. Loading such a column unchanged is an explicit choice: <code>columns={("table", "column"): PassthroughHandler()}</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Handler</th>
+<th>Column types</th>
+<th>Accepted text</th>
+<th>Settings</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>TextHandler</code></td>
+<td><code>String</code>, <code>Text</code></td>
+<td>Any nonempty text; longer than the column is an error</td>
+<td><code>strip</code></td>
+</tr>
+<tr>
+<td><code>EnumHandler</code></td>
+<td><code>Enum</code></td>
+<td>One of the labels the column stores</td>
+<td><code>strip</code></td>
+</tr>
+<tr>
+<td><code>IntegerHandler</code></td>
+<td><code>Integer</code>, <code>SmallInteger</code>, <code>BigInteger</code></td>
+<td>Optional sign and digits, with an optional all-zero fraction (<code>1.0</code>); a value outside the 16, 32 or 64 bits of the column type is an error</td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>FloatHandler</code></td>
+<td><code>Float</code></td>
+<td>Decimal or exponent form; <code>Infinity</code> and values that overflow to infinity are errors</td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>NumericHandler</code></td>
+<td><code>Numeric</code></td>
+<td>Plain and exponent decimal forms such as <code>1.5</code>, <code>.05</code> and <code>1.5E3</code>, converted to an Arrow decimal of the declared precision and scale without rounding; a precision without a scale has scale 0. A value that does not fit the declared digits is an error. The declaration must have a precision of at most 38 digits, see below</td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>BooleanHandler</code></td>
+<td><code>Boolean</code></td>
+<td><code>true</code>, <code>t</code>, <code>yes</code>, <code>y</code>, <code>1</code>, <code>on</code> and their opposites</td>
+<td><code>true_words</code>, <code>false_words</code></td>
+</tr>
+<tr>
+<td><code>DateHandler</code></td>
+<td><code>Date</code></td>
+<td>One of <code>formats</code>, validated against the calendar; year 0 is an error</td>
+<td><code>formats</code></td>
+</tr>
+<tr>
+<td><code>DateTimeHandler</code></td>
+<td><code>DateTime</code></td>
+<td>ISO date and time, or a date in one of <code>formats</code>; see time zones below</td>
+<td><code>formats</code></td>
+</tr>
+</tbody>
+</table>
+<p>Dates default to <code>yyyymmdd</code>, <code>dd-mon-yyyy</code> and <code>yyyy-mm-dd</code>. Ambiguous forms such as <code>02/01/2020</code> are never guessed; declare <code>DateHandler(formats=("dd/mm/yyyy",))</code> or <code>("mm/dd/yyyy",)</code>. A timestamp column reads date-only values with its own <code>formats</code>.</p>
+<h3 id="time-zones">Time zones<a class="headerlink" href="#time-zones" title="Permanent link">&para;</a></h3>
+<p>The column type decides, so no value is converted by a convention the schema did not ask for.</p>
+<ul>
+<li>A <code>DateTime(timezone=True)</code> column requires an offset (<code>Z</code> or <code>+hh:mm</code>) and stores UTC. A value without an offset and a date-only value are errors.</li>
+<li>A <code>DateTime</code> column without a time zone rejects a value with an offset.</li>
+</ul>
+<h3 id="typed-input">Typed input<a class="headerlink" href="#typed-input" title="Permanent link">&para;</a></h3>
+<p>Input that already has a type, such as a Parquet column, is cast to the column type and checked like parsed text. A value that does not come back unchanged when cast back to its input type is an error, so an integer <code>2</code> in a <code>Boolean</code> column, a timestamp with a time in a <code>Date</code> column and a decimal that loses digits are all rejected. Float <code>NaN</code> is missing.</p>
+<p>In a <code>Numeric</code> column an integer is read exactly and a float is read as its shortest decimal text, so a Parquet float column loads the same values as a CSV of the same numbers. Infinity is an error.</p>
+<h3 id="numeric-columns">Numeric columns<a class="headerlink" href="#numeric-columns" title="Permanent link">&para;</a></h3>
+<p>The loader converts only what an Arrow decimal can hold, which is a precision of at most 38 digits. That is also the widest decimal DuckDB stores, and SQLite stores <code>Numeric</code> as a float. A <code>Numeric</code> column with a wider precision or no precision raises a <code>PolicyError</code> before any row is read. To load it anyway, leave the value to the database with <code>columns={("table", "column"): PassthroughHandler()}</code>: the database then parses the text and rounds a value that exceeds the scale, and a value it cannot parse aborts the load.</p>
+<h3 id="adding-a-column-type">Adding a column type<a class="headerlink" href="#adding-a-column-type" title="Permanent link">&para;</a></h3>
+<p>Subclass <code>ConvertingHandler</code>, implement <code>arrow_type</code> and <code>parse</code>, and pass the handler in <code>ConversionPolicy.handlers</code> for the type class, or in <code>ConversionPolicy.columns</code> for a single column. <code>clean</code>, <code>missing</code> and <code>check</code> can be overridden.</p>
+<div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">HexHandler</span><span class="p">(</span><span class="n">ConvertingHandler</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">arrow_type</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sa_type</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">pa</span><span class="o">.</span><span class="n">int64</span><span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">parse</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">cleaned</span><span class="p">,</span> <span class="n">sa_type</span><span class="p">):</span>
+        <span class="o">...</span>  <span class="c1"># return Interpretation(values, invalid)</span>
+
+<span class="n">policy</span> <span class="o">=</span> <span class="n">ConversionPolicy</span><span class="p">(</span><span class="n">handlers</span><span class="o">=</span><span class="p">{</span><span class="n">MyHexType</span><span class="p">:</span> <span class="n">HexHandler</span><span class="p">()})</span>
+</code></pre></div>
+<h3 id="convertinghandler">ConvertingHandler<a class="headerlink" href="#convertinghandler" title="Permanent link">&para;</a></h3>
+
+
+<div class="doc doc-object doc-class">
+
+
+
+
+    <div class="doc doc-contents first">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="orm_loader.conversion.handlers.base.ColumnHandler">ColumnHandler</span></code></p>
+
+
+
+        <p>Converts a column in four stages: clean, detect missing, parse, check.</p>
+<p>Text input follows the stages. Input that already has a type, such as a
+Parquet column, is cast directly with floating NaN read as missing. A
+value that does not survive the cast back to its input type is lossy and
+unreadable, and <code>check</code> runs on the cast values.
+Subclasses supply <code>arrow_type</code> and <code>parse</code> and may override <code>clean</code>,
+<code>missing</code> and <code>check</code>.</p>
+
+
+<p><span class="doc-section-title">Attributes:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td><code><span title="orm_loader.conversion.ConvertingHandler.distinct">distinct</span></code></td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Run the stages once per distinct value and gather the results back,
+for types whose parse step is expensive per value.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="orm_loader.conversion.ConvertingHandler.arrow_type" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">arrow_type</span><span class="p">(</span><span class="n">sa_type</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-abstractmethod"><code>abstractmethod</code></small>
+  </span>
+
+<a href="#orm_loader.conversion.ConvertingHandler.arrow_type" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return the Arrow type of the converted values.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="orm_loader.conversion.ConvertingHandler.check" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">check</span><span class="p">(</span><span class="n">values</span><span class="p">,</span> <span class="n">sa_type</span><span class="p">)</span></code>
+
+<a href="#orm_loader.conversion.ConvertingHandler.check" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return a mask of parsed values the column cannot hold, or None when it holds any.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="orm_loader.conversion.ConvertingHandler.clean" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">clean</span><span class="p">(</span><span class="n">raw</span><span class="p">,</span> <span class="n">trimmed</span><span class="p">)</span></code>
+
+<a href="#orm_loader.conversion.ConvertingHandler.clean" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return the text that is parsed, the trimmed text by default.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="orm_loader.conversion.ConvertingHandler.missing" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">missing</span><span class="p">(</span><span class="n">trimmed</span><span class="p">,</span> <span class="n">nulls</span><span class="p">)</span></code>
+
+<a href="#orm_loader.conversion.ConvertingHandler.missing" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return a mask of values that count as missing, by the typed rules by default.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="orm_loader.conversion.ConvertingHandler.parse" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">parse</span><span class="p">(</span><span class="n">cleaned</span><span class="p">,</span> <span class="n">sa_type</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-abstractmethod"><code>abstractmethod</code></small>
+  </span>
+
+<a href="#orm_loader.conversion.ConvertingHandler.parse" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Parse cleaned text in which missing values are null.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>cleaned</code>
+            </td>
+            <td>
+                  <code><span title="pyarrow.Array">Array</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>String array with missing values set to null.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>sa_type</code>
+            </td>
+            <td>
+                  <code><span title="sqlalchemy.types.TypeEngine">TypeEngine</span>[<span title="typing.Any">Any</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Column type the values are converted to.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="orm_loader.conversion.values.Interpretation">Interpretation</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Parsed values and a mask of values that did not fit.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div><h3 id="columnhandler">ColumnHandler<a class="headerlink" href="#columnhandler" title="Permanent link">&para;</a></h3>
+
+
+<div class="doc doc-object doc-class">
+
+
+
+
+    <div class="doc doc-contents first">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="abc.ABC">ABC</span></code></p>
+
+
+
+        <p>Interprets the raw values of the columns of one kind of column type.</p>
+<p>A handler is a frozen settings object. It is selected for a column by
+<code>ConversionPolicy.for_column</code> and holds no state about the column.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="orm_loader.conversion.ColumnHandler.expected" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">expected</span><span class="p">(</span><span class="n">sa_type</span><span class="p">)</span></code>
+
+<a href="#orm_loader.conversion.ColumnHandler.expected" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return the name reported in an error for an unreadable value.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="orm_loader.conversion.ColumnHandler.interpret" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">interpret</span><span class="p">(</span><span class="n">arr</span><span class="p">,</span> <span class="n">sa_type</span><span class="p">,</span> <span class="n">nulls</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-abstractmethod"><code>abstractmethod</code></small>
+  </span>
+
+<a href="#orm_loader.conversion.ColumnHandler.interpret" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Interpret a raw column without raising on unreadable values.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>arr</code>
+            </td>
+            <td>
+                  <code><span title="pyarrow.Array">Array</span> | <span title="pyarrow.ChunkedArray">ChunkedArray</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Raw column.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>sa_type</code>
+            </td>
+            <td>
+                  <code><span title="sqlalchemy.types.TypeEngine">TypeEngine</span>[<span title="typing.Any">Any</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Column type the values are converted to.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>nulls</code>
+            </td>
+            <td>
+                  <code><span title="orm_loader.conversion.policy.NullPolicy">NullPolicy</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>What counts as a missing value.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="orm_loader.conversion.values.Interpretation">Interpretation</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Converted values with nulls where a value is missing, and a mask
+that is true where a value was unreadable.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="orm_loader.conversion.ColumnHandler.validate" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">validate</span><span class="p">(</span><span class="n">sa_type</span><span class="p">)</span></code>
+
+<a href="#orm_loader.conversion.ColumnHandler.validate" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Raise <code>ValueError</code> when the handler cannot read the column type as declared.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.expand", "navigation.path", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="https://unpkg.com/mermaid@10/dist/mermaid.min.js"></script>
+      
+        <script src="../../js/mermaid-init.js"></script>
+      
+    
+  </body>
+</html>
