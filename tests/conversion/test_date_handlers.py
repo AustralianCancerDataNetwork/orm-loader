@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import numpy as np
 import pyarrow as pa
@@ -31,8 +31,19 @@ def test_both_athena_formats_and_iso_parse_by_default(raw, expected):
 
 @pytest.mark.parametrize(
     "raw",
-    ["20200231", "19000229", "2020022", "+2020229", "202002299", "abcdefgh",
-     "31-FEB-2020", "01-XXX-2020", "2019-02-29", "Jan 2 2020", "2020-13-45"],
+    [
+        "20200231",
+        "19000229",
+        "2020022",
+        "+2020229",
+        "202002299",
+        "abcdefgh",
+        "31-FEB-2020",
+        "01-XXX-2020",
+        "2019-02-29",
+        "Jan 2 2020",
+        "2020-13-45",
+    ],
 )
 def test_impossible_or_misshapen_dates_are_unreadable(raw):
     assert unreadable(raw, sa.Date())
@@ -40,8 +51,12 @@ def test_impossible_or_misshapen_dates_are_unreadable(raw):
 
 def test_ambiguous_date_needs_a_declared_format():
     assert unreadable("02/01/2020", sa.Date())
-    assert read("02/01/2020", sa.Date(), ConversionPolicy(date=DateHandler(formats=("dd/mm/yyyy",)))) == date(2020, 1, 2)
-    assert read("02/01/2020", sa.Date(), ConversionPolicy(date=DateHandler(formats=("mm/dd/yyyy",)))) == date(2020, 2, 1)
+    assert read(
+        "02/01/2020", sa.Date(), ConversionPolicy(date=DateHandler(formats=("dd/mm/yyyy",)))
+    ) == date(2020, 1, 2)
+    assert read(
+        "02/01/2020", sa.Date(), ConversionPolicy(date=DateHandler(formats=("mm/dd/yyyy",)))
+    ) == date(2020, 2, 1)
 
 
 def test_unknown_date_format_name_is_rejected():
@@ -52,7 +67,11 @@ def test_unknown_date_format_name_is_rejected():
 def test_dictionary_encoded_dates_parse_the_same():
     column = pc.dictionary_encode(pa.array(["20200229", None, "", "20200301", "20200229"]))
     assert interpret(column, sa.Date())[0] == [
-        date(2020, 2, 29), None, None, date(2020, 3, 1), date(2020, 2, 29),
+        date(2020, 2, 29),
+        None,
+        None,
+        date(2020, 3, 1),
+        date(2020, 2, 29),
     ]
 
 
@@ -70,7 +89,9 @@ def test_datetime_accepts_iso_and_date_only_forms(raw, expected):
     assert read(raw, sa.DateTime()) == expected
 
 
-@pytest.mark.parametrize("raw", ["2017-02-30 01:00:00", "2017-08-24 25:00:00", "2017-08-24 something", "garbage"])
+@pytest.mark.parametrize(
+    "raw", ["2017-02-30 01:00:00", "2017-08-24 25:00:00", "2017-08-24 something", "garbage"]
+)
 def test_datetime_rejects_invalid_values(raw):
     assert unreadable(raw, sa.DateTime())
 
@@ -87,7 +108,9 @@ def _yyyymmdd(days: np.ndarray) -> pa.Array:
 
 
 def test_every_calendar_date_from_year_1_to_9999_parses_to_itself():
-    days = np.arange(np.datetime64("0001-01-01"), np.datetime64("10000-01-01"), dtype="datetime64[D]")
+    days = np.arange(
+        np.datetime64("0001-01-01"), np.datetime64("10000-01-01"), dtype="datetime64[D]"
+    )
     dates, invalid = parse_dates(_yyyymmdd(days), ("yyyymmdd",))
     assert not pc.any(invalid).as_py()
     assert dates.cast(pa.int32()).to_numpy().tolist() == days.astype(int).tolist()
@@ -142,8 +165,8 @@ def test_year_zero_is_unreadable(sa_type):
 
 def test_a_timezone_column_requires_an_offset_and_stores_utc():
     aware = sa.DateTime(timezone=True)
-    assert read("2020-01-01T10:00:00+10:00", aware) == datetime(2020, 1, 1, tzinfo=timezone.utc)
-    assert read("2020-01-01 10:00:00Z", aware) == datetime(2020, 1, 1, 10, tzinfo=timezone.utc)
+    assert read("2020-01-01T10:00:00+10:00", aware) == datetime(2020, 1, 1, tzinfo=UTC)
+    assert read("2020-01-01 10:00:00Z", aware) == datetime(2020, 1, 1, 10, tzinfo=UTC)
     assert unreadable("2020-01-01 10:00:00", aware)
     assert unreadable("20200101", aware)
 

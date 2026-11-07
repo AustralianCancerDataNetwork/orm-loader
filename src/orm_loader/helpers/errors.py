@@ -73,7 +73,11 @@ class ConversionError(IngestError):
         self.count = count
         self.samples = samples
         target = ".".join(part for part in (table_name, column_name) if part) or "column"
-        hint = " Declare the source format with DateHandler(formats=...)." if "Date" in expected else ""
+        hint = (
+            " Declare the source format with DateHandler(formats=...)."
+            if "Date" in expected
+            else ""
+        )
         super().__init__(
             f"{target}: {count} value(s) cannot be read as {expected}. Examples: {samples}.{hint}"
         )

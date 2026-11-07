@@ -211,9 +211,7 @@ class ORMTableBase:
         """
         pks = cls.pk_columns()
         if len(pks) != 1:
-            raise ValueError(
-                f"{cls.__name__} has composite PK; max_id() not supported"
-            )
+            raise ValueError(f"{cls.__name__} has composite PK; max_id() not supported")
         pk = pks[0]
         return session.query(sa.func.max(pk)).scalar() or 0
 
@@ -240,5 +238,3 @@ class ORMTableBase:
             An ID allocator initialised to the current maximum ID.
         """
         return IdAllocator(cls.max_id(session))
-
-

@@ -1,4 +1,4 @@
-from typing import Type, cast
+from typing import cast
 
 import pandas as pd
 import sqlalchemy as sa
@@ -16,13 +16,13 @@ class Base(DeclarativeBase):
 
 class DedupTable(Base, FileLoadableTableInterface):
     __tablename__ = "dedup_table"
-    __table_args__ = {"schema": Role.PRIMARY.value}
+    __table_args__ = ({"schema": Role.PRIMARY.value},)
 
     id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     value: so.Mapped[str] = so.mapped_column(sa.String, nullable=False)
 
 
-_DedupTable = cast(Type[FileTableProtocol], DedupTable)
+_DedupTable = cast(type[FileTableProtocol], DedupTable)
 
 
 def test_internal_deduplication(sqlite_session, sqlite_engine, tmp_path):

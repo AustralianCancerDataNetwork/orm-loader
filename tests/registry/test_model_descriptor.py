@@ -1,7 +1,10 @@
+from typing import Any, ClassVar
+
+import pytest
 import sqlalchemy as sa
 import sqlalchemy.orm as so
-import pytest
 from sqlalchemy.exc import NoInspectionAvailable
+
 from orm_loader.registry.registry import ModelDescriptor
 from orm_loader.tables.orm_table import ORMTableBase
 
@@ -10,7 +13,7 @@ Base = so.declarative_base()
 
 def test_model_descriptor_from_model_basic():
     class T(ORMTableBase, Base):
-        __tablename__ = "t"
+        __tablename__: ClassVar[str] = "t"
         id = sa.Column(sa.Integer, primary_key=True)
         a = sa.Column(sa.String)
 
@@ -29,20 +32,19 @@ def test_model_descriptor_detects_foreign_keys():
         id = sa.Column(sa.Integer, primary_key=True)
 
     class Child(ORMTableBase, Base):
-        __tablename__ = "child"
+        __tablename__: ClassVar[str] = "child"
         id = sa.Column(sa.Integer, primary_key=True)
         parent_id = sa.Column(sa.Integer, sa.ForeignKey("parent.id"))
 
     desc = ModelDescriptor.from_model(Child)
 
-    assert desc.foreign_keys == {
-        "parent_id": ("parent", "id")
-    }
+    assert desc.foreign_keys == {"parent_id": ("parent", "id")}
 
 
 def test_model_descriptor_rejects_unmapped_class():
     class NotMapped:
         pass
 
+    not_mapped: Any = NotMapped
     with pytest.raises(NoInspectionAvailable):
-        ModelDescriptor.from_model(NotMapped) # type: ignore
+        ModelDescriptor.from_model(not_mapped)

@@ -36,14 +36,27 @@ class DateFormats:
 
     DEFAULT: ClassVar[tuple[str, ...]] = ("yyyymmdd", "dd-mon-yyyy", "yyyy-mm-dd")
     MONTHS: ClassVar[tuple[str, ...]] = (
-        "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec",
+        "jan",
+        "feb",
+        "mar",
+        "apr",
+        "may",
+        "jun",
+        "jul",
+        "aug",
+        "sep",
+        "oct",
+        "nov",
+        "dec",
     )
 
     @staticmethod
     def yyyymmdd(values: pa.Array) -> tuple[pa.Array, pa.Array]:
         ok = pc.and_(pc.equal(pc.utf8_length(values), 8), pc.utf8_is_digit(values))
         cut = pc.utf8_slice_codeunits
-        return ok, pc.binary_join_element_wise(cut(values, 0, 4), cut(values, 4, 6), cut(values, 6, 8), "-")
+        return ok, pc.binary_join_element_wise(
+            cut(values, 0, 4), cut(values, 4, 6), cut(values, 6, 8), "-"
+        )
 
     @staticmethod
     def yyyy_mm_dd(values: pa.Array) -> tuple[pa.Array, pa.Array]:
@@ -53,7 +66,9 @@ class DateFormats:
     def dd_mon_yyyy(values: pa.Array) -> tuple[pa.Array, pa.Array]:
         ok = pc.match_substring_regex(values, r"^\d{2}-[A-Za-z]{3}-\d{4}$")
         cut = pc.utf8_slice_codeunits
-        month = pc.index_in(pc.utf8_lower(cut(values, 3, 6)), value_set=pa.array(DateFormats.MONTHS))
+        month = pc.index_in(
+            pc.utf8_lower(cut(values, 3, 6)), value_set=pa.array(DateFormats.MONTHS)
+        )
         month = pc.utf8_lpad(pc.cast(pc.add(month, 1), pa.string()), 2, "0")
         return ok, pc.binary_join_element_wise(cut(values, 7, 11), month, cut(values, 0, 2), "-")
 
@@ -61,13 +76,17 @@ class DateFormats:
     def dd_mm_yyyy(values: pa.Array) -> tuple[pa.Array, pa.Array]:
         ok = pc.match_substring_regex(values, r"^\d{2}/\d{2}/\d{4}$")
         cut = pc.utf8_slice_codeunits
-        return ok, pc.binary_join_element_wise(cut(values, 6, 10), cut(values, 3, 5), cut(values, 0, 2), "-")
+        return ok, pc.binary_join_element_wise(
+            cut(values, 6, 10), cut(values, 3, 5), cut(values, 0, 2), "-"
+        )
 
     @staticmethod
     def mm_dd_yyyy(values: pa.Array) -> tuple[pa.Array, pa.Array]:
         ok = pc.match_substring_regex(values, r"^\d{2}/\d{2}/\d{4}$")
         cut = pc.utf8_slice_codeunits
-        return ok, pc.binary_join_element_wise(cut(values, 6, 10), cut(values, 0, 2), cut(values, 3, 5), "-")
+        return ok, pc.binary_join_element_wise(
+            cut(values, 6, 10), cut(values, 0, 2), cut(values, 3, 5), "-"
+        )
 
     SHAPES: ClassVar[Mapping[str, DateShape]] = MappingProxyType(
         {
@@ -134,7 +153,9 @@ class DateHandler(ConvertingHandler):
     def __post_init__(self) -> None:
         unknown = [name for name in self.formats if name not in DateFormats.SHAPES]
         if unknown:
-            raise ValueError(f"Unknown date formats {unknown}; choose from {sorted(DateFormats.SHAPES)}")
+            raise ValueError(
+                f"Unknown date formats {unknown}; choose from {sorted(DateFormats.SHAPES)}"
+            )
 
     def arrow_type(self, sa_type: TypeEngine[Any]) -> pa.DataType:
         return pa.date32()
@@ -152,12 +173,12 @@ class DateTimeHandler(DateHandler):
 
     - A timestamp has date and time separated by ``T`` or a space, with
     optional seconds and up to six fractional digits.
-    -  A date-only value becomes midnight. 
-    - The column type decides about time zones: 
+    -  A date-only value becomes midnight.
+    - The column type decides about time zones:
         - ``DateTime(timezone=True)`` column requires an offset (``Z`` or
-    ``+hh:mm``) and stores UTC, and 
-        - a column without a time zone rejects an offset. 
-    - A date-only value is not read for a time zone column. 
+    ``+hh:mm``) and stores UTC, and
+        - a column without a time zone rejects an offset.
+    - A date-only value is not read for a time zone column.
     - Typed input follows the same rule: a time zone aware timestamp does not fill a
     naive column and a naive one does not fill an aware column.
     """
@@ -172,7 +193,11 @@ class DateTimeHandler(DateHandler):
         return pa.timestamp("us", "UTC" if getattr(sa_type, "timezone", False) else None)
 
     def expected(self, sa_type: TypeEngine[Any]) -> str:
-        return "DateTime with an offset (Z or +hh:mm)" if getattr(sa_type, "timezone", False) else "DateTime without an offset"
+        return (
+            "DateTime with an offset (Z or +hh:mm)"
+            if getattr(sa_type, "timezone", False)
+            else "DateTime without an offset"
+        )
 
     def _interpret_typed(self, arr: pa.Array, sa_type: TypeEngine[Any]) -> Interpretation:
         target = self.arrow_type(sa_type)
@@ -184,10 +209,14 @@ class DateTimeHandler(DateHandler):
     def parse(self, cleaned: pa.Array, sa_type: TypeEngine[Any]) -> Interpretation:
         target = self.arrow_type(sa_type)
         aware = target.tz is not None
-        is_iso = pc.fill_null(pc.match_substring_regex(cleaned, self.AWARE if aware else self.NAIVE), False)
+        is_iso = pc.fill_null(
+            pc.match_substring_regex(cleaned, self.AWARE if aware else self.NAIVE), False
+        )
         stamps, stamp_failed = safe_cast(pc.if_else(is_iso, cleaned, NULL_STRING), target)
         if aware:
-            return Interpretation(stamps, pc.or_(stamp_failed, pc.and_(pc.is_valid(cleaned), pc.invert(is_iso))))
+            return Interpretation(
+                stamps, pc.or_(stamp_failed, pc.and_(pc.is_valid(cleaned), pc.invert(is_iso)))
+            )
         rest = pc.dictionary_encode(pc.if_else(is_iso, NULL_STRING, cleaned))
         dates, invalid = parse_dates(rest.dictionary, self.formats)
         dates = pc.take(dates, rest.indices)

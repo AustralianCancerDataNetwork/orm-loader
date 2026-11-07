@@ -1,6 +1,6 @@
 """Input that already has a type, such as a Parquet column, is cast and checked like parsed text."""
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pyarrow as pa
@@ -51,7 +51,9 @@ def test_float_nan_is_missing_and_infinity_is_unreadable():
 
 
 def test_decimals_that_lose_digits_are_unreadable():
-    values, invalid = _result(pa.array([Decimal("1.25"), Decimal("1.234")], pa.decimal128(10, 3)), sa.Numeric(10, 2))
+    values, invalid = _result(
+        pa.array([Decimal("1.25"), Decimal("1.234")], pa.decimal128(10, 3)), sa.Numeric(10, 2)
+    )
     assert values == [Decimal("1.25"), None]
     assert invalid == [False, True]
 
@@ -63,9 +65,12 @@ def test_an_all_null_column_of_unknown_type_is_missing_values():
 
 
 def test_timestamps_with_and_without_a_time_zone_match_their_column():
-    aware = pa.array([datetime(2020, 1, 1, 10, tzinfo=timezone.utc)], pa.timestamp("us", "UTC"))
+    aware = pa.array([datetime(2020, 1, 1, 10, tzinfo=UTC)], pa.timestamp("us", "UTC"))
     naive = pa.array([datetime(2020, 1, 1, 10)], pa.timestamp("us"))
-    assert _result(aware, sa.DateTime(timezone=True)) == ([datetime(2020, 1, 1, 10, tzinfo=timezone.utc)], [False])
+    assert _result(aware, sa.DateTime(timezone=True)) == (
+        [datetime(2020, 1, 1, 10, tzinfo=UTC)],
+        [False],
+    )
     assert _result(naive, sa.DateTime()) == ([datetime(2020, 1, 1, 10)], [False])
 
 
@@ -76,23 +81,29 @@ def test_year_zero_dates_are_unreadable_on_typed_input():
 
 
 def test_the_time_zone_rule_of_the_column_applies_to_typed_timestamps():
-    aware = pa.array([datetime(2020, 1, 1, 10, tzinfo=timezone.utc), None], pa.timestamp("us", "UTC"))
+    aware = pa.array([datetime(2020, 1, 1, 10, tzinfo=UTC), None], pa.timestamp("us", "UTC"))
     naive = pa.array([datetime(2020, 1, 1, 10), None], pa.timestamp("us"))
     assert _result(aware, sa.DateTime())[1] == [True, False]
     assert _result(naive, sa.DateTime(timezone=True))[1] == [True, False]
-    assert _result(pa.array([date(2020, 1, 1)], pa.date32()), sa.DateTime(timezone=True))[1] == [True]
+    assert _result(pa.array([date(2020, 1, 1)], pa.date32()), sa.DateTime(timezone=True))[1] == [
+        True
+    ]
     assert _result(pa.array([date(2020, 1, 1)], pa.date32()), sa.DateTime())[1] == [False]
 
 
 @pytest.mark.parametrize("source", [pa.decimal128(10, 3), pa.decimal256(55, 3)])
 def test_decimals_of_any_width_are_read_exactly_or_refused(source):
-    values, invalid = _result(pa.array([Decimal("1.250"), Decimal("1.555"), None], source), sa.Numeric(12, 2))
+    values, invalid = _result(
+        pa.array([Decimal("1.250"), Decimal("1.555"), None], source), sa.Numeric(12, 2)
+    )
     assert values == [Decimal("1.25"), None, None]
     assert invalid == [False, True, False]
 
 
 def test_floats_and_integers_in_a_numeric_column_must_fit_exactly():
-    values, invalid = _result(pa.array([0.1, 1.555, float("inf"), float("nan"), 2.5]), sa.Numeric(12, 2))
+    values, invalid = _result(
+        pa.array([0.1, 1.555, float("inf"), float("nan"), 2.5]), sa.Numeric(12, 2)
+    )
     assert values == [Decimal("0.10"), None, None, None, Decimal("2.50")]
     assert invalid == [False, True, True, False, False]
     values, invalid = _result(pa.array([5, 10**11]), sa.Numeric(12, 2))

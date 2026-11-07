@@ -1,12 +1,19 @@
-from typing import TypeVar
+from typing import overload
+
 from .metadata import Base
 
-ModelT = TypeVar("ModelT", bound=Base)
 
-def get_model_by_tablename(
-    tablename: str,
-    base: type[ModelT] = Base,  # ty: ignore[invalid-parameter-default]
-) -> type[ModelT] | None:
+@overload
+def get_model_by_tablename(tablename: str) -> type[Base] | None: ...
+
+
+@overload
+def get_model_by_tablename[ModelT: Base](
+    tablename: str, base: type[ModelT]
+) -> type[ModelT] | None: ...
+
+
+def get_model_by_tablename(tablename: str, base: type[Base] = Base) -> type[Base] | None:
     tablename = tablename.lower().strip()
     for mapper in base.registry.mappers:
         cls = mapper.class_

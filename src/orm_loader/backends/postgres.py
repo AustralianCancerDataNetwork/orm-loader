@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import io
 import logging
-from contextlib import contextmanager, nullcontext
 from collections.abc import Iterable, Mapping, Sequence
+from contextlib import contextmanager, nullcontext
 from typing import TYPE_CHECKING, Any, cast
 
 import pyarrow as pa
@@ -19,13 +19,13 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.sql.compiler import IdentifierPreparer
 
-from ..mappers.materialised_view_mixin import MaterializedViewBackend
 from ..mappers.materialised_view_errors import (
     ConcurrentRefreshNotEligibleError,
     MaterializationError,
     MaterializationFailure,
     MaterializationOperation,
 )
+from ..mappers.materialised_view_mixin import MaterializedViewBackend
 from .base import DatabaseBackend
 
 if TYPE_CHECKING:
@@ -73,7 +73,9 @@ class PostgresBackend(DatabaseBackend, MaterializedViewBackend):
     def identifier_preparer(self) -> IdentifierPreparer:
         return postgresql.dialect().identifier_preparer
 
-    def _staging_table(self, table_cls: type["FileTableProtocol"], columns: Sequence[sa.Column[Any]]) -> sa.Table:
+    def _staging_table(
+        self, table_cls: type[FileTableProtocol], columns: Sequence[sa.Column[Any]]
+    ) -> sa.Table:
         """Unlogged, with an identity column, which paginates the merge in O(N log N) without an index."""
         return sa.Table(
             self.staging_name_for_table(table_cls.__tablename__),
@@ -86,7 +88,7 @@ class PostgresBackend(DatabaseBackend, MaterializedViewBackend):
 
     def insert_batches(
         self,
-        ctx: "LoaderContext",
+        ctx: LoaderContext,
         staging: sa.Table,
         batches: Iterable[pa.Table],
         columns: Sequence[str],
@@ -101,12 +103,16 @@ class PostgresBackend(DatabaseBackend, MaterializedViewBackend):
         cursor = connection.connection.cursor()
         if not hasattr(cursor, "copy"):
             cursor.close()
-            raise RuntimeError("The PostgreSQL sink needs a psycopg 3 connection, whose cursors provide copy()")
+            raise RuntimeError(
+                "The PostgreSQL sink needs a psycopg 3 connection, whose cursors provide copy()"
+            )
         table_ref = self._staging_reference(staging, connection)
         column_list = ", ".join(self.identifier_preparer.quote(c) for c in columns)
         options = pacsv.WriteOptions(include_header=False, quoting_style="needed")
         try:
-            with cursor.copy(f"COPY {table_ref} ({column_list}) FROM STDIN WITH (FORMAT csv)") as copy:
+            with cursor.copy(
+                f"COPY {table_ref} ({column_list}) FROM STDIN WITH (FORMAT csv)"
+            ) as copy:
                 for table in batches:
                     buffer = io.BytesIO()
                     pacsv.write_csv(table, buffer, options)
@@ -198,7 +204,7 @@ class PostgresBackend(DatabaseBackend, MaterializedViewBackend):
 
     def merge_replace(
         self,
-        table_cls: type["FileTableProtocol"],
+        table_cls: type[FileTableProtocol],
         session: so.Session,
         pk_cols: list[str],
         staging: sa.Table,
@@ -221,7 +227,7 @@ class PostgresBackend(DatabaseBackend, MaterializedViewBackend):
 
     def merge_upsert(
         self,
-        table_cls: type["FileTableProtocol"],
+        table_cls: type[FileTableProtocol],
         session: so.Session,
         pk_cols: list[str],
         staging: sa.Table,
@@ -242,10 +248,16 @@ class PostgresBackend(DatabaseBackend, MaterializedViewBackend):
                 .on_conflict_do_nothing(index_elements=[target_columns[c] for c in pk_cols])
             )
 
-        non_paginated_select = sa.select(*(self._staging_value(table_cls, staging, c) for c in insertable_cols))
+        non_paginated_select = sa.select(
+            *(self._staging_value(table_cls, staging, c) for c in insertable_cols)
+        )
 
         for batch_range in self._paginate_batches(table_cls, staging, session, merge_batch_size):
-            select_ = non_paginated_select if batch_range is None else non_paginated_select.where(batch_range)
+            select_ = (
+                non_paginated_select
+                if batch_range is None
+                else non_paginated_select.where(batch_range)
+            )
             session.execute(_upsert(select_))
             self._commit_batch_if_needed(
                 table_cls, session, batch_range, validate_deferred_fks=validate_deferred_fks
@@ -253,7 +265,7 @@ class PostgresBackend(DatabaseBackend, MaterializedViewBackend):
 
     def merge_insert(
         self,
-        table_cls: type["FileTableProtocol"],
+        table_cls: type[FileTableProtocol],
         session: so.Session,
         staging: sa.Table,
         *,
@@ -269,13 +281,21 @@ class PostgresBackend(DatabaseBackend, MaterializedViewBackend):
         target = table_cls.__table__
         target_columns = {column.name: column for column in target.columns}
         insertable_cols = self._insertable_column_names(table_cls, staging)
-        non_paginated_select = sa.select(*(self._staging_value(table_cls, staging, c) for c in insertable_cols))
+        non_paginated_select = sa.select(
+            *(self._staging_value(table_cls, staging, c) for c in insertable_cols)
+        )
 
         def _insert(select_: Any) -> sa.Insert:
-            return sa.insert(target).from_select([target_columns[c] for c in insertable_cols], select_)
+            return sa.insert(target).from_select(
+                [target_columns[c] for c in insertable_cols], select_
+            )
 
         for batch_range in self._paginate_batches(table_cls, staging, session, merge_batch_size):
-            select_ = non_paginated_select if batch_range is None else non_paginated_select.where(batch_range)
+            select_ = (
+                non_paginated_select
+                if batch_range is None
+                else non_paginated_select.where(batch_range)
+            )
             session.execute(_insert(select_))
             self._commit_batch_if_needed(
                 table_cls, session, batch_range, validate_deferred_fks=validate_deferred_fks
@@ -321,19 +341,18 @@ class PostgresBackend(DatabaseBackend, MaterializedViewBackend):
         *,
         schema: str | None = None,
         concurrently: bool = False,
-        declared_indexes: tuple["MaterializedViewIndex", ...] = (),
+        declared_indexes: tuple[MaterializedViewIndex, ...] = (),
     ) -> None:
         with self._as_connection(bind) as conn:
-            if concurrently:
-                if not any(index.unique for index in declared_indexes):
-                    raise ConcurrentRefreshNotEligibleError(
-                        MaterializationFailure(
-                            operation=MaterializationOperation.REFRESH,
-                            schema=schema,
-                            name=name,
-                            reason="no simple unique index is declared",
-                        )
+            if concurrently and not any(index.unique for index in declared_indexes):
+                raise ConcurrentRefreshNotEligibleError(
+                    MaterializationFailure(
+                        operation=MaterializationOperation.REFRESH,
+                        schema=schema,
+                        name=name,
+                        reason="no simple unique index is declared",
                     )
+                )
 
             safe_name = qualified(conn, name, physical_schema=schema)
             concurrency = "CONCURRENTLY " if concurrently else ""
@@ -369,7 +388,9 @@ class PostgresBackend(DatabaseBackend, MaterializedViewBackend):
             try:
                 conn.execute(
                     DropMaterializedView(
-                        qualified(conn, name, physical_schema=schema), if_exists=if_exists, cascade=cascade
+                        qualified(conn, name, physical_schema=schema),
+                        if_exists=if_exists,
+                        cascade=cascade,
                     )
                 )
             except Exception as error:
@@ -387,7 +408,7 @@ class PostgresBackend(DatabaseBackend, MaterializedViewBackend):
         self,
         bind: Engine | Connection,
         name: str,
-        index: "MaterializedViewIndex",
+        index: MaterializedViewIndex,
         *,
         schema: str | None = None,
         if_not_exists: bool = True,
@@ -398,7 +419,9 @@ class PostgresBackend(DatabaseBackend, MaterializedViewBackend):
             try:
                 conn.execute(
                     CreateMaterializedViewIndex(
-                        qualified(conn, name, physical_schema=schema), index, if_not_exists=if_not_exists
+                        qualified(conn, name, physical_schema=schema),
+                        index,
+                        if_not_exists=if_not_exists,
                     )
                 )
             except Exception as error:

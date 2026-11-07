@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
 import pyarrow.compute as pc
+import sqlalchemy as sa
 from sqlalchemy.types import TypeEngine
 
 from ..values import Interpretation, no_failures
@@ -52,5 +53,6 @@ class EnumHandler(TextHandler):
     """Keeps text verbatim and rejects values that are not a label the column stores."""
 
     def check(self, values: pa.Array, sa_type: TypeEngine[Any]) -> pa.Array | None:
+        assert isinstance(sa_type, sa.Enum)
         known = pc.is_in(values, value_set=pa.array(sa_type.enums, pa.string()))
         return pc.and_(pc.is_valid(values), pc.invert(known))

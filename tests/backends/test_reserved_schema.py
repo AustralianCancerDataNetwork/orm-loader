@@ -17,14 +17,15 @@ see each other.
 
 from __future__ import annotations
 
+import pytest
 from oa_configurator import (
     CDMDatabaseConfig,
     GenericDatabaseConfig,
+    ResolvedCDMDatabase,
     Resolver,
     SchemaOwnershipError,
 )
 from oa_configurator.testing import reset_schema_registry_rows
-import pytest
 
 from orm_loader.backends import STAGING_SCHEMA, staging_schema_claim
 
@@ -49,8 +50,10 @@ def test_resolving_cdm_database_with_staging_schema_name_raises(pg_db, cleanup_a
     engine = resolver.resolve_database("loader").create_engine(
         schema_claims=[staging_schema_claim()]
     )
+    cdm = resolver.resolve_database(cdm_name)
+    assert isinstance(cdm, ResolvedCDMDatabase)
     try:
         with pytest.raises(SchemaOwnershipError, match=f"{STAGING_SCHEMA!r}.*orm_loader"):
-            resolver.resolve_database(cdm_name).create_engines()
+            cdm.create_engines()
     finally:
         engine.dispose()

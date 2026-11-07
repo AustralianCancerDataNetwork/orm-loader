@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Sequence
-from typing import TYPE_CHECKING, Any, ClassVar, Type, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import pyarrow as pa
 import sqlalchemy as sa
@@ -48,8 +48,8 @@ class DuckDBBackend(DatabaseBackend):
     def _unenforced_constraints(
         self, tables: tuple[sa.Table, ...]
     ) -> tuple[UnenforcedForeignKey, ...]:
-        """Every FK in *tables* DuckDB will not enforce, including reason: 
-        - omitted (cross-database/cross-schema) or 
+        """Every FK in *tables* DuckDB will not enforce, including reason:
+        - omitted (cross-database/cross-schema) or
         - created but never added (cyclic/``use_alter=True``).
 
         Delegates to oa-configurator's :func:`unenforced_foreign_keys`, the
@@ -71,7 +71,7 @@ class DuckDBBackend(DatabaseBackend):
 
     def deferred_fk_constraints(
         self,
-        table_cls: Type["FileTableProtocol"],
+        table_cls: type[FileTableProtocol],
     ) -> tuple[sa.ForeignKeyConstraint, ...]:
         """FK constraints on *table_cls* this backend's database will not enforce:
         - omitted (cross-database/cross-schema), or
@@ -82,10 +82,15 @@ class DuckDBBackend(DatabaseBackend):
         if not own_fks:
             return ()
         metadata = table_cls.__table__.metadata
-        unenforced = {entry.constraint for entry in self._unenforced_constraints(tuple(metadata.tables.values()))}
+        unenforced = {
+            entry.constraint
+            for entry in self._unenforced_constraints(tuple(metadata.tables.values()))
+        }
         return tuple(fk for fk in own_fks if fk in unenforced)
 
-    def validate_deferred_fks(self, table_cls: Type["FileTableProtocol"], session: so.Session) -> None:
+    def validate_deferred_fks(
+        self, table_cls: type[FileTableProtocol], session: so.Session
+    ) -> None:
         """Validate every deferred FK on table_cls, including a cross-database one.
 
         A cross-schema or cyclic deferred FK points to a table in the same
@@ -103,11 +108,15 @@ class DuckDBBackend(DatabaseBackend):
             if entry.constraint not in own_fks:
                 continue
             if entry.reason == "cross_database":
-                self._validate_cross_database_fk(entry.constraint, session, DeferredForeignKeyViolationError)
+                self._validate_cross_database_fk(
+                    entry.constraint, session, DeferredForeignKeyViolationError
+                )
             else:
                 self._validate_one_fk(entry.constraint, session, DeferredForeignKeyViolationError)
 
-    def validate_foreign_keys(self, table_cls: Type["FileTableProtocol"], session: so.Session) -> None:
+    def validate_foreign_keys(
+        self, table_cls: type[FileTableProtocol], session: so.Session
+    ) -> None:
         """Raise if any row in *table_cls* references a row that does not exist.
 
         DuckDB enforces the foreign keys it creates, so only the ones it
@@ -125,7 +134,10 @@ class DuckDBBackend(DatabaseBackend):
         """
         tables = tuple(target.metadata.tables.values())
         incoming = tuple(
-            fk for other in tables if other is not target for fk in other.foreign_key_constraints
+            fk
+            for other in tables
+            if other is not target
+            for fk in other.foreign_key_constraints
             if fk.referred_table is target
         )
         if not incoming:
@@ -142,21 +154,28 @@ class DuckDBBackend(DatabaseBackend):
         bind = session.get_bind()
         inspector = sa.inspect(bind)
         return any(
-            inspector.has_table(other.name, schema=physical_schema_of(bind, schema_tag=other.schema))
-            and session.execute(sa.select(sa.literal(1)).select_from(other).limit(1)).first() is not None
+            inspector.has_table(
+                other.name, schema=physical_schema_of(bind, schema_tag=other.schema)
+            )
+            and session.execute(sa.select(sa.literal(1)).select_from(other).limit(1)).first()
+            is not None
             for other in self._tables_referencing(target)
         )
 
-    def _staging_table(self, table_cls: type["FileTableProtocol"], columns: Sequence[sa.Column[Any]]) -> sa.Table:
+    def _staging_table(
+        self, table_cls: type[FileTableProtocol], columns: Sequence[sa.Column[Any]]
+    ) -> sa.Table:
         """Number the rows with a sequence, which DuckDB creates and drops with the table."""
         name = self.staging_name_for_table(table_cls.__tablename__)
         sequence = sa.Sequence(f"{name}_rownum_seq", schema=self.staging_schema)
-        row_key = sa.Column("_rownum", sa.BigInteger, sequence, server_default=sequence.next_value())
+        row_key = sa.Column(
+            "_rownum", sa.BigInteger, sequence, server_default=sequence.next_value()
+        )
         return sa.Table(name, sa.MetaData(), *columns, row_key, schema=self.staging_schema)
 
     def _paginate_batches(
         self,
-        table_cls: type["FileTableProtocol"],
+        table_cls: type[FileTableProtocol],
         staging: sa.Table,
         session: so.Session,
         merge_batch_size: int | None,
@@ -176,7 +195,7 @@ class DuckDBBackend(DatabaseBackend):
 
     def _self_referential_batches(
         self,
-        table_cls: type["FileTableProtocol"],
+        table_cls: type[FileTableProtocol],
         staging: sa.Table,
         session: so.Session,
         merge_batch_size: int | None,
@@ -213,20 +232,24 @@ class DuckDBBackend(DatabaseBackend):
             remote_cols = [cast(sa.ColumnElement[Any], element.column) for element in fk.elements]
             not_null = sa.and_(*(col.isnot(None) for col in local_cols))
             has_match = sa.exists(
-                sa.select(sa.literal(1)).select_from(target).where(
-                    sa.and_(*(local_cols[i] == remote_cols[i] for i in range(len(remote_cols))))
-                )
+                sa.select(sa.literal(1))
+                .select_from(target)
+                .where(sa.and_(*(local_cols[i] == remote_cols[i] for i in range(len(remote_cols)))))
             )
             per_fk.append((not_null, has_match))
         ready = sa.and_(*(sa.or_(sa.not_(not_null), has_match) for not_null, has_match in per_fk))
 
         while True:
-            query = sa.select(order_column).where(ready).order_by(order_column).limit(merge_batch_size)
+            query = (
+                sa.select(order_column).where(ready).order_by(order_column).limit(merge_batch_size)
+            )
             keys = session.execute(query).scalars().all()
             if keys:
                 chunk: sa.ColumnElement[bool] = order_column.in_(keys)
             else:
-                remaining = session.execute(sa.select(sa.func.count()).select_from(staging)).scalar_one()
+                remaining = session.execute(
+                    sa.select(sa.func.count()).select_from(staging)
+                ).scalar_one()
                 if not remaining:
                     return
                 chunk = sa.true()
@@ -243,7 +266,7 @@ class DuckDBBackend(DatabaseBackend):
 
     def insert_batches(
         self,
-        ctx: "LoaderContext",
+        ctx: LoaderContext,
         staging: sa.Table,
         batches: Iterable[pa.Table],
         columns: Sequence[str],
@@ -274,7 +297,7 @@ class DuckDBBackend(DatabaseBackend):
 
     def check_replace_feasible(
         self,
-        table_cls: type["FileTableProtocol"],
+        table_cls: type[FileTableProtocol],
         pk_cols: list[str],
         session: so.Session,
     ) -> None:
@@ -293,9 +316,12 @@ class DuckDBBackend(DatabaseBackend):
         target = table_cls.__table__
         target_columns = {column.name: column for column in target.columns}
         update_cols = [c for c in self._insertable_column_names(table_cls) if c not in pk_cols]
-        deferred_cols = {col.name for fk in self.deferred_fk_constraints(table_cls) for col in fk.columns}
+        deferred_cols = {
+            col.name for fk in self.deferred_fk_constraints(table_cls) for col in fk.columns
+        }
         enforced_fk_cols = [
-            c for c in update_cols
+            c
+            for c in update_cols
             if c in target_columns and target_columns[c].foreign_keys and c not in deferred_cols
         ]
         if not enforced_fk_cols:
@@ -313,7 +339,7 @@ class DuckDBBackend(DatabaseBackend):
 
     def merge_replace(
         self,
-        table_cls: type["FileTableProtocol"],
+        table_cls: type[FileTableProtocol],
         session: so.Session,
         pk_cols: list[str],
         staging: sa.Table,
@@ -344,7 +370,9 @@ class DuckDBBackend(DatabaseBackend):
         self.check_replace_feasible(table_cls, pk_cols, session)
         target = table_cls.__table__
         target_columns = {column.name: column for column in target.columns}
-        update_cols = [c for c in self._insertable_column_names(table_cls, staging) if c not in pk_cols]
+        update_cols = [
+            c for c in self._insertable_column_names(table_cls, staging) if c not in pk_cols
+        ]
         pk_join = sa.and_(*(target_columns[c] == staging.c[c] for c in pk_cols))
 
         def _batch_keys(extra: sa.ColumnElement[bool] | None = None) -> sa.Select[Any]:
@@ -359,9 +387,16 @@ class DuckDBBackend(DatabaseBackend):
             return sa.tuple_(*(target_columns[c] for c in pk_cols)).in_(keys)
 
         def _update(extra: sa.ColumnElement[bool] | None = None) -> None:
-            stmt = sa.update(target).values(
-                {target_columns[c]: self._staging_value(table_cls, staging, c) for c in update_cols}
-            ).where(pk_join)
+            stmt = (
+                sa.update(target)
+                .values(
+                    {
+                        target_columns[c]: self._staging_value(table_cls, staging, c)
+                        for c in update_cols
+                    }
+                )
+                .where(pk_join)
+            )
             if extra is not None:
                 stmt = stmt.where(_pk_in(_batch_keys(extra)))
             session.execute(stmt)
@@ -380,17 +415,25 @@ class DuckDBBackend(DatabaseBackend):
         self_referential_fks = self._self_referential_deferred_fks(table_cls)
         if self_referential_fks:
             insertable_cols = self._insertable_column_names(table_cls, staging)
-            non_paginated_select = sa.select(*(self._staging_value(table_cls, staging, c) for c in insertable_cols))
+            non_paginated_select = sa.select(
+                *(self._staging_value(table_cls, staging, c) for c in insertable_cols)
+            )
 
             def _insert(select_: Any) -> sa.Insert:
-                return sa.insert(target).from_select([target_columns[c] for c in insertable_cols], select_)
+                return sa.insert(target).from_select(
+                    [target_columns[c] for c in insertable_cols], select_
+                )
 
             def _process_batch(batch_range: sa.ColumnElement[bool] | None) -> None:
                 # batch_range's rows already in target are updated; what's
                 # left in staging afterward is new and gets inserted here.
                 _update(batch_range)
                 _drop_matched_from_staging(batch_range)
-                select_ = non_paginated_select if batch_range is None else non_paginated_select.where(batch_range)
+                select_ = (
+                    non_paginated_select
+                    if batch_range is None
+                    else non_paginated_select.where(batch_range)
+                )
                 session.execute(_insert(select_))
                 # Runs even when batch_range is None: merge_insert() runs
                 # next and needs staging fully drained.
@@ -412,7 +455,7 @@ class DuckDBBackend(DatabaseBackend):
 
     def merge_upsert(
         self,
-        table_cls: type["FileTableProtocol"],
+        table_cls: type[FileTableProtocol],
         session: so.Session,
         pk_cols: list[str],
         staging: sa.Table,
@@ -434,11 +477,17 @@ class DuckDBBackend(DatabaseBackend):
                 .on_conflict_do_nothing(index_elements=[target_columns[c] for c in pk_cols])
             )
 
-        non_paginated_select = sa.select(*(self._staging_value(table_cls, staging, c) for c in insertable_cols))
+        non_paginated_select = sa.select(
+            *(self._staging_value(table_cls, staging, c) for c in insertable_cols)
+        )
         self_referential = bool(self._self_referential_deferred_fks(table_cls))
 
         for batch_range in self._paginate_batches(table_cls, staging, session, merge_batch_size):
-            select_ = non_paginated_select if batch_range is None else non_paginated_select.where(batch_range)
+            select_ = (
+                non_paginated_select
+                if batch_range is None
+                else non_paginated_select.where(batch_range)
+            )
             session.execute(_upsert(select_))
             if self_referential and batch_range is not None:
                 # Must be removed from staging in this same transaction,
@@ -450,7 +499,7 @@ class DuckDBBackend(DatabaseBackend):
 
     def merge_insert(
         self,
-        table_cls: type["FileTableProtocol"],
+        table_cls: type[FileTableProtocol],
         session: so.Session,
         staging: sa.Table,
         *,
@@ -461,15 +510,23 @@ class DuckDBBackend(DatabaseBackend):
         target = table_cls.__table__
         target_columns = {column.name: column for column in target.columns}
         insertable_cols = self._insertable_column_names(table_cls, staging)
-        non_paginated_select = sa.select(*(self._staging_value(table_cls, staging, c) for c in insertable_cols))
+        non_paginated_select = sa.select(
+            *(self._staging_value(table_cls, staging, c) for c in insertable_cols)
+        )
 
         def _insert(select_: Any) -> sa.Insert:
-            return sa.insert(target).from_select([target_columns[c] for c in insertable_cols], select_)
+            return sa.insert(target).from_select(
+                [target_columns[c] for c in insertable_cols], select_
+            )
 
         self_referential = bool(self._self_referential_deferred_fks(table_cls))
 
         for batch_range in self._paginate_batches(table_cls, staging, session, merge_batch_size):
-            select_ = non_paginated_select if batch_range is None else non_paginated_select.where(batch_range)
+            select_ = (
+                non_paginated_select
+                if batch_range is None
+                else non_paginated_select.where(batch_range)
+            )
             session.execute(_insert(select_))
             if self_referential and batch_range is not None:
                 # Must be removed from staging in this same transaction,

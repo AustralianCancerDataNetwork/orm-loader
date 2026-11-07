@@ -60,7 +60,9 @@ class RejectsWriter:
         while not directory.exists() and directory != directory.parent:
             directory = directory.parent
         if not directory.is_dir() or not os.access(directory, os.W_OK):
-            raise IngestError(f"Cannot write rejected rows to {self.path.parent}: directory is not writable")
+            raise IngestError(
+                f"Cannot write rejected rows to {self.path.parent}: directory is not writable"
+            )
 
     def write(self, rows: pa.Table) -> None:
         """Append rejected rows, creating the directory and file on first use."""
@@ -147,7 +149,10 @@ class BatchProcessor:
         self.out_columns = [*columns, *(name for name in defaults if name not in columns)]
         self.types = {name: underlying_type(model_columns[name].type) for name in self.out_columns}
         self.handlers = (
-            {name: policy.for_column(self.types[name], self.table_name, name) for name in self.out_columns}
+            {
+                name: policy.for_column(self.types[name], self.table_name, name)
+                for name in self.out_columns
+            }
             if normalise
             else {}
         )
@@ -166,7 +171,8 @@ class BatchProcessor:
         self.required = [
             name
             for name in self.out_columns
-            if (not model_columns[name].nullable or name in primary_keys) and name not in expressions
+            if (not model_columns[name].nullable or name in primary_keys)
+            and name not in expressions
         ]
         self._literals: dict[str, pa.Scalar] = {}
         self.rejects = RejectsWriter(rejects_path)
@@ -217,7 +223,9 @@ class BatchProcessor:
         if not self.normalise:
             return pa.Table.from_batches([raw])
         results = {
-            name: self.handlers[name].interpret(raw.column(name), self.types[name], self.policy.nulls)
+            name: self.handlers[name].interpret(
+                raw.column(name), self.types[name], self.policy.nulls
+            )
             for name in self.columns
         }
         self._fill_defaults(results, raw.num_rows)
@@ -232,7 +240,9 @@ class BatchProcessor:
         """Give a missing value, and a column the file lacks, the column's default."""
         for name, default in self.defaults.items():
             if name not in results:
-                results[name] = Interpretation(pa.repeat(self._fill_value(name, default), count), no_failures(count))
+                results[name] = Interpretation(
+                    pa.repeat(self._fill_value(name, default), count), no_failures(count)
+                )
                 continue
             values, invalid = results[name]
             missing = pc.and_(pc.is_null(values), pc.invert(invalid))
@@ -248,7 +258,9 @@ class BatchProcessor:
 
     def _read_default(self, name: str, value: Any) -> pa.Scalar:
         """Read a default value the way the column's handler reads a value from the file."""
-        values, invalid = self.handlers[name].interpret(pa.array([value]), self.types[name], self.policy.nulls)
+        values, invalid = self.handlers[name].interpret(
+            pa.array([value]), self.types[name], self.policy.nulls
+        )
         if invalid[0].as_py():
             raise ConversionError(
                 table_name=self.table_name,
@@ -264,14 +276,18 @@ class BatchProcessor:
         for name in self.columns:
             invalid = results[name].invalid
             if pc.any(invalid).as_py():
-                found[name] = [(invalid, f"cannot be read as {self.handlers[name].expected(self.types[name])}")]
+                found[name] = [
+                    (invalid, f"cannot be read as {self.handlers[name].expected(self.types[name])}")
+                ]
         for name in self.required:
             missing = pc.and_(pc.is_null(results[name].values), pc.invert(results[name].invalid))
             if pc.any(missing).as_py():
                 found.setdefault(name, []).append((missing, "required value is missing"))
         return found
 
-    def _conversion_error(self, name: str, raw: pa.Array | pa.ChunkedArray, invalid: pa.Array) -> ConversionError | None:
+    def _conversion_error(
+        self, name: str, raw: pa.Array | pa.ChunkedArray, invalid: pa.Array
+    ) -> ConversionError | None:
         """Describe the unreadable values of a column, or return None when there are none.
 
         Parameters
@@ -312,7 +328,11 @@ class BatchProcessor:
             missing = pc.is_null(results[name].values)
             count = pc.sum(pc.cast(missing, pa.int64())).as_py() or 0
             if count:
-                rows = self._row_numbers(first, raw.num_rows).take(pc.indices_nonzero(missing).slice(0, 3)).to_pylist()
+                rows = (
+                    self._row_numbers(first, raw.num_rows)
+                    .take(pc.indices_nonzero(missing).slice(0, 3))
+                    .to_pylist()
+                )
                 raise RequiredValueError(
                     table_name=self.table_name, column_name=name, count=count, rows=rows
                 )
@@ -334,9 +354,12 @@ class BatchProcessor:
                 reason = pc.if_else(first_hit, pa.scalar(why), reason)
                 rejected = pc.or_(rejected, mask)
         row_numbers = self._row_numbers(first, raw.num_rows)
-        plain = [c.dictionary_decode() if pa.types.is_dictionary(c.type) else c for c in raw.columns]
+        plain = [
+            c.dictionary_decode() if pa.types.is_dictionary(c.type) else c for c in raw.columns
+        ]
         listing = pa.table(
-            [row_numbers, column, reason, *plain], names=["row", "column", "reason", *raw.schema.names]
+            [row_numbers, column, reason, *plain],
+            names=["row", "column", "reason", *raw.schema.names],
         )
         dropped = listing.filter(rejected)
         self.rejects.write(dropped)
@@ -367,7 +390,9 @@ class BatchProcessor:
         text, empty = pa.string(), pa.nulls(count, pa.string())
         rows = pa.table(
             {
-                "row": pa.array([None if n is None else n - 1 for n, _ in self.skipped], pa.int64()),
+                "row": pa.array(
+                    [None if n is None else n - 1 for n, _ in self.skipped], pa.int64()
+                ),
                 "column": empty,
                 "reason": pa.array([why for _, why in self.skipped], text),
             }

@@ -27,7 +27,13 @@ def test_float_rejects_non_numbers(raw):
 
 
 def test_float_accepts_decimal_and_exponent_forms():
-    assert [read(v, sa.Float()) for v in ("1.80", "2", ".5", "1e3", "+2.5")] == [1.8, 2.0, 0.5, 1000.0, 2.5]
+    assert [read(v, sa.Float()) for v in ("1.80", "2", ".5", "1e3", "+2.5")] == [
+        1.8,
+        2.0,
+        0.5,
+        1000.0,
+        2.5,
+    ]
 
 
 def test_numeric_keeps_declared_precision_and_rejects_overflow_of_scale():
@@ -75,7 +81,7 @@ def test_float_rejects_infinity_from_text_overflow():
 
 
 def test_numeric_precision_without_scale_has_scale_zero():
-    assert read("12345678901234567890", sa.Numeric(30)) == Decimal("12345678901234567890")
+    assert read("12345678901234567890", sa.Numeric(30)) == Decimal(12345678901234567890)
     assert unreadable("1.5", sa.Numeric(30))
 
 
@@ -90,21 +96,54 @@ def _reference_integer(raw: str, bits: int) -> int | None:
     sign = -1 if text.startswith("-") else 1
     digits = text[1:] if text[:1] in ("+", "-") else text
     whole, _, fraction = digits.partition(".")
-    if not (whole.isascii() and whole.isdigit()) or (fraction and set(fraction) != {"0"}) or text.count(".") > 1:
+    if (
+        not (whole.isascii() and whole.isdigit())
+        or (fraction and set(fraction) != {"0"})
+        or text.count(".") > 1
+    ):
         return None
     value = sign * int(whole)
     return value if -(2 ** (bits - 1)) <= value < 2 ** (bits - 1) else None
 
 
 EDGE_INTEGERS = [
-    "0", "-0", "+0", "007", "-007", "1.0", "1.", ".5", "5.", "1.50", "+7", "--1", "1e3", "",
-    "32767", "32768", "-32768", "-32769", "2147483647", "2147483648", "-2147483649",
-    "9223372036854775807", "9223372036854775808", "-9223372036854775808", "-9223372036854775809",
-    "0" * 30 + "12", "9" * 25, "12abc", " 7 ", "1_000", "١٢",
+    "0",
+    "-0",
+    "+0",
+    "007",
+    "-007",
+    "1.0",
+    "1.",
+    ".5",
+    "5.",
+    "1.50",
+    "+7",
+    "--1",
+    "1e3",
+    "",
+    "32767",
+    "32768",
+    "-32768",
+    "-32769",
+    "2147483647",
+    "2147483648",
+    "-2147483649",
+    "9223372036854775807",
+    "9223372036854775808",
+    "-9223372036854775808",
+    "-9223372036854775809",
+    "0" * 30 + "12",
+    "9" * 25,
+    "12abc",
+    " 7 ",
+    "1_000",
+    "١٢",
 ]
 
 
-@pytest.mark.parametrize("sa_type, bits", [(sa.SmallInteger(), 16), (sa.Integer(), 32), (sa.BigInteger(), 64)])
+@pytest.mark.parametrize(
+    "sa_type, bits", [(sa.SmallInteger(), 16), (sa.Integer(), 32), (sa.BigInteger(), 64)]
+)
 def test_integer_parsing_matches_a_per_element_reference(sa_type, bits):
     values, invalid = interpret(EDGE_INTEGERS, sa_type)
     for raw, value, bad in zip(EDGE_INTEGERS, values, invalid):
@@ -119,7 +158,7 @@ def test_one_bad_value_in_a_large_batch_does_not_slow_the_whole_batch():
     raw = pa.array([str(i) for i in range(200_000)])
     raw = pa.concat_arrays([raw.slice(0, 100_000), pa.array(["9" * 25]), raw.slice(100_000)])
     started = time.perf_counter()
-    values, invalid = interpret(raw, sa.BigInteger())
+    _, invalid = interpret(raw, sa.BigInteger())
     assert time.perf_counter() - started < 0.5
     assert sum(invalid) == 1 and invalid[100_000]
 
@@ -134,28 +173,64 @@ def test_numeric_fractions_longer_than_the_decimal_do_not_wrap_around():
 
 def test_numeric_with_scale_zero_accepts_a_zero_fraction_only():
     assert interpret(["2", "2.0", "2.5", "."], sa.Numeric(30)) == (
-        [Decimal("2"), Decimal("2"), None, None],
+        [Decimal(2), Decimal(2), None, None],
         [False, False, True, True],
     )
 
 
-@pytest.mark.parametrize("raw, expected", [
-    ("1e3", "1000.00"), ("1.5E3", "1500.00"), ("1.5E+003", "1500.00"), ("5e005", "500000.00"), ("2.50e1", "25.00"), ("1e-2", "0.01"), ("-2.5E+2", "-250.00"),
-    (".05", "0.05"), ("5.", "5.00"), (".0", "0.00"), ("+7", "7.00"), ("1.500", "1.50"), ("007.50", "7.50"),
-])
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("1e3", "1000.00"),
+        ("1.5E3", "1500.00"),
+        ("1.5E+003", "1500.00"),
+        ("5e005", "500000.00"),
+        ("2.50e1", "25.00"),
+        ("1e-2", "0.01"),
+        ("-2.5E+2", "-250.00"),
+        (".05", "0.05"),
+        ("5.", "5.00"),
+        (".0", "0.00"),
+        ("+7", "7.00"),
+        ("1.500", "1.50"),
+        ("007.50", "7.50"),
+    ],
+)
 def test_numeric_reads_plain_and_exponent_forms(raw, expected):
     assert read(raw, sa.Numeric(12, 2)) == Decimal(expected)
 
 
-@pytest.mark.parametrize("raw", [
-    ".", "+", "-", "+.", "-.", "e5", "1e", "1e+", "1e+-5", "--1", "1.2.3", "0x1F", "1,5", "abc",
-    "1.555", "1e-3", "1.5e-3", "1e10", "123456789012.00",
-])
+@pytest.mark.parametrize(
+    "raw",
+    [
+        ".",
+        "+",
+        "-",
+        "+.",
+        "-.",
+        "e5",
+        "1e",
+        "1e+",
+        "1e+-5",
+        "--1",
+        "1.2.3",
+        "0x1F",
+        "1,5",
+        "abc",
+        "1.555",
+        "1e-3",
+        "1.5e-3",
+        "1e10",
+        "123456789012.00",
+    ],
+)
 def test_numeric_rejects_malformed_and_inexact_values(raw):
     assert unreadable(raw, sa.Numeric(12, 2))
 
 
-@pytest.mark.parametrize("raw", ["5e-50", "1e-40", "1.0e-39", "1" + "0" * 39, "9" * 39, "1e99999", "5e-9999"])
+@pytest.mark.parametrize(
+    "raw", ["5e-50", "1e-40", "1.0e-39", "1" + "0" * 39, "9" * 39, "1e99999", "5e-9999"]
+)
 def test_numeric_values_beyond_what_arrow_parses_exactly_are_unreadable(raw):
     assert unreadable(raw, sa.Numeric(38, 2))
     assert unreadable(raw, sa.Numeric(38, 0))
@@ -174,20 +249,33 @@ def test_numeric_fills_the_declared_precision_exactly():
 def _reference(raw: str, precision: int, scale: int) -> Fraction | None:
     """Exact value of a decimal or exponent literal, or None when it does not fit the column."""
     match = re.fullmatch(r"([+-]?)(\d*)\.?(\d*)(?:[eE]([+-]?\d+))?", raw)
-    if not match or not (match.group(2) or match.group(3)) or not re.fullmatch(r"[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?", raw):
+    if (
+        not match
+        or not (match.group(2) or match.group(3))
+        or not re.fullmatch(r"[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?", raw)
+    ):
         return None
-    sign, whole, fraction, exponent = match.group(1), match.group(2), match.group(3), int(match.group(4) or 0)
+    sign, whole, fraction, exponent = (
+        match.group(1),
+        match.group(2),
+        match.group(3),
+        int(match.group(4) or 0),
+    )
     value = Fraction(int((whole + fraction) or "0"), 10 ** len(fraction)) * Fraction(10) ** exponent
-    scaled = (-value if sign == "-" else value) * 10 ** scale
-    if scaled.denominator != 1 or abs(scaled) >= 10 ** precision:
+    scaled = (-value if sign == "-" else value) * 10**scale
+    if scaled.denominator != 1 or abs(scaled) >= 10**precision:
         return None
-    return Fraction(scaled.numerator, 10 ** scale)
+    return Fraction(scaled.numerator, 10**scale)
 
 
 @pytest.mark.parametrize("precision, scale", [(10, 2), (12, 0), (38, 2), (6, 6)])
 def test_numeric_reads_every_string_exactly_or_refuses_it(precision, scale):
     """A string is read to its exact value or refused, and no string over this alphabet is refused though valid."""
-    raws = ["".join(chars) for length in range(1, 6) for chars in itertools.product("+-.05e9", repeat=length)]
+    raws = [
+        "".join(chars)
+        for length in range(1, 6)
+        for chars in itertools.product("+-.05e9", repeat=length)
+    ]
     raws += [
         f"{mantissa}e{sign}{exponent}"
         for mantissa in ("1", "1.5", "9.99", ".5")
@@ -205,7 +293,10 @@ def test_numeric_reads_every_string_exactly_or_refuses_it(precision, scale):
     assert refused_valid == [], refused_valid[:10]
 
 
-@pytest.mark.parametrize("declared", [sa.Numeric(), sa.Numeric(39, 2), sa.Numeric(50, 2), sa.Numeric(0, 0), sa.Numeric(2, 5)])
+@pytest.mark.parametrize(
+    "declared",
+    [sa.Numeric(), sa.Numeric(39, 2), sa.Numeric(50, 2), sa.Numeric(0, 0), sa.Numeric(2, 5)],
+)
 def test_numeric_declarations_an_arrow_decimal_cannot_hold_are_refused(declared):
     from orm_loader.conversion.handlers import NumericHandler
 
@@ -213,7 +304,9 @@ def test_numeric_declarations_an_arrow_decimal_cannot_hold_are_refused(declared)
         NumericHandler().validate(declared)
 
 
-@pytest.mark.parametrize("declared", [sa.Numeric(1, 0), sa.Numeric(38, 38), sa.Numeric(18), sa.Numeric(10, 2)])
+@pytest.mark.parametrize(
+    "declared", [sa.Numeric(1, 0), sa.Numeric(38, 38), sa.Numeric(18), sa.Numeric(10, 2)]
+)
 def test_numeric_declarations_an_arrow_decimal_holds_are_accepted(declared):
     from orm_loader.conversion.handlers import NumericHandler
 

@@ -30,7 +30,7 @@ class Interpretation(NamedTuple):
 def underlying_type(sa_type: TypeEngine) -> TypeEngine:
     """Return the type a ``TypeDecorator`` stores its values as, or the type itself."""
     while isinstance(sa_type, TypeDecorator):
-        sa_type = sa_type.impl
+        sa_type = sa_type.impl_instance
     return sa_type
 
 

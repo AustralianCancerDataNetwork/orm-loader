@@ -1,7 +1,7 @@
-
 from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
+from typing import ClassVar
 
 import sqlalchemy as sa
 import sqlalchemy.orm as so
@@ -18,10 +18,9 @@ class Role(str, Enum):
     LAST_AUTHOR = "last author"
 
 
-
 class FileLoaderTable(FileLoadableTableInterface, Base):
     __tablename__ = "test_file_loader"
-    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+    __table_args__: ClassVar[dict[str, str]] = {"schema": SchemaRole.PRIMARY.value}
     id = sa.Column(sa.Integer, primary_key=True)
     value = sa.Column(sa.String, nullable=False)
 
@@ -39,7 +38,7 @@ class SimpleTable(Base, FileLoadableTableInterface):
 
 class RequiredTable(Base, FileLoadableTableInterface):
     __tablename__ = "required_table"
-    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+    __table_args__: ClassVar[dict[str, str]] = {"schema": SchemaRole.PRIMARY.value}
 
     id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     name: so.Mapped[str] = so.mapped_column(sa.String, nullable=False)
@@ -47,7 +46,7 @@ class RequiredTable(Base, FileLoadableTableInterface):
 
 class CompositeTable(Base, FileLoadableTableInterface):
     __tablename__ = "composite_table"
-    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+    __table_args__: ClassVar[dict[str, str]] = {"schema": SchemaRole.PRIMARY.value}
 
     a: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     b: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
@@ -59,7 +58,7 @@ class CycleATable(Base, FileLoadableTableInterface):
     DuckDB can't execute the ALTER TABLE ADD CONSTRAINT this cycle forces."""
 
     __tablename__ = "cycle_a_table"
-    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+    __table_args__: ClassVar[dict[str, str]] = {"schema": SchemaRole.PRIMARY.value}
 
     id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     b_id: so.Mapped[int | None] = so.mapped_column(
@@ -69,7 +68,7 @@ class CycleATable(Base, FileLoadableTableInterface):
 
 class CycleBTable(Base, FileLoadableTableInterface):
     __tablename__ = "cycle_b_table"
-    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+    __table_args__: ClassVar[dict[str, str]] = {"schema": SchemaRole.PRIMARY.value}
 
     id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     a_id: so.Mapped[int | None] = so.mapped_column(
@@ -82,7 +81,7 @@ class EnumTable(Base, FileLoadableTableInterface):
     sa.Enum stores by default."""
 
     __tablename__ = "enum_table"
-    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+    __table_args__: ClassVar[dict[str, str]] = {"schema": SchemaRole.PRIMARY.value}
 
     id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     role: so.Mapped[Role | None] = so.mapped_column(sa.Enum(Role), nullable=True)
@@ -95,7 +94,7 @@ class ComputedColumnTable(Base, FileLoadableTableInterface):
     FileLoadableTableInterface."""
 
     __tablename__ = "computed_column_table"
-    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+    __table_args__: ClassVar[dict[str, str]] = {"schema": SchemaRole.PRIMARY.value}
 
     id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     name: so.Mapped[str] = so.mapped_column(sa.String)
@@ -110,7 +109,7 @@ class ReferencedParentTable(Base, FileLoadableTableInterface):
     dropped."""
 
     __tablename__ = "referenced_parent_table"
-    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+    __table_args__: ClassVar[dict[str, str]] = {"schema": SchemaRole.PRIMARY.value}
 
     id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     grandparent_id: so.Mapped[int] = so.mapped_column(
@@ -121,7 +120,7 @@ class ReferencedParentTable(Base, FileLoadableTableInterface):
 
 class UnreferencedGrandparentTable(Base, FileLoadableTableInterface):
     __tablename__ = "unreferenced_grandparent_table"
-    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+    __table_args__: ClassVar[dict[str, str]] = {"schema": SchemaRole.PRIMARY.value}
 
     id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     name: so.Mapped[str] = so.mapped_column(sa.String)
@@ -129,7 +128,7 @@ class UnreferencedGrandparentTable(Base, FileLoadableTableInterface):
 
 class ReferencingChildTable(Base, FileLoadableTableInterface):
     __tablename__ = "referencing_child_table"
-    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+    __table_args__: ClassVar[dict[str, str]] = {"schema": SchemaRole.PRIMARY.value}
 
     id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     parent_id: so.Mapped[int] = so.mapped_column(
@@ -159,7 +158,7 @@ class VocabReferencingTable(Base, FileLoadableTableInterface):
     reached a different way."""
 
     __tablename__ = "vocab_referencing_table"
-    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+    __table_args__: ClassVar[dict[str, str]] = {"schema": SchemaRole.PRIMARY.value}
 
     id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     vocab_id: so.Mapped[int | None] = so.mapped_column(
@@ -176,7 +175,7 @@ class SelfReferentialTable(Base, FileLoadableTableInterface):
     self-reference."""
 
     __tablename__ = "self_referential_table"
-    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+    __table_args__: ClassVar[dict[str, str]] = {"schema": SchemaRole.PRIMARY.value}
 
     id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     parent_id: so.Mapped[int | None] = so.mapped_column(
@@ -189,7 +188,7 @@ class DemoRecord(Base, FileLoadableTableInterface):
     """Optional text label plus one column of each typed kind, for null-handling tests."""
 
     __tablename__ = "demo_record"
-    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+    __table_args__: ClassVar[dict[str, str]] = {"schema": SchemaRole.PRIMARY.value}
 
     demo_id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     demo_label: so.Mapped[str | None] = so.mapped_column(sa.String, nullable=True)
@@ -202,7 +201,7 @@ class DemoRequiredRecord(Base, FileLoadableTableInterface):
     """Same shape as DemoRecord with a required text label."""
 
     __tablename__ = "demo_required_record"
-    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+    __table_args__: ClassVar[dict[str, str]] = {"schema": SchemaRole.PRIMARY.value}
 
     demo_id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     demo_label: so.Mapped[str] = so.mapped_column(sa.String, nullable=False)
@@ -212,7 +211,7 @@ class DemoDefaultedRecord(Base, FileLoadableTableInterface):
     """Non-nullable columns with a server default, a scalar default and a callable default."""
 
     __tablename__ = "demo_defaulted_record"
-    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+    __table_args__: ClassVar[dict[str, str]] = {"schema": SchemaRole.PRIMARY.value}
 
     demo_id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     demo_status: so.Mapped[str] = so.mapped_column(sa.String, nullable=False, server_default="open")
@@ -225,7 +224,7 @@ class DemoTypedRecord(Base, FileLoadableTableInterface):
     """One column of each kind a typed (Parquet) input can fill."""
 
     __tablename__ = "demo_typed_record"
-    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+    __table_args__: ClassVar[dict[str, str]] = {"schema": SchemaRole.PRIMARY.value}
 
     typed_id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     typed_small: so.Mapped[int | None] = so.mapped_column(sa.SmallInteger, nullable=True)
@@ -234,7 +233,9 @@ class DemoTypedRecord(Base, FileLoadableTableInterface):
     typed_flag: so.Mapped[bool | None] = so.mapped_column(sa.Boolean, nullable=True)
     typed_date: so.Mapped[date | None] = so.mapped_column(sa.Date, nullable=True)
     typed_stamp: so.Mapped[datetime | None] = so.mapped_column(sa.DateTime, nullable=True)
-    typed_stamp_utc: so.Mapped[datetime | None] = so.mapped_column(sa.DateTime(timezone=True), nullable=True)
+    typed_stamp_utc: so.Mapped[datetime | None] = so.mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
     typed_label: so.Mapped[str | None] = so.mapped_column(sa.String(10), nullable=True)
 
 
@@ -242,25 +243,39 @@ class DemoDefaultKinds(Base, FileLoadableTableInterface):
     """One column for each kind of default a column can declare."""
 
     __tablename__ = "demo_default_kinds"
-    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+    __table_args__: ClassVar[dict[str, str]] = {"schema": SchemaRole.PRIMARY.value}
 
     kind_id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
-    kind_text: so.Mapped[str] = so.mapped_column(sa.String, nullable=False, server_default="it's text")
+    kind_text: so.Mapped[str] = so.mapped_column(
+        sa.String, nullable=False, server_default="it's text"
+    )
     kind_int: so.Mapped[int] = so.mapped_column(sa.Integer, nullable=False, server_default="7")
-    kind_bool: so.Mapped[bool] = so.mapped_column(sa.Boolean, nullable=False, server_default=sa.true())
-    kind_date: so.Mapped[date] = so.mapped_column(sa.Date, nullable=False, server_default="2000-01-02")
-    kind_stamp: so.Mapped[datetime] = so.mapped_column(sa.DateTime, nullable=False, server_default="2000-01-02 10:30:00")
-    kind_expression: so.Mapped[str] = so.mapped_column(sa.String, nullable=False, server_default=sa.text("'expr'"))
-    kind_now: so.Mapped[datetime | None] = so.mapped_column(sa.DateTime, nullable=True, server_default=sa.func.current_timestamp())
+    kind_bool: so.Mapped[bool] = so.mapped_column(
+        sa.Boolean, nullable=False, server_default=sa.true()
+    )
+    kind_date: so.Mapped[date] = so.mapped_column(
+        sa.Date, nullable=False, server_default="2000-01-02"
+    )
+    kind_stamp: so.Mapped[datetime] = so.mapped_column(
+        sa.DateTime, nullable=False, server_default="2000-01-02 10:30:00"
+    )
+    kind_expression: so.Mapped[str] = so.mapped_column(
+        sa.String, nullable=False, server_default=sa.text("'expr'")
+    )
+    kind_now: so.Mapped[datetime | None] = so.mapped_column(
+        sa.DateTime, nullable=True, server_default=sa.func.current_timestamp()
+    )
     kind_py_int: so.Mapped[int | None] = so.mapped_column(sa.Integer, nullable=True, default=5)
-    kind_py_date: so.Mapped[date | None] = so.mapped_column(sa.Date, nullable=True, default=date(2001, 2, 3))
+    kind_py_date: so.Mapped[date | None] = so.mapped_column(
+        sa.Date, nullable=True, default=date(2001, 2, 3)
+    )
 
 
 class DemoBinaryRecord(Base, FileLoadableTableInterface):
     """A column type that the conversion policy has no handler for."""
 
     __tablename__ = "demo_binary_record"
-    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+    __table_args__: ClassVar[dict[str, str]] = {"schema": SchemaRole.PRIMARY.value}
 
     demo_id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     demo_blob: so.Mapped[str | None] = so.mapped_column(sa.LargeBinary, nullable=True)
@@ -270,7 +285,7 @@ class DemoKeyedRecord(Base, FileLoadableTableInterface):
     """A key the database assigns."""
 
     __tablename__ = "demo_keyed_record"
-    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+    __table_args__: ClassVar[dict[str, str]] = {"schema": SchemaRole.PRIMARY.value}
 
     keyed_id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True, autoincrement=True)
     keyed_name: so.Mapped[str] = so.mapped_column(sa.String, nullable=False)
@@ -280,7 +295,7 @@ class DemoBadDefaultRecord(Base, FileLoadableTableInterface):
     """A default that cannot be read as the type of its column."""
 
     __tablename__ = "demo_bad_default_record"
-    __table_args__ = {"schema": SchemaRole.PRIMARY.value}
+    __table_args__: ClassVar[dict[str, str]] = {"schema": SchemaRole.PRIMARY.value}
 
     bad_id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     bad_count: so.Mapped[int | None] = so.mapped_column(sa.Integer, nullable=True, default="abc")

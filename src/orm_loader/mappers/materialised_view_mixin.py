@@ -1,17 +1,19 @@
 from abc import ABC, abstractmethod
 from collections import defaultdict, deque
-from typing import Any
+from collections.abc import Set as AbstractSet
+from typing import Any, ClassVar
 
 import sqlalchemy as sa
-from sqlalchemy.ext import compiler
-from sqlalchemy.schema import DDLElement
 from oa_configurator import (
     Role,
     open_connection,
     physical_schema_of,
 )
+from sqlalchemy.ext import compiler
+from sqlalchemy.schema import DDLElement
 
 from .materialised_view_contracts import MaterializedViewIndex
+
 
 class CreateMaterializedView(DDLElement):
     """
@@ -52,13 +54,11 @@ class CreateMaterializedView(DDLElement):
         self.with_data = with_data
         self.if_not_exists = if_not_exists
 
+
 @compiler.compiles(CreateMaterializedView)
 def _create_view(
-    element: CreateMaterializedView,
-    compiler: sa.sql.compiler.SQLCompiler,
-    **kwargs: Any
+    element: CreateMaterializedView, compiler: sa.sql.compiler.SQLCompiler, **kwargs: Any
 ) -> str:
-
     """
     `_create_view`
 
@@ -142,7 +142,6 @@ class MaterializedViewBackend(ABC):
 
 
 class MaterializedViewMixin:
-
     """
     `MaterializedViewMixin`
 
@@ -226,13 +225,13 @@ class MaterializedViewMixin:
         observation_date = sa.Column(sa.Date, nullable=False)
         concept_id = sa.Column(sa.Integer, nullable=False)
         n_observations = sa.Column(sa.Integer, nullable=False)
-        
- 
+
+
     ```
     Query like a normal mapped class:
 
     ```python
- 
+
     rows = (
         session.query(DailyObservationCount)
         .filter(DailyObservationCount.observation_date >= date(2025, 1, 1))
@@ -248,16 +247,17 @@ class MaterializedViewMixin:
     * Treat as immutable cache
 
     """
+
     __mv_name__: str
     __mv_select__: sa.sql.Select[Any]
-    __mv_dependencies__: set[str] = set()
+    __mv_dependencies__: ClassVar[AbstractSet[str]] = frozenset()
     __mv_schema_tag__: str = Role.PRIMARY.value
     __mv_indexes__: tuple[MaterializedViewIndex, ...] = ()
 
     @classmethod
     def _resolve_schema_tag(cls, schema_tag: str | None) -> str | None:
         """Effective schema_tag for one lifecycle call.
-        A declratively mapped class's own mapped table's schema is authoritative, 
+        A declratively mapped class's own mapped table's schema is authoritative,
         overriding any ``__mv_schema_tag__``.
         """
         if schema_tag is not None:
@@ -268,13 +268,17 @@ class MaterializedViewMixin:
         return cls.__mv_schema_tag__
 
     @staticmethod
-    def _materialized_view_backend(bind: "sa.engine.Connection | sa.engine.Engine") -> MaterializedViewBackend:
+    def _materialized_view_backend(
+        bind: "sa.engine.Connection | sa.engine.Engine",
+    ) -> MaterializedViewBackend:
         """Return the bind's backend, or raise when it has no materialized views."""
         from ..backends.resolve import resolve_backend
 
         backend = resolve_backend(bind)
         if not isinstance(backend, MaterializedViewBackend):
-            raise NotImplementedError(f"Backend '{backend.name}' does not support materialized views")
+            raise NotImplementedError(
+                f"Backend '{backend.name}' does not support materialized views"
+            )
         return backend
 
     @classmethod
@@ -316,7 +320,7 @@ class MaterializedViewMixin:
 
         with engine.begin() as conn:
             RecentObservationMV.create_mv(conn)
-        
+
         ```
 
         This emits SQL equivalent to:
@@ -427,12 +431,17 @@ class MaterializedViewMixin:
         backend = cls._materialized_view_backend(bind)
         tag = cls._resolve_schema_tag(schema_tag)
         backend.drop_materialized_view(
-            bind, cls.__mv_name__, schema=physical_schema_of(bind, schema_tag=tag),
-            if_exists=if_exists, cascade=cascade,
+            bind,
+            cls.__mv_name__,
+            schema=physical_schema_of(bind, schema_tag=tag),
+            if_exists=if_exists,
+            cascade=cascade,
         )
 
 
-def resolve_mv_refresh_order(mv_classes: list[type[MaterializedViewMixin]]) -> list[type]:
+def resolve_mv_refresh_order(
+    mv_classes: list[type[MaterializedViewMixin]],
+) -> list[type[MaterializedViewMixin]]:
     """
     `resolve_mv_refresh_order`
 
@@ -458,9 +467,7 @@ def resolve_mv_refresh_order(mv_classes: list[type[MaterializedViewMixin]]) -> l
                 graph[dep].add(cls.__mv_name__)
                 indegree[cls.__mv_name__] += 1
 
-    queue = deque(
-        name for name, deg in indegree.items() if deg == 0
-    )
+    queue = deque(name for name, deg in indegree.items() if deg == 0)
 
     ordered: list[str] = []
 
@@ -474,18 +481,17 @@ def resolve_mv_refresh_order(mv_classes: list[type[MaterializedViewMixin]]) -> l
                 queue.append(downstream)
 
     if len(ordered) != len(indegree):
-        raise RuntimeError(
-            "Cycle detected in materialized view dependencies"
-        )
+        raise RuntimeError("Cycle detected in materialized view dependencies")
 
     return [name_to_mv[name] for name in ordered]
 
 
-def refresh_all_mvs(bind: "sa.engine.Connection | sa.engine.Engine", mv_classes: list[type[MaterializedViewMixin]]) -> None:
-
+def refresh_all_mvs(
+    bind: "sa.engine.Connection | sa.engine.Engine", mv_classes: list[type[MaterializedViewMixin]]
+) -> None:
     """
     `refresh_all_mvs`
-    
+
     Handle refreshing multiple materialized views in dependency order.
 
     Examples
@@ -499,7 +505,7 @@ def refresh_all_mvs(bind: "sa.engine.Connection | sa.engine.Engine", mv_classes:
         refresh_all_mvs(engine, ALL_MVS)
     ```
     """
-    ordered: list[type[MaterializedViewMixin]] = resolve_mv_refresh_order(mv_classes)  # ty: ignore[invalid-assignment]
+    ordered = resolve_mv_refresh_order(mv_classes)
 
     for mv in ordered:
         mv.refresh_mv(bind)

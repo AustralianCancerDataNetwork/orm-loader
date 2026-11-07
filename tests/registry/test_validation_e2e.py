@@ -1,13 +1,15 @@
 import io
+
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 
 from orm_loader.registry.registry import ModelRegistry
-from orm_loader.registry.validation_runner import ValidationRunner
 from orm_loader.registry.validation_presets import always_on_validators
+from orm_loader.registry.validation_runner import ValidationRunner
 from orm_loader.tables.orm_table import ORMTableBase
 
 Base = so.declarative_base()
+
 
 class FakeCSVResource:
     def __init__(self, text: str):
@@ -15,6 +17,7 @@ class FakeCSVResource:
 
     def open(self, *_, **__):
         return io.StringIO(self._text)
+
 
 def test_validation_runner_happy_path():
     class Person(ORMTableBase, Base):
@@ -105,10 +108,7 @@ Concept,concept_id,Yes,integer,Yes,No
     runner = ValidationRunner(validators=always_on_validators())
     report = runner.run(registry)
 
-    assert any(
-        i.message == "PRIMARY_KEY_COLUMN_NULLABLE"
-        for i in report.issues
-    )
+    assert any(i.message == "PRIMARY_KEY_COLUMN_NULLABLE" for i in report.issues)
 
 
 def test_foreign_key_not_in_spec_warns():
@@ -128,8 +128,7 @@ Child,cdm,Yes,Child table
     )
 
     field_csv = FakeCSVResource(
-
-    """cdmTableName,cdmFieldName,isRequired,cdmDatatype,isPrimaryKey,isForeignKey
+        """cdmTableName,cdmFieldName,isRequired,cdmDatatype,isPrimaryKey,isForeignKey
 Child,id,Yes,integer,Yes,No
 Child,parent_id,No,integer,No,No
 """
@@ -143,10 +142,8 @@ Child,parent_id,No,integer,No,No
     runner = ValidationRunner(validators=always_on_validators())
     report = runner.run(registry)
 
-    assert any(
-        i.message == "FOREIGN_KEY_NOT_IN_SPEC"
-        for i in report.issues
-    )
+    assert any(i.message == "FOREIGN_KEY_NOT_IN_SPEC" for i in report.issues)
+
 
 def test_fail_fast_stops_on_first_error():
     class Drug(ORMTableBase, Base):

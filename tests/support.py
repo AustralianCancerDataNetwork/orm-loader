@@ -24,16 +24,22 @@ def interpret(
     arr = values if isinstance(values, (pa.Array, pa.ChunkedArray)) else pa.array(values)
     handler = policy.for_column(sa_type, table_name, column_name)
     out, invalid = handler.interpret(arr, sa_type, policy.nulls)
-    return pc.if_else(invalid, pa.scalar(None, out.type), out).to_pylist(), invalid.to_pylist()
+    return pc.if_else(invalid, pa.scalar(None, out.type), out).to_pylist(), [
+        bool(flag) for flag in invalid.to_pylist()
+    ]
 
 
-def read(raw: Any, sa_type: TypeEngine[Any], policy: ConversionPolicy | None = None, **column: Any) -> Any:
+def read(
+    raw: Any, sa_type: TypeEngine[Any], policy: ConversionPolicy | None = None, **column: Any
+) -> Any:
     """Return the value read from one raw value, failing if it is unreadable."""
     values, invalid = interpret([raw], sa_type, policy, **column)
     assert not invalid[0], f"{raw!r} is unreadable as {sa_type!r}"
     return values[0]
 
 
-def unreadable(raw: Any, sa_type: TypeEngine[Any], policy: ConversionPolicy | None = None, **column: Any) -> bool:
+def unreadable(
+    raw: Any, sa_type: TypeEngine[Any], policy: ConversionPolicy | None = None, **column: Any
+) -> bool:
     """Return True when one raw value cannot be read as the column type."""
     return interpret([raw], sa_type, policy, **column)[1][0]

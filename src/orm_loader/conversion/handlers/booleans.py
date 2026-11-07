@@ -33,8 +33,12 @@ class BooleanHandler(ConvertingHandler):
 
     def parse(self, cleaned: pa.Array, sa_type: TypeEngine[Any]) -> Interpretation:
         lowered = pc.utf8_lower(cleaned)
-        is_true = pc.fill_null(pc.is_in(lowered, value_set=pa.array(self.true_words, pa.string())), False)
-        is_false = pc.fill_null(pc.is_in(lowered, value_set=pa.array(self.false_words, pa.string())), False)
+        is_true = pc.fill_null(
+            pc.is_in(lowered, value_set=pa.array(self.true_words, pa.string())), False
+        )
+        is_false = pc.fill_null(
+            pc.is_in(lowered, value_set=pa.array(self.false_words, pa.string())), False
+        )
         known = pc.or_(is_true, is_false)
         values = pc.if_else(known, is_true, pa.scalar(None, pa.bool_()))
         return Interpretation(values, pc.and_(pc.is_valid(cleaned), pc.invert(known)))

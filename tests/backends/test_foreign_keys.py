@@ -1,11 +1,11 @@
 """Referential integrity after a load: the same check on every dialect."""
 
 from pathlib import Path
-from typing import Type, cast
+from typing import cast
 
 import pytest
-
 from oa_configurator import Dialect
+
 from orm_loader.backends import STAGING_SCHEMA, ForeignKeyViolationError
 from orm_loader.tables.typing import FileTableProtocol
 from tests.models import (
@@ -16,11 +16,11 @@ from tests.models import (
     UnreferencedGrandparentTable,
 )
 
-_Child = cast(Type[FileTableProtocol], ReferencingChildTable)
-_Parent = cast(Type[FileTableProtocol], ReferencedParentTable)
-_Grandparent = cast(Type[FileTableProtocol], UnreferencedGrandparentTable)
-_Self = cast(Type[FileTableProtocol], SelfReferentialTable)
-_Simple = cast(Type[FileTableProtocol], SimpleTable)
+_Child = cast(type[FileTableProtocol], ReferencingChildTable)
+_Parent = cast(type[FileTableProtocol], ReferencedParentTable)
+_Grandparent = cast(type[FileTableProtocol], UnreferencedGrandparentTable)
+_Self = cast(type[FileTableProtocol], SelfReferentialTable)
+_Simple = cast(type[FileTableProtocol], SimpleTable)
 
 
 @pytest.fixture
@@ -64,12 +64,21 @@ def test_null_references_are_not_violations(dialect_session, tmp_path, options):
 
 
 def test_an_orphan_is_reported_with_its_key(dialect_session, tmp_path, options):
-    _load(dialect_session, _Self, tmp_path, "id,parent_id\n1,\n2,99\n", options, validate_deferred_fks=False)
+    _load(
+        dialect_session,
+        _Self,
+        tmp_path,
+        "id,parent_id\n1,\n2,99\n",
+        options,
+        validate_deferred_fks=False,
+    )
     with pytest.raises(ForeignKeyViolationError, match=r"self_referential_table.*\[\(99,\)\]"):
         _validate(dialect_session, _Self, options)
 
 
-def test_tables_loaded_child_first_validate_once_the_parents_are_loaded(dialect_session, tmp_path, options):
+def test_tables_loaded_child_first_validate_once_the_parents_are_loaded(
+    dialect_session, tmp_path, options
+):
     if dialect_session.get_bind().dialect.name == Dialect.DUCKDB:
         pytest.skip("DuckDB enforces this key itself, so a child cannot be loaded first")
     _load(dialect_session, _Child, tmp_path, "id,parent_id\n1,1\n", options)

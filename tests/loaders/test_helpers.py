@@ -12,10 +12,12 @@ def test_infer_delim_csv(tmp_path):
     p.write_text("a,b,c\n1,2,3\n")
     assert infer_delim(p) == ","
 
+
 def test_infer_delim_tsv(tmp_path):
     p = tmp_path / "x.tsv"
     p.write_text("a\tb\tc\n1\t2\t3\n")
     assert infer_delim(p) == "\t"
+
 
 def test_infer_encoding_promotes_ascii_to_utf8(tmp_path):
     p = tmp_path / "ascii.csv"
@@ -33,6 +35,7 @@ def test_infer_encoding_utf8(tmp_path):
 # ---------------------------------------------------------------------------
 # resolve_quote_mode
 # ---------------------------------------------------------------------------
+
 
 def test_resolve_quote_mode_explicit_csv_passthrough():
     # Explicit modes are returned unchanged and never read the file

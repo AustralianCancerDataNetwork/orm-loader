@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Generator, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar, Type
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import pyarrow as pa
 import sqlalchemy as sa
@@ -68,7 +68,9 @@ class ForeignKeyViolationError(RuntimeError):
 
     qualifier: ClassVar[str] = ""
 
-    def __init__(self, constraint: sa.ForeignKeyConstraint, orphan_keys: list[tuple[Any, ...]]) -> None:
+    def __init__(
+        self, constraint: sa.ForeignKeyConstraint, orphan_keys: list[tuple[Any, ...]]
+    ) -> None:
         self.constraint = constraint
         self.orphan_keys = orphan_keys
         local_cols = ", ".join(c.name for c in constraint.columns)
@@ -88,10 +90,12 @@ class DeferredForeignKeyViolationError(ForeignKeyViolationError):
 STAGING_SCHEMA: str = "staging"
 
 
-def staging_schema_claim(physical_schema: str | None = None, *, reserved: bool = True) -> SchemaClaim:
+def staging_schema_claim(
+    physical_schema: str | None = None, *, reserved: bool = True
+) -> SchemaClaim:
     """SchemaClaim reserving orm-loader's staging schema.
     Since orm-loader doesn't have an engine creation step of its own,
-    this claim needs to be registered by the caller ingesting tables into 
+    this claim needs to be registered by the caller ingesting tables into
     the database through orm-loader.
 
     Add to your own ``create_engines(schema_claims=[...])`` call before
@@ -202,7 +206,9 @@ class DatabaseBackend(ABC):
             e.g. '"staging"."_staging_concept"' or '"_staging_concept"'.
         """
         return qualified(
-            self.identifier_preparer, self.staging_name_for_table(tablename), physical_schema=self.staging_schema
+            self.identifier_preparer,
+            self.staging_name_for_table(tablename),
+            physical_schema=self.staging_schema,
         )
 
     @property
@@ -283,7 +289,7 @@ class DatabaseBackend(ABC):
 
     def _insertable_column_names(
         self,
-        table_cls: Type["FileTableProtocol"],
+        table_cls: type[FileTableProtocol],
         staging: sa.Table | None = None,
     ) -> list[str]:
         """
@@ -301,7 +307,7 @@ class DatabaseBackend(ABC):
 
     @staticmethod
     def _staging_value(
-        table_cls: Type["FileTableProtocol"], staging: sa.Table, name: str
+        table_cls: type[FileTableProtocol], staging: sa.Table, name: str
     ) -> sa.ColumnElement[Any]:
         """Apply a SQL-expression default to null staging values during merge."""
         column = staging.c[name]
@@ -310,7 +316,7 @@ class DatabaseBackend(ABC):
 
     def deferred_fk_constraints(
         self,
-        table_cls: Type["FileTableProtocol"],
+        table_cls: type[FileTableProtocol],
     ) -> tuple[sa.ForeignKeyConstraint, ...]:
         """FK constraints on *table_cls* that this backend never enforces at the DB level.
 
@@ -321,7 +327,7 @@ class DatabaseBackend(ABC):
 
     def validate_deferred_fks(
         self,
-        table_cls: Type["FileTableProtocol"],
+        table_cls: type[FileTableProtocol],
         session: so.Session,
     ) -> None:
         """Raise if any row in *table_cls* violates one of its deferred_fk_constraints().
@@ -341,7 +347,7 @@ class DatabaseBackend(ABC):
 
     def validate_foreign_keys(
         self,
-        table_cls: Type["FileTableProtocol"],
+        table_cls: type[FileTableProtocol],
         session: so.Session,
     ) -> None:
         """Raise if any row in *table_cls* references a row that does not exist.
@@ -365,7 +371,9 @@ class DatabaseBackend(ABC):
             cross_database = {
                 entry.constraint
                 for entry in unenforced_foreign_keys(
-                    tuple(metadata.tables.values()), resolved=self.resolved, physical_schemas=self.physical_schemas
+                    tuple(metadata.tables.values()),
+                    resolved=self.resolved,
+                    physical_schemas=self.physical_schemas,
                 )
                 if entry.reason == "cross_database"
             }
@@ -434,7 +442,10 @@ class DatabaseBackend(ABC):
                     condition = remote_cols[0].in_(value for (value,) in local_values)
                 else:
                     condition = sa.tuple_(*remote_cols).in_(tuple(value) for value in local_values)
-                existing = {tuple(row) for row in remote_conn.execute(sa.select(*remote_cols).where(condition))}
+                existing = {
+                    tuple(row)
+                    for row in remote_conn.execute(sa.select(*remote_cols).where(condition))
+                }
         finally:
             dispose_engines(primary_engine, vocab_engine)
 
@@ -477,9 +488,13 @@ class DatabaseBackend(ABC):
         remote_cols = [element.column for element in fk.elements]
         referred_alias = remote_cols[0].table.alias()
         aliased_remote_cols = [referred_alias.c[col.name] for col in remote_cols]
-        matches = sa.and_(*(local_cols[i] == aliased_remote_cols[i] for i in range(len(local_cols))))
+        matches = sa.and_(
+            *(local_cols[i] == aliased_remote_cols[i] for i in range(len(local_cols)))
+        )
         not_null = sa.and_(*(col.isnot(None) for col in local_cols))
-        orphan_exists = sa.exists(sa.select(sa.literal(1)).select_from(referred_alias).where(matches))
+        orphan_exists = sa.exists(
+            sa.select(sa.literal(1)).select_from(referred_alias).where(matches)
+        )
 
         orphans = session.execute(
             sa.select(*local_cols).where(not_null, ~orphan_exists).limit(5)
@@ -489,7 +504,7 @@ class DatabaseBackend(ABC):
 
     def create_staging_table(
         self,
-        table_cls: Type["FileTableProtocol"],
+        table_cls: type[FileTableProtocol],
         session: so.Session,
     ) -> sa.Table:
         """
@@ -520,20 +535,24 @@ class DatabaseBackend(ABC):
             if c.computed is None
         ]
         staging = self._staging_table(table_cls, columns)
-        staging.create(bind=session.connection(bind_arguments={"mapper": table_cls}), checkfirst=True)
+        staging.create(
+            bind=session.connection(bind_arguments={"mapper": table_cls}), checkfirst=True
+        )
         session.commit()
         return staging
 
     def drop_staging_table(
         self,
-        table_cls: Type["FileTableProtocol"],
+        table_cls: type[FileTableProtocol],
         session: so.Session,
     ) -> None:
         """Drop a staging table and what belongs to its row key, if they exist."""
         staging = self._staging_table(table_cls, [])
         staging.drop(bind=session.connection(bind_arguments={"mapper": table_cls}), checkfirst=True)
 
-    def _staging_table(self, table_cls: Type["FileTableProtocol"], columns: Sequence[sa.Column[Any]]) -> sa.Table:
+    def _staging_table(
+        self, table_cls: type[FileTableProtocol], columns: Sequence[sa.Column[Any]]
+    ) -> sa.Table:
         """
         Return the definition of the staging table, which create and drop both use.
 
@@ -560,7 +579,7 @@ class DatabaseBackend(ABC):
     @abstractmethod
     def insert_batches(
         self,
-        ctx: "LoaderContext",
+        ctx: LoaderContext,
         staging: sa.Table,
         batches: Iterable[pa.Table],
         columns: Sequence[str],
@@ -611,17 +630,17 @@ class DatabaseBackend(ABC):
         schema = translate.get(staging.schema, staging.schema)
         return qualified(connection, staging.name, physical_schema=schema)
 
-    def count_staging(self, ctx: "LoaderContext", staging: sa.Table) -> int:
+    def count_staging(self, ctx: LoaderContext, staging: sa.Table) -> int:
         """Return the number of rows in the staging table."""
         count = sa.select(sa.func.count()).select_from(staging)
         return ctx.session.execute(count, bind_arguments={"mapper": ctx.tableclass}).scalar_one()
 
     def deduplicate_staging(
         self,
-        ctx: "LoaderContext",
+        ctx: LoaderContext,
         staging: sa.Table,
         key_columns: Sequence[str],
-    ) -> "DedupeResult":
+    ) -> DedupeResult:
         """
         Keep the first row for each primary key in the staging table.
 
@@ -652,11 +671,15 @@ class DatabaseBackend(ABC):
         ).subquery()
         duplicates = sa.select(ranked.c.row_key).where(ranked.c.position > 1)
         before = self.count_staging(ctx, staging)
-        ctx.session.execute(sa.delete(staging).where(row_key.in_(duplicates)), bind_arguments=arguments)
+        ctx.session.execute(
+            sa.delete(staging).where(row_key.in_(duplicates)), bind_arguments=arguments
+        )
         after = self.count_staging(ctx, staging)
         return DedupeResult(tuple(key_columns), before, before - after)
 
-    def disable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int | None:
+    def disable_fk_check(
+        self, session: so.Session, *, mapper: Any | None = None
+    ) -> str | int | None:
         """Relax foreign key enforcement and return the state to restore.
 
         The default relaxes nothing and returns ``None``, which is right for a
@@ -675,7 +698,7 @@ class DatabaseBackend(ABC):
 
     def check_replace_feasible(
         self,
-        table_cls: Type["FileTableProtocol"],
+        table_cls: type[FileTableProtocol],
         pk_cols: list[str],
         session: so.Session,
     ) -> None:
@@ -691,7 +714,7 @@ class DatabaseBackend(ABC):
     @abstractmethod
     def merge_replace(
         self,
-        table_cls: Type["FileTableProtocol"],
+        table_cls: type[FileTableProtocol],
         session: so.Session,
         pk_cols: list[str],
         staging: sa.Table,
@@ -710,7 +733,7 @@ class DatabaseBackend(ABC):
     @abstractmethod
     def merge_upsert(
         self,
-        table_cls: Type["FileTableProtocol"],
+        table_cls: type[FileTableProtocol],
         session: so.Session,
         pk_cols: list[str],
         staging: sa.Table,
@@ -727,7 +750,7 @@ class DatabaseBackend(ABC):
     @abstractmethod
     def merge_insert(
         self,
-        table_cls: Type["FileTableProtocol"],
+        table_cls: type[FileTableProtocol],
         session: so.Session,
         staging: sa.Table,
         *,
@@ -742,7 +765,7 @@ class DatabaseBackend(ABC):
 
     def _pagination_column(
         self,
-        table_cls: Type["FileTableProtocol"],
+        table_cls: type[FileTableProtocol],
         staging: sa.Table,
     ) -> sa.ColumnElement[int]:
         """Column this backend orders a staging-table scan by, for pagination.
@@ -755,7 +778,7 @@ class DatabaseBackend(ABC):
 
     def _ensure_pagination_index(
         self,
-        table_cls: Type["FileTableProtocol"],
+        table_cls: type[FileTableProtocol],
         staging: sa.Table,
         session: so.Session,
     ) -> None:
@@ -776,7 +799,7 @@ class DatabaseBackend(ABC):
 
     def _paginate_batches(
         self,
-        table_cls: Type["FileTableProtocol"],
+        table_cls: type[FileTableProtocol],
         staging: sa.Table,
         session: so.Session,
         merge_batch_size: int | None,
@@ -787,7 +810,7 @@ class DatabaseBackend(ABC):
         ------
         sa.ColumnElement[bool] or None
             A predicate to filter the staging table to a single batch of rows.
-            None if merge_batch_size is None or the staging table is smaller than 
+            None if merge_batch_size is None or the staging table is smaller than
             merge_batch_size.
         """
         if merge_batch_size is not None:
@@ -809,21 +832,21 @@ class DatabaseBackend(ABC):
 
     def _commit_batch_if_needed(
         self,
-        table_cls: Type["FileTableProtocol"],
+        table_cls: type[FileTableProtocol],
         session: so.Session,
         batch_range: sa.ColumnElement[bool] | None,
         *,
         validate_deferred_fks: bool = True,
     ) -> None:
-        """Validate deferred FKs and commit after one pagination batch, 
+        """Validate deferred FKs and commit after one pagination batch,
         if this backend commits between batches.
 
-        Called from every merge_*() method after each batch of rows is processed. 
+        Called from every merge_*() method after each batch of rows is processed.
         Instead of committing directly, a batch that violates a deferred FK is caught
         before the next batch starts. Without this, an earlier batch's commit cannot
         be undone once a later batch's load_file()-level validation fails.
 
-        No-op when there is nothing to validate to not add cost. This is true for every 
+        No-op when there is nothing to validate to not add cost. This is true for every
         backend but DuckDB, and for DuckDB whenever table_cls has no deferred/
         unenforced FK at all.
         """
@@ -834,7 +857,7 @@ class DatabaseBackend(ABC):
         session.commit()
 
     def _self_referential_deferred_fks(
-        self, table_cls: Type["FileTableProtocol"]
+        self, table_cls: type[FileTableProtocol]
     ) -> tuple[sa.ForeignKeyConstraint, ...]:
         """Deferred FKs on table_cls that point back at table_cls itself.
 
@@ -845,7 +868,9 @@ class DatabaseBackend(ABC):
         dependency order instead.
         """
         target = table_cls.__table__
-        return tuple(fk for fk in self.deferred_fk_constraints(table_cls) if fk.referred_table is target)
+        return tuple(
+            fk for fk in self.deferred_fk_constraints(table_cls) if fk.referred_table is target
+        )
 
     @contextmanager
     def relaxed_foreign_keys(
@@ -890,4 +915,3 @@ class DatabaseBackend(ABC):
             if previous_state is not None:
                 self.restore_fk_check(session, previous_state, mapper=mapper)
                 logger.info(f"{scope}Foreign key checks restored.")
-

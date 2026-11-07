@@ -1,18 +1,18 @@
-from .registry import ModelRegistry, ModelDescriptor, TableSpec, FieldSpec
-from .validation_report import ValidationIssue, SeverityLevel
+from .registry import FieldSpec, ModelDescriptor, ModelRegistry, TableSpec
 from .validation import Validator
-from .validation_runner import ValidationRunner
 from .validation_presets import always_on_validators
+from .validation_report import SeverityLevel, ValidationIssue
+from .validation_runner import ValidationRunner
 
 __all__ = [
-    "ModelRegistry",
-    "ModelDescriptor",
-    "TableSpec",
     "FieldSpec",
-    "Validator",
-    "ValidationIssue",
+    "ModelDescriptor",
+    "ModelRegistry",
     "SeverityLevel",
+    "TableSpec",
+    "ValidationIssue",
     "ValidationRunner",
+    "Validator",
     "always_on_validators",
 ]
 

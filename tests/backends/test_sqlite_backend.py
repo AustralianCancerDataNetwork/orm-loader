@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Type, cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
 import sqlalchemy as sa
+import sqlalchemy.event as sae
 import sqlalchemy.orm as so
 from sqlalchemy.dialects import sqlite as sqlite_dialect
 
@@ -37,10 +38,12 @@ class _FakeSession:
             def scalar(self):
                 return self._value
 
-        return _Result(self.scalar_results.pop(0) if len(self.scalar_results) > 1 else self.scalar_results[0])
+        return _Result(
+            self.scalar_results.pop(0) if len(self.scalar_results) > 1 else self.scalar_results[0]
+        )
 
 
-_ComputedTableCls = cast("Type[FileTableProtocol]", ComputedColumnTable)
+_ComputedTableCls = cast("type[FileTableProtocol]", ComputedColumnTable)
 
 
 def _sess(s: _FakeSession) -> so.Session:
@@ -80,7 +83,9 @@ def test_sqlite_backend_create_staging_table(sqlite_session, sqlite_engine):
     cols = inspector.get_columns(_STAGING_TABLE)
     assert [c["name"] for c in cols] == ["id", "name"]
     target = {c.name: c.nullable for c in ComputedColumnTable.__table__.columns}
-    assert {c["name"]: c["nullable"] for c in cols} == {name: target[name] for name in ("id", "name")}
+    assert {c["name"]: c["nullable"] for c in cols} == {
+        name: target[name] for name in ("id", "name")
+    }
 
 
 def test_sqlite_backend_disable_fk_reads_sets_then_reads_back():
@@ -182,14 +187,17 @@ def test_sqlite_backend_fk_toggle_round_trip(sqlite_session):
     previous = backend.disable_fk_check(sqlite_session)
     assert sqlite_session.execute(sa.text("PRAGMA foreign_keys")).scalar() == 0
 
+    assert previous is not None
     backend.restore_fk_check(sqlite_session, previous)
     assert sqlite_session.execute(sa.text("PRAGMA foreign_keys")).scalar() == 1
 
 
 def test_relaxed_foreign_keys_on_sqlite_logs_the_toggling(sqlite_session, caplog):
-    with caplog.at_level("INFO", logger="orm_loader.backends.base"):
-        with SQLiteBackend().relaxed_foreign_keys(sqlite_session):
-            pass
+    with (
+        caplog.at_level("INFO", logger="orm_loader.backends.base"),
+        SQLiteBackend().relaxed_foreign_keys(sqlite_session),
+    ):
+        pass
 
     assert "Foreign key checks disabled" in caplog.text
     assert "Foreign key checks restored" in caplog.text
@@ -198,7 +206,7 @@ def test_relaxed_foreign_keys_on_sqlite_logs_the_toggling(sqlite_session, caplog
 @pytest.fixture
 def enforcing_session(sqlite_engine):
     """A session whose connections come up with foreign key enforcement on."""
-    sa.event.listen(sqlite_engine, "connect", lambda conn, _: conn.execute("PRAGMA foreign_keys = ON"))
+    sae.listen(sqlite_engine, "connect", lambda conn, _: conn.execute("PRAGMA foreign_keys = ON"))
     sqlite_engine.dispose()
     with so.Session(sqlite_engine) as session:
         yield session
@@ -211,7 +219,7 @@ def _foreign_keys(session: so.Session) -> int:
 def test_a_load_relaxes_enforced_foreign_keys_and_restores_them(enforcing_session, tmp_path):
     path = tmp_path / "referencing_child_table.csv"
     path.write_text("id,parent_id\n1,1\n")
-    child = cast("Type[FileTableProtocol]", ReferencingChildTable)
+    child = cast("type[FileTableProtocol]", ReferencingChildTable)
 
     assert child.load_file(enforcing_session, path, staging_schema_tag=None) == 1
 
@@ -223,7 +231,7 @@ def test_a_load_on_a_session_with_pending_writes_raises_and_keeps_them(enforcing
     enforcing_session.flush()
     path = tmp_path / f"{SimpleTable.__tablename__}.csv"
     path.write_text("id,name\n2,a\n")
-    simple = cast("Type[FileTableProtocol]", SimpleTable)
+    simple = cast("type[FileTableProtocol]", SimpleTable)
 
     with pytest.raises(RuntimeError, match="inside a transaction"):
         simple.load_file(enforcing_session, path, staging_schema_tag=None)

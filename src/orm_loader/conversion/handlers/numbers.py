@@ -36,7 +36,9 @@ class NumberHandler(ConvertingHandler):
 
     def parse(self, cleaned: pa.Array, sa_type: TypeEngine[Any]) -> Interpretation:
         fits = pc.fill_null(pc.match_substring_regex(cleaned, self.pattern(sa_type)), False)
-        candidate = pc.replace_substring_regex(pc.if_else(fits, cleaned, NULL_STRING), self.STRIPPED, "")
+        candidate = pc.replace_substring_regex(
+            pc.if_else(fits, cleaned, NULL_STRING), self.STRIPPED, ""
+        )
         values, cast_failed = safe_cast(candidate, self.arrow_type(sa_type))
         invalid = pc.and_(pc.is_valid(cleaned), pc.invert(fits))
         return Interpretation(values, pc.or_(invalid, cast_failed))
@@ -63,7 +65,13 @@ class IntegerHandler(NumberHandler):
     @staticmethod
     def bounds(sa_type: TypeEngine[Any]) -> tuple[int, int]:
         """Return the smallest and largest value the column type holds."""
-        bits = 64 if isinstance(sa_type, BigInteger) else 16 if isinstance(sa_type, SmallInteger) else 32
+        bits = (
+            64
+            if isinstance(sa_type, BigInteger)
+            else 16
+            if isinstance(sa_type, SmallInteger)
+            else 32
+        )
         return -(1 << (bits - 1)), (1 << (bits - 1)) - 1
 
 
@@ -102,7 +110,9 @@ class NumericHandler(NumberHandler):
     """
 
     MAX_PRECISION: ClassVar[int] = 38
-    SHAPE: ClassVar[str] = r"^(?P<sign>[+-]?)(?P<whole>\d*)(?:\.(?P<frac>\d*))?(?:[eE](?P<exp>[+-]?\d{1,3}))?$"
+    SHAPE: ClassVar[str] = (
+        r"^(?P<sign>[+-]?)(?P<whole>\d*)(?:\.(?P<frac>\d*))?(?:[eE](?P<exp>[+-]?\d{1,3}))?$"
+    )
 
     @staticmethod
     def precision_scale(sa_type: TypeEngine[Any]) -> tuple[int | None, int | None]:
@@ -111,7 +121,11 @@ class NumericHandler(NumberHandler):
 
     def validate(self, sa_type: TypeEngine[Any]) -> None:
         precision, scale = self.precision_scale(sa_type)
-        if precision is None or not 1 <= precision <= self.MAX_PRECISION or not 0 <= (scale or 0) <= precision:
+        if (
+            precision is None
+            or not 1 <= precision <= self.MAX_PRECISION
+            or not 0 <= (scale or 0) <= precision
+        ):
             raise ValueError(
                 f"Numeric needs a precision from 1 to {self.MAX_PRECISION} and a scale from 0 to the precision, "
                 f"declared ({precision}, {scale}). A PassthroughHandler for the column leaves the value to the database"
@@ -151,18 +165,24 @@ class NumericHandler(NumberHandler):
         implied = pc.subtract(fraction, exponent)
         floor = pa.scalar(0, pa.int32())
         needed = pc.max_element_wise(pc.subtract(implied, trailing), floor)
-        growth = pc.max_element_wise(pc.subtract(pc.add(pa.scalar(scale, pa.int32()), exponent), fraction), floor)
+        growth = pc.max_element_wise(
+            pc.subtract(pc.add(pa.scalar(scale, pa.int32()), exponent), fraction), floor
+        )
         holds = pc.and_(
-            pc.less_equal(needed, scale), pc.less_equal(pc.subtract(significant, implied), precision - scale)
+            pc.less_equal(needed, scale),
+            pc.less_equal(pc.subtract(significant, implied), precision - scale),
         )
         parsable = pc.and_(
-            pc.less_equal(pc.add(count, growth), self.MAX_PRECISION), pc.less_equal(implied, self.MAX_PRECISION)
+            pc.less_equal(pc.add(count, growth), self.MAX_PRECISION),
+            pc.less_equal(implied, self.MAX_PRECISION),
         )
         readable = pc.and_(
             pc.and_(shaped, pc.greater_equal(count, 1)),
             pc.or_(pc.equal(significant, 0), pc.and_(holds, parsable)),
         )
-        text = pc.if_else(pc.equal(significant, 0), "0", pc.replace_substring_regex(cleaned, r"^\+", ""))
+        text = pc.if_else(
+            pc.equal(significant, 0), "0", pc.replace_substring_regex(cleaned, r"^\+", "")
+        )
         return pc.if_else(pc.fill_null(readable, False), text, NULL_STRING)
 
     def _split(self, cleaned: pa.Array) -> tuple[pa.Array, pa.Array, pa.Array, pa.Array]:

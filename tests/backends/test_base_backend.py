@@ -3,14 +3,15 @@ from __future__ import annotations
 import importlib
 import importlib.abc
 import sys
+from collections.abc import Iterable, Sequence
 from importlib.machinery import ModuleSpec
 from types import ModuleType
-from typing import TYPE_CHECKING, Sequence, Type, cast, Any
+from typing import TYPE_CHECKING, Any, cast
 
+import pyarrow as pa
 import pytest
 import sqlalchemy as sa
 import sqlalchemy.orm as so
-from sqlalchemy.engine import Engine
 
 from orm_loader.backends import (
     DatabaseBackend,
@@ -19,6 +20,7 @@ from orm_loader.backends import (
 )
 
 if TYPE_CHECKING:
+    from orm_loader.loaders.loader import LoaderContext
     from orm_loader.tables.typing import FileTableProtocol
 
 
@@ -38,12 +40,15 @@ class FakeBackend(DatabaseBackend):
     def __init__(self) -> None:
         self.calls: list[tuple[str, object]] = []
 
-    def insert_batches(self, ctx, staging, batches, columns) -> int:
-        total = 0
+    def insert_batches(
+        self,
+        ctx: LoaderContext,
+        staging: sa.Table,
+        batches: Iterable[pa.Table],
+        columns: Sequence[str],
+    ) -> None:
         for table in batches:
             ctx.session.execute(staging.insert(), table.to_pylist())
-            total += table.num_rows
-        return total
 
     @property
     def name(self) -> str:
@@ -64,49 +69,50 @@ class FakeBackend(DatabaseBackend):
         return f"_staging_{tablename}"
 
     def create_staging_table(
-        self, _table_cls: Type[FileTableProtocol], _session: so.Session
-    ) -> None:
-        return None
+        self, table_cls: type[FileTableProtocol], session: so.Session
+    ) -> sa.Table:
+        return sa.Table("staging", sa.MetaData(), sa.Column("id", sa.Integer))
 
-    def drop_staging_table(
-        self, _table_cls: Type[FileTableProtocol], _session: so.Session
-    ) -> None:
+    def drop_staging_table(self, table_cls: type[FileTableProtocol], session: so.Session) -> None:
         return None
 
     def merge_replace(
         self,
-        _table_cls: Type[FileTableProtocol],
-        _session: so.Session,
-        _target_name: str,
-        _pk_cols: list[str],
+        table_cls: type[FileTableProtocol],
+        session: so.Session,
+        pk_cols: list[str],
+        staging: sa.Table,
         *,
-        _merge_batch_size: int | None = None,
+        merge_batch_size: int | None = None,
+        validate_deferred_fks: bool = True,
     ) -> None:
         return None
 
     def merge_upsert(
         self,
-        _table_cls: Type[FileTableProtocol],
-        _session: so.Session,
-        _target_name: str,
-        _pk_cols: list[str],
+        table_cls: type[FileTableProtocol],
+        session: so.Session,
+        pk_cols: list[str],
+        staging: sa.Table,
         *,
-        _merge_batch_size: int | None = None,
+        merge_batch_size: int | None = None,
+        validate_deferred_fks: bool = True,
     ) -> None:
         return None
 
     def merge_insert(
         self,
-        _table_cls: Type[FileTableProtocol],
-        _session: so.Session,
-        _target_name: str,
+        table_cls: type[FileTableProtocol],
+        session: so.Session,
+        staging: sa.Table,
         *,
-        _merge_batch_size: int | None = None,
+        merge_batch_size: int | None = None,
+        validate_deferred_fks: bool = True,
     ) -> None:
         return None
 
     def _pagination_column(
-        self, _table_cls: Type[FileTableProtocol], _staging: sa.Table
+        self, table_cls: type[FileTableProtocol], staging: sa.Table
     ) -> sa.ColumnElement[int]:
         return sa.literal_column("rowid")
 
@@ -114,7 +120,9 @@ class FakeBackend(DatabaseBackend):
     def _commits_between_pagination_batches(self) -> bool:
         return True
 
-    def disable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int | None:
+    def disable_fk_check(
+        self, session: so.Session, *, mapper: Any | None = None
+    ) -> str | int | None:
         self.calls.append(("disable_fk_check", session))
         return "enabled"
 
@@ -134,12 +142,13 @@ class _ComputedTable:
     )
 
 
-_ComputedTableCls = cast("Type[FileTableProtocol]", _ComputedTable)
+_ComputedTableCls = cast("type[FileTableProtocol]", _ComputedTable)
 
 
 def test_database_backend_is_abstract():
+    abstract_backend: Any = DatabaseBackend
     with pytest.raises(TypeError):
-        DatabaseBackend() # type: ignore
+        abstract_backend()
 
 
 def test_fake_backend_can_implement_contract():
@@ -179,7 +188,9 @@ def test_relaxed_foreign_keys_toggles_fk_and_restores(sqlite_session):
 
 def test_relaxed_foreign_keys_leaves_keys_enforced_when_backend_cannot_toggle(sqlite_session):
     class NoFKBackend(FakeBackend):
-        def disable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int | None:
+        def disable_fk_check(
+            self, session: so.Session, *, mapper: Any | None = None
+        ) -> str | int | None:
             return super(FakeBackend, self).disable_fk_check(session, mapper=mapper)
 
     backend = NoFKBackend()
@@ -193,9 +204,11 @@ def test_relaxed_foreign_keys_leaves_keys_enforced_when_backend_cannot_toggle(sq
 def test_relaxed_foreign_keys_rolls_back_and_restores(sqlite_session):
     backend = FakeBackend()
 
-    with pytest.raises(RuntimeError, match="boom"):
-        with backend.relaxed_foreign_keys(sqlite_session):
-            raise RuntimeError("boom")
+    with (
+        pytest.raises(RuntimeError, match="boom"),
+        backend.relaxed_foreign_keys(sqlite_session),
+    ):
+        raise RuntimeError("boom")
 
     assert backend.calls == [
         ("disable_fk_check", sqlite_session),
@@ -204,7 +217,7 @@ def test_relaxed_foreign_keys_rolls_back_and_restores(sqlite_session):
 
 
 def test_backends_package_exports():
-    import orm_loader.backends as backends
+    from orm_loader import backends
 
     assert backends.DatabaseBackend is DatabaseBackend
     assert backends.Dialect is Dialect
@@ -230,8 +243,10 @@ def test_resolve_backend_raises_for_unknown_dialect():
         class dialect:
             name = "unknown"
 
+    unknown_bindable: Any = _Unknown()
     with pytest.raises(NotImplementedError, match="Unsupported SQLAlchemy dialect"):
-        resolve_backend(cast(Engine, _Unknown()))
+        resolve_backend(unknown_bindable)
+
 
 def test_backends_import_does_not_require_psycopg():
     blocker = _BlockPsycopg()

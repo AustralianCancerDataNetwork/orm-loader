@@ -6,7 +6,7 @@ otherwise. Empty and whitespace-only values are missing.
 
 from datetime import date
 from pathlib import Path
-from typing import Type, cast
+from typing import cast
 
 import pyarrow as pa
 import pytest
@@ -18,12 +18,23 @@ from orm_loader.tables.typing import FileTableProtocol
 from tests.models import DemoRecord, DemoRequiredRecord
 from tests.support import interpret, read
 
-_Demo = cast(Type[FileTableProtocol], DemoRecord)
-_DemoRequired = cast(Type[FileTableProtocol], DemoRequiredRecord)
+_Demo = cast(type[FileTableProtocol], DemoRecord)
+_DemoRequired = cast(type[FileTableProtocol], DemoRequiredRecord)
 
 MARKER_WORDS = [
-    "Null", "NULL", "null", "None", "none", "NA", "N/A", "NaN", "nan",
-    "#N/A", "<NA>", "Contains NULL here", '"NULL"',
+    "Null",
+    "NULL",
+    "null",
+    "None",
+    "none",
+    "NA",
+    "N/A",
+    "NaN",
+    "nan",
+    "#N/A",
+    "<NA>",
+    "Contains NULL here",
+    '"NULL"',
 ]
 
 SEVEN_ROWS = 'demo_id,demo_label\n1,NULL\n2,"NULL"\n3,"""NULL"""\n4,\n5,""\n6,"alpha,beta"\n7,"alpha\nbeta"\n'
@@ -32,11 +43,17 @@ SEVEN_ROWS_QUOTED = (
     '"6","alpha,beta"\n"7","alpha\nbeta"\n'
 )
 SEVEN_EXPECTED = {
-    1: "NULL", 2: "NULL", 3: '"NULL"', 4: None, 5: None, 6: "alpha,beta", 7: "alpha\nbeta",
+    1: "NULL",
+    2: "NULL",
+    3: '"NULL"',
+    4: None,
+    5: None,
+    6: "alpha,beta",
+    7: "alpha\nbeta",
 }
 
 
-def _write(tmp_path: Path, table: type, text: str) -> Path:
+def _write(tmp_path: Path, table: type[FileTableProtocol], text: str) -> Path:
     path = tmp_path / f"{table.__tablename__}.csv"
     path.write_text(text, encoding="utf-8", newline="")
     return path
@@ -44,18 +61,23 @@ def _write(tmp_path: Path, table: type, text: str) -> Path:
 
 def _load(dialect_session, tmp_path: Path, table, text: str, **kwargs) -> int:
     tag = None if dialect_session.get_bind().dialect.name == "sqlite" else STAGING_SCHEMA
-    n = table.load_file(dialect_session, _write(tmp_path, table, text), staging_schema_tag=tag, **kwargs)
+    n = table.load_file(
+        dialect_session, _write(tmp_path, table, text), staging_schema_tag=tag, **kwargs
+    )
     dialect_session.commit()
     dialect_session.expire_all()
     return n
 
 
 def _labels(dialect_session, model) -> dict[int, str | None]:
-    rows = dialect_session.execute(sa.select(model.demo_id, model.demo_label).order_by(model.demo_id)).all()
+    rows = dialect_session.execute(
+        sa.select(model.demo_id, model.demo_label).order_by(model.demo_id)
+    ).all()
     return {r[0]: r[1] for r in rows}
 
 
 # Marker-like text through each entry point
+
 
 @pytest.mark.parametrize("word", MARKER_WORDS)
 def test_text_keeps_marker_words(word):
@@ -64,6 +86,7 @@ def test_text_keeps_marker_words(word):
 
 
 # Actual missing objects
+
 
 @pytest.mark.parametrize("value", [None, "", "   "])
 def test_missing_text_is_null(value):
@@ -78,6 +101,7 @@ def test_arrow_null_bitmap_and_nan_are_null():
 
 # Whitespace and identifiers
 
+
 def test_text_is_stripped_by_default():
     assert read("  x  ", sa.String()) == "x"
 
@@ -88,6 +112,7 @@ def test_text_is_never_canonicalised_as_a_number(code):
 
 
 # Typed columns: valid value, missing word, or error
+
 
 @pytest.mark.parametrize("word", ["null", "None", "NA", "N/A", "NaN", "#N/A"])
 def test_typed_missing_words_are_null(word):
@@ -101,6 +126,7 @@ def test_typed_float_missing_words_are_null(word):
 
 
 # Persisted round trips
+
 
 def test_seven_row_fixture_preserves_text(dialect_session, tmp_path):
     _load(dialect_session, tmp_path, _Demo, SEVEN_ROWS)
@@ -121,7 +147,9 @@ def test_marker_words_survive_tab_delimited_load(dialect_session, tmp_path):
 
 def test_literal_quotes_survive_tab_delimited_load(dialect_session, tmp_path):
     values = ['"NULL"', '"word" label', "Null", "NA"]
-    text = "demo_id\tdemo_label\n" + "".join(f"{i}\t{v}\n" for i, v in enumerate(values, 1)) + "5\t\n"
+    text = (
+        "demo_id\tdemo_label\n" + "".join(f"{i}\t{v}\n" for i, v in enumerate(values, 1)) + "5\t\n"
+    )
     _load(dialect_session, tmp_path, _Demo, text, quote_mode="literal")
     assert _labels(dialect_session, DemoRecord) == {**dict(enumerate(values, 1)), 5: None}
 
@@ -134,9 +162,11 @@ def test_typed_values_round_trip(dialect_session, tmp_path):
         "3,c,7,true,2020-01-02\n"
     )
     _load(dialect_session, tmp_path, _Demo, text)
-    rows = dialect_session.execute(sa.select(
-        DemoRecord.demo_id, DemoRecord.demo_number, DemoRecord.demo_flag, DemoRecord.demo_date
-    ).order_by(DemoRecord.demo_id)).all()
+    rows = dialect_session.execute(
+        sa.select(
+            DemoRecord.demo_id, DemoRecord.demo_number, DemoRecord.demo_flag, DemoRecord.demo_date
+        ).order_by(DemoRecord.demo_id)
+    ).all()
     assert [tuple(r) for r in rows] == [
         (1, 0, False, date(2020, 2, 29)),
         (2, None, None, None),
@@ -161,10 +191,14 @@ def test_unreadable_typed_value_raises_and_loads_nothing(dialect_session, tmp_pa
     text = f"demo_id,demo_label,demo_number,demo_date\n1,a,,\n2,b,{cols['demo_number']},{cols['demo_date']}\n"
     with pytest.raises(IngestError, match=column):
         _load(dialect_session, tmp_path, _Demo, text)
-    assert dialect_session.execute(sa.select(sa.func.count()).select_from(DemoRecord)).scalar_one() == 0
+    assert (
+        dialect_session.execute(sa.select(sa.func.count()).select_from(DemoRecord)).scalar_one()
+        == 0
+    )
 
 
 # Required columns
+
 
 def test_required_text_accepts_marker_words(dialect_session, tmp_path):
     words = ["Null", "None", "NA", "N/A", "NaN"]
@@ -178,11 +212,21 @@ def test_required_text_empty_raises_and_loads_nothing(dialect_session, tmp_path,
     text = f"demo_id,demo_label\n1,ok\n2,{missing}\n"
     with pytest.raises(IngestError, match="demo_label"):
         _load(dialect_session, tmp_path, _DemoRequired, text)
-    assert dialect_session.execute(sa.select(sa.func.count()).select_from(DemoRequiredRecord)).scalar_one() == 0
+    assert (
+        dialect_session.execute(
+            sa.select(sa.func.count()).select_from(DemoRequiredRecord)
+        ).scalar_one()
+        == 0
+    )
 
 
 def test_required_empty_raises_atomically_with_batching(dialect_session, tmp_path):
     text = "demo_id,demo_label\n1,a\n2,b\n3,\n"
     with pytest.raises(IngestError, match="demo_label"):
         _load(dialect_session, tmp_path, _DemoRequired, text, merge_batch_size=1)
-    assert dialect_session.execute(sa.select(sa.func.count()).select_from(DemoRequiredRecord)).scalar_one() == 0
+    assert (
+        dialect_session.execute(
+            sa.select(sa.func.count()).select_from(DemoRequiredRecord)
+        ).scalar_one()
+        == 0
+    )

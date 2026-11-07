@@ -1,6 +1,6 @@
 import logging
 from collections.abc import Iterable
-from typing import cast
+from typing import overload
 
 import sqlalchemy as sa
 from oa_configurator import (
@@ -23,7 +23,13 @@ from .metadata import Base
 logger = logging.getLogger(__name__)
 
 
-def _resolve_binds(resolved: ResolvedDatabase, bindable: Bindable | None) -> tuple[Bindable, Bindable]:
+@overload
+def _resolve_binds(resolved: ResolvedDatabase, bindable: None) -> tuple[sa.Engine, sa.Engine]: ...
+@overload
+def _resolve_binds(resolved: ResolvedDatabase, bindable: Bindable) -> tuple[Bindable, Bindable]: ...
+def _resolve_binds(
+    resolved: ResolvedDatabase, bindable: Bindable | None
+) -> tuple[Bindable, Bindable]:
     """Return (primary_bind, vocab_bind) to run DDL against.
 
     Built from resolved.create_engines()/create_engine() when bindable is
@@ -81,27 +87,28 @@ def create_tables(
         If a table has no schema tag.
     """
     tables = list(tables)
-    tagged = [(table, table.schema) for table in tables]
-    if not tagged:
+    if not tables:
         return
-    untagged = sorted(table.name for table, tag in tagged if tag is None)
+    untagged = sorted(table.name for table in tables if table.schema is None)
     if untagged:
         raise ValueError(f"create_tables() needs schema-tagged tables, got untagged {untagged}.")
-    schema_tags = {tag for _, tag in tagged if tag is not None}
+    tag_of = {table: table.schema for table in tables if table.schema is not None}
+    schema_tags = set(tag_of.values())
     if not resolved.tags_share_a_transaction(*schema_tags):
         raise ValueError(
             "create_tables() requires all tables to share one database transaction; "
             f"got schema tags {sorted(schema_tags)}."
         )
-    # Includes tags claimed only via schema_claims=[...] so 
+    # Includes tags claimed only via schema_claims=[...] so
     # foreign_key_can_span() can resolve them too.
     physical_schemas = {
-        tag: physical_schema_of(connection, schema_tag=tag) for tag in claimed_schema_tags(connection)
+        tag: physical_schema_of(connection, schema_tag=tag)
+        for tag in claimed_schema_tags(connection)
     }
     crossing = any(
         not resolved.foreign_key_can_span(
-            cast(str, table.schema),
-            referred_schema_tag(fk, cast(str, table.schema)),
+            tag_of[table],
+            referred_schema_tag(fk, tag_of[table]),
             physical_schemas=physical_schemas,
         )
         for table in tables
@@ -124,9 +131,7 @@ def create_tables(
             candidate
             for candidate in metadata.tables.values()
             if candidate.schema is not None
-            and resolved.tags_share_a_transaction(
-                candidate.schema, cast(str, table.schema)
-            )
+            and resolved.tags_share_a_transaction(candidate.schema, tag_of[table])
         )
 
     for metadata, related in related_by_metadata.items():
@@ -173,8 +178,12 @@ def create_db(resolved: ResolvedDatabase, *, bindable: Bindable | None = None) -
             "the module(s) defining your ORM models likely weren't imported yet. "
             "SQLAlchemy only registers a model on Base when its module runs."
         )
-    owned = bindable is None
-    primary_bind, vocab_bind = _resolve_binds(resolved, bindable)
+    owned_engines: tuple[sa.Engine, sa.Engine] | None = None
+    if bindable is None:
+        owned_engines = _resolve_binds(resolved, None)
+        primary_bind, vocab_bind = owned_engines
+    else:
+        primary_bind, vocab_bind = _resolve_binds(resolved, bindable)
 
     tables_by_bind: dict[int, tuple[Bindable, dict[str, list[sa.Table]]]] = {}
     untagged: list[str] = []
@@ -207,10 +216,8 @@ def create_db(resolved: ResolvedDatabase, *, bindable: Bindable | None = None) -
                     )
                 create_tables(connection, tables, resolved=resolved)
     finally:
-        if owned:
-            # _resolve_binds() only returns Engine instances on this path
-            # (bindable is None): create_engines()/create_engine().
-            dispose_engines(cast(sa.engine.Engine, primary_bind), cast(sa.engine.Engine, vocab_bind))
+        if owned_engines is not None:
+            dispose_engines(*owned_engines)
 
 
 def bootstrap(
