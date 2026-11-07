@@ -11,7 +11,6 @@ requires-python = ">=3.12"
 dependencies = [
     "chardet>=5.2.0",
     "oa-configurator>=2.1.0,<3",
-    "pandas>=2.3.3",
     "pyarrow>=23.0.1",
     "sqlalchemy>=2.0.45",
 ]
@@ -54,10 +53,10 @@ duckdb = [
 ]
 dev = [
     "oa-configurator[postgres,duckdb]>=2.0.0,<3",
+    "pandas>=2.3.3",
     "pytest>=9.0.3",
     "ty==0.0.90",
     "ruff==0.17.1",
-    "pyarrow-stubs==20.0.0.20260819",
     "mkdocs-material>=9.7.7",
     "mkdocstrings-python>=2.0.1",
     "requests>=2.33.0",
@@ -82,3 +81,8 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-ra -m 'not db_dialect'"
+
+[tool.ty.analysis]
+# pyarrow ships no inline types and pyarrow-stubs is being retired. Upstream typing is
+# not finalised yet (https://github.com/apache/arrow/discussions/45919), so pyarrow is Any.
+replace-imports-with-any = ["pyarrow", "pyarrow.**"]

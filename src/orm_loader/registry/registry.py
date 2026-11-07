@@ -173,7 +173,7 @@ class ModelDescriptor:
 
         Returns
         -------
-        Type[ORMTableProtocol]
+        type[ORMTableProtocol]
             The ORM model class.
         """
         return self.model_class

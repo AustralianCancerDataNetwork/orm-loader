@@ -62,11 +62,11 @@ wheels = [
 
 [[package]]
 name = "certifi"
-version = "2026.1.4"
+version = "2026.10.23"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/e0/2d/a891ca51311197f6ad14a7ef42e2399f36cf2f9bd44752b3dc4eab60fdc5/certifi-2026.1.4.tar.gz", hash = "sha256:ac726dd470482006e014ad384921ed6438c457018f4b3d204aea4281258b2120", size = 154268, upload-time = "2026-01-04T02:42:41.825Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/fd/11/b524cbd9bbdaca58608e4cf4053fd463417549e1959fa8d3aa18319f9555/certifi-2026.10.23.tar.gz", hash = "sha256:a9895e6e2758b371e0545e321a3a8fd1fcfd9829ada8824a936dfb16aaaf36cd", size = 136225, upload-time = "2026-10-23T11:36:16.478Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e6/ad/3cc14f097111b4de0040c83a525973216457bbeeb63739ef1ed275c1c021/certifi-2026.1.4-py3-none-any.whl", hash = "sha256:9943707519e4add1115f44c2bc244f782c0249876bf51b6599fee1ffbedd685c", size = 152900, upload-time = "2026-01-04T02:42:40.15Z" },
+    { url = "https://files.pythonhosted.org/packages/32/d1/a3652fe2c19134d0d15922177821d863cbd7e842d53a21bbe7e8e3a1b5ac/certifi-2026.10.23-py3-none-any.whl", hash = "sha256:e9b54de76e530bb6cf0ccd036787103acb58fd42ba930ea8bf948ddbaa2f61d1", size = 135082, upload-time = "2026-10-23T11:36:14.763Z" },
 ]
 
 [[package]]
@@ -187,7 +187,7 @@ wheels = [
 
 [[package]]
 name = "duckdb-sqlalchemy"
-version = "1.5.6.8"
+version = "1.5.6.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "duckdb" },
@@ -195,9 +195,9 @@ dependencies = [
     { name = "pytz" },
     { name = "sqlalchemy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/22/e2/8be0e825bc1579201cb0cf748f234f75a528b0a8ff707f54b779f11a5d21/duckdb_sqlalchemy-1.5.6.8.tar.gz", hash = "sha256:fe8bf0c1d46721fc87c7a905ff17841c2a27f849c059762ce3edb0e45f28343c", size = 211413, upload-time = "2026-11-02T11:10:19.681Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f8/fe/b2ced0727a5927aa893fae5fe95604ee030310604445a99e93dc237f0e41/duckdb_sqlalchemy-1.5.6.6.tar.gz", hash = "sha256:69fcb6a7a024dd2d49a9eeaebed587898ebdad26396c83a2dd78df7370d93e9b", size = 190836, upload-time = "2026-10-28T08:55:15.774Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9e/3e/570caa63a404778dabc1340522a8d3e0c5e11b0893fe31265ecb040e313a/duckdb_sqlalchemy-1.5.6.8-py3-none-any.whl", hash = "sha256:f6e8b1e956c9d8236a406c4eb06cb3688cc0375bc7da67b625cc38199c1d1d9b", size = 85289, upload-time = "2026-11-02T11:10:18.04Z" },
+    { url = "https://files.pythonhosted.org/packages/77/74/a0400aee4154a9bf2072eaaf6f35b8f4750d46784cb99063b356b4892951/duckdb_sqlalchemy-1.5.6.6-py3-none-any.whl", hash = "sha256:b4e4547ef3dcf46ea75964d56291d9f33195c3b03c0f3abe76fb7dfdbf5074ca", size = 76990, upload-time = "2026-10-28T08:55:14.278Z" },
 ]
 
 [[package]]
@@ -637,7 +637,6 @@ source = { editable = "." }
 dependencies = [
     { name = "chardet" },
     { name = "oa-configurator" },
-    { name = "pandas" },
     { name = "pyarrow" },
     { name = "sqlalchemy" },
 ]
@@ -649,7 +648,7 @@ dev = [
     { name = "mkdocs-mermaid2-plugin" },
     { name = "mkdocstrings-python" },
     { name = "oa-configurator", extra = ["duckdb", "postgres"] },
-    { name = "pyarrow-stubs" },
+    { name = "pandas" },
     { name = "pygments" },
     { name = "pytest" },
     { name = "python-dotenv" },
@@ -674,10 +673,9 @@ requires-dist = [
     { name = "mkdocstrings-python", marker = "extra == 'dev'", specifier = ">=2.0.1" },
     { name = "oa-configurator", specifier = ">=2.1.0,<3" },
     { name = "oa-configurator", extras = ["duckdb", "postgres"], marker = "extra == 'dev'", specifier = ">=2.0.0,<3" },
-    { name = "pandas", specifier = ">=2.3.3" },
+    { name = "pandas", marker = "extra == 'dev'", specifier = ">=2.3.3" },
     { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.2" },
     { name = "pyarrow", specifier = ">=23.0.1" },
-    { name = "pyarrow-stubs", marker = "extra == 'dev'", specifier = "==20.0.0.20260819" },
     { name = "pygments", marker = "extra == 'dev'", specifier = ">=2.20.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0.3" },
     { name = "python-dotenv", marker = "extra == 'dev'" },
@@ -879,18 +877,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/b0/49/942c3b79878ba928324d1e17c274ed84581db8c0a749b24bcf4cbdf15bd3/pyarrow-24.0.0-cp314-cp314t-musllinux_1_2_aarch64.whl", hash = "sha256:d8ddd2768da81d3ee08cfea9b597f4abb4e8e1dc8ae7e204b608d23a0d3ab699", size = 49471890, upload-time = "2026-04-21T10:51:02.439Z" },
     { url = "https://files.pythonhosted.org/packages/76/97/ff71431000a75d84135a1ace5ca4ba11726a231a8007bbb320a4c54075d5/pyarrow-24.0.0-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:61a3d7eaa97a14768b542f3d284dc6400dd2470d9f080708b13cd46b6ae18136", size = 51932250, upload-time = "2026-04-21T10:51:10.576Z" },
     { url = "https://files.pythonhosted.org/packages/51/be/6f79d55816d5c22557cf27533543d5d70dfe692adfbee4b99f2760674f38/pyarrow-24.0.0-cp314-cp314t-win_amd64.whl", hash = "sha256:c91d00057f23b8d353039520dc3a6c09d8608164c692e9f59a175a42b2ae0c19", size = 28131282, upload-time = "2026-04-21T10:51:16.815Z" },
-]
-
-[[package]]
-name = "pyarrow-stubs"
-version = "20.0.0.20260819"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "pyarrow" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/12/a7/8a2ca91ffe4c6576207f932de655d7d8a36485c520dccce70ce7d492b256/pyarrow_stubs-20.0.0.20260819.tar.gz", hash = "sha256:150710a72248bc834bf048d3092713f070904a4af76d40289c43afb3ee189823", size = 238222, upload-time = "2026-08-19T05:52:53.618Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/65/6c/eea1d03e475217aea95b1d52aee09c97575d05bbc592c39c085b71dab89f/pyarrow_stubs-20.0.0.20260819-py3-none-any.whl", hash = "sha256:297e60b6e5314739c082b4757d090d8be6047465510eb0684ca954ef7ea58be3", size = 235949, upload-time = "2026-08-19T05:52:54.711Z" },
 ]
 
 [[package]]
@@ -1164,11 +1150,11 @@ wheels = [
 
 [[package]]
 name = "setuptools"
-version = "84.0.0"
+version = "84.2.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/6d/44/f5da03a8ef95d369145c5bb53050e7877c9f3d312e128605fd9504829143/setuptools-84.0.0.tar.gz", hash = "sha256:f4695c21257f0d9b537ec2692c941d02ee143b7cc1276941349a546573b2ef73", size = 1168449, upload-time = "2026-08-08T18:27:58.365Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/70/b3/c19426f783614d625699a4b247faf628ea9ab1db228674491767b417f9e1/setuptools-84.2.1.tar.gz", hash = "sha256:3ff8b3b5492a0aa66960f4419365a86b84e013070d4313e4d4a6894f5d64d6bc", size = 1230289, upload-time = "2026-10-20T19:01:37.742Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/95/9c/c510029fc6ef33a6275cd2c5d3cecd6613dfd6aa401d57c54f1c18852ccf/setuptools-84.0.0-py3-none-any.whl", hash = "sha256:51a52592b3b99e102b609654876bd65f19f999935166d1352678931132b0c670", size = 818216, upload-time = "2026-08-08T18:27:56.719Z" },
+    { url = "https://files.pythonhosted.org/packages/ef/55/6dc6d6bb953bdfc52519a0059592c52b6e3b8ad51cf8256dffceb55b0610/setuptools-84.2.1-py3-none-any.whl", hash = "sha256:ca140b45d5325a9478f880e351484f62fef15f336462e449ca0c03c873d589c2", size = 876263, upload-time = "2026-10-20T19:01:35.678Z" },
 ]
 
 [[package]]

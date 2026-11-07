@@ -21,6 +21,7 @@ from .materialised_view_errors import (
 )
 from .materialised_view_mixin import (
     CreateMaterializedView,
+    MaterializedViewBackend,
     MaterializedViewMixin,
     refresh_all_mvs,
     resolve_mv_refresh_order,
@@ -34,6 +35,7 @@ __all__ = [
     "MaterializationError",
     "MaterializationFailure",
     "MaterializationOperation",
+    "MaterializedViewBackend",
     "MaterializedViewIndex",
     "MaterializedViewMixin",
     "refresh_all_mvs",

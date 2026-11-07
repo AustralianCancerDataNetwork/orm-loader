@@ -6,9 +6,10 @@ from ..mappers.materialised_view_errors import (
 )
 from .base import (
     STAGING_SCHEMA,
-    BackendCapabilities,
     DatabaseBackend,
+    DedupeResult,
     Dialect,
+    ForeignKeyViolationError,
     staging_schema_claim,
 )
 from .duckdb import DuckDBBackend
@@ -18,11 +19,12 @@ from .sqlite import SQLiteBackend
 
 __all__ = [
     "STAGING_SCHEMA",
-    "BackendCapabilities",
     "ConcurrentRefreshNotEligibleError",
     "DatabaseBackend",
+    "DedupeResult",
     "Dialect",
     "DuckDBBackend",
+    "ForeignKeyViolationError",
     "MaterializationError",
     "MaterializationFailure",
     "MaterializationOperation",

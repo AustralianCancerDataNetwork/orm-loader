@@ -14,7 +14,7 @@ All components are:
 
 - [`ORMTableBase`](orm_table.md)
 - [`SerialisableTableInterface`](serialisable_table.md)
-- [`CSVLoadableTableInterface`](loadable_table.md)
+- [`FileLoadableTableInterface`](loadable_table.md)
 
 ---
 

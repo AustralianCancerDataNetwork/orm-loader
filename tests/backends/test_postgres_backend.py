@@ -4,17 +4,16 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 import sqlalchemy as sa
-import sqlalchemy.event as sae
 import sqlalchemy.orm as so
 from oa_configurator import SCHEMA_TRANSLATE_MAP_KEY, Role, qualified
 from oa_configurator.testing import isolated_test_schema
 from sqlalchemy import exc as sa_exc
 from sqlalchemy.dialects import postgresql
-from sqlalchemy.engine import Engine
 
 from orm_loader.backends import STAGING_SCHEMA, Dialect, PostgresBackend
 from orm_loader.backends.resolve import resolve_backend
-from tests.models import ComputedColumnTable
+from tests.models import ComputedColumnTable, EnumTable, SimpleTable
+from tests.models import Role as AuthorRole
 
 _TARGET_TABLE = ComputedColumnTable.__tablename__
 _STAGING_TABLE = f"_staging_{_TARGET_TABLE}"
@@ -23,11 +22,12 @@ _STAGING_TABLE_WITH_SCHEMA: str = qualified(
     _PREPARER, _STAGING_TABLE, physical_schema=STAGING_SCHEMA
 )
 
-_ComputedTableCls = cast("type[CSVTableProtocol]", ComputedColumnTable)
+_ComputedTableCls = cast("type[FileTableProtocol]", ComputedColumnTable)
+_SimpleTableCls = cast("type[FileTableProtocol]", SimpleTable)
 
 
 if TYPE_CHECKING:
-    from orm_loader.tables.typing import CSVTableProtocol
+    from orm_loader.tables.typing import FileTableProtocol
 
 
 class _FakeSession:
@@ -91,11 +91,7 @@ def test_postgres_backend_identity_and_capabilities():
 
     assert backend.name == "postgres"
     assert backend.dialect == Dialect.POSTGRESQL
-    assert backend.supports_dialect(Dialect.POSTGRESQL) is True
-    assert backend.capabilities.supports_fast_load is True
-    assert backend.capabilities.supports_unlogged_staging is True
-    assert backend.capabilities.supports_fk_toggle is True
-    assert backend.capabilities.supports_materialized_views is True
+    assert backend.supports_replace_with_kept_indexes is True
 
 
 @pytest.mark.parametrize("merge_batch_size", [0, -1])
@@ -108,6 +104,7 @@ def test_postgres_backend_rejects_non_positive_merge_batch_size(merge_batch_size
     args = [_ComputedTableCls, session]
     if merge_strategy in {"replace", "upsert"}:
         args.append(["id"])
+    args.append(sa.Table("staging", sa.MetaData()))
 
     with pytest.raises(ValueError, match="merge_batch_size must be a positive integer or None"):
         merge(*args, merge_batch_size=merge_batch_size)
@@ -130,34 +127,6 @@ def test_postgres_backend_create_staging_table_drops_computed_columns(pg_session
     inspector = sa.inspect(pg_session.get_bind())
     cols = {c["name"] for c in inspector.get_columns(_STAGING_TABLE, schema=STAGING_SCHEMA)}
     assert cols == {"id", "name", "_rownum"}  # slug is computed, excluded
-
-
-def test_postgres_backend_drop_staging_table():
-    backend = PostgresBackend(staging_schema=STAGING_SCHEMA)
-    session = _FakeSession()
-
-    backend.drop_staging_table(_ComputedTableCls, _sess(session))
-
-    assert session.statements == [f"DROP TABLE IF EXISTS {_STAGING_TABLE_WITH_SCHEMA}"]
-
-
-def test_postgres_backend_fk_methods_emit_expected_sql():
-    backend = PostgresBackend()
-    session = _FakeSession()
-
-    previous = backend.disable_fk_check(_sess(session))
-    enabled = backend.enable_fk_check(_sess(session))
-    backend.restore_fk_check(_sess(session), previous)
-
-    assert previous == "origin"
-    assert enabled == "origin"
-    assert session.statements == [
-        "SHOW session_replication_role",
-        "SET session_replication_role = 'replica'",
-        "SHOW session_replication_role",
-        "SET session_replication_role = 'origin'",
-        "SET session_replication_role = 'origin'",
-    ]
 
 
 def test_postgres_backend_materialized_view_methods_work_end_to_end(pg_db):
@@ -569,100 +538,102 @@ def test_postgres_backend_normalize_fk_check_state():
     else:
         raise AssertionError("Expected ValueError for unrecognised role")
 
-    try:
-        normalize(1)
-    except ValueError as exc:
-        assert "Postgres uses string roles" in str(exc)
-    else:
-        raise AssertionError("Expected ValueError for integer input")
+
+# ---------------------------------------------------------------------------
+# Loading files into real Postgres
+# ---------------------------------------------------------------------------
 
 
-def test_postgres_backend_disable_fk_raises_when_show_returns_non_string():
-    backend = PostgresBackend()
-    session = _FakeSession(scalar_result=42)
-
-    try:
-        backend.disable_fk_check(_sess(session))
-    except RuntimeError as exc:
-        assert "Expected PostgreSQL FK state to be a string" in str(exc)
-    else:
-        raise AssertionError("Expected RuntimeError when SHOW returns a non-string")
+def _write_simple(tmp_path, rows: list[tuple[int, str]]):
+    path = tmp_path / "test_table.csv"
+    path.write_text("id,name\n" + "".join(f"{i},{n}\n" for i, n in rows))
+    return path
 
 
-def test_postgres_backend_enable_fk_raises_when_show_returns_non_string():
-    backend = PostgresBackend()
-    session = _FakeSession(scalar_result=42)
-
-    try:
-        backend.enable_fk_check(_sess(session))
-    except RuntimeError as exc:
-        assert "Expected PostgreSQL FK state to be a string" in str(exc)
-    else:
-        raise AssertionError("Expected RuntimeError when SHOW returns a non-string")
-
-
-def test_postgres_backend_engine_with_replica_role_unregisters_listener(monkeypatch):
-    backend = PostgresBackend()
-    events: list[tuple[str, object, str]] = []
-    statements: list[str] = []
-
-    class _Result:
-        def scalar(self):
-            return "origin"
-
-    class _Conn:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_) -> None:
-            return None
-
-        def execution_options(self, **_):
-            return self
-
-        def get_isolation_level(self):
-            return "READ COMMITTED"
-
-        def rollback(self) -> None:
-            return None
-
-        def close(self) -> None:
-            return None
-
-        def execute(self, statement):
-            sql = str(statement.compile(dialect=postgresql.dialect()))
-            statements.append(sql)
-            return _Result()
-
-    class _Engine(Engine):
-        def __init__(self) -> None:
-            # only exists for autocommit_connection() to route it into its real Engine branch
-            pass
-
-        def connect(self):
-            events.append(("connect", self, "connect"))
-            return _Conn()
-
-    engine = _Engine()
-
-    def _listen(target, name, *_) -> None:
-        events.append(("listen", target, name))
-
-    def _remove(target, name, *_) -> None:
-        events.append(("remove", target, name))
-
-    monkeypatch.setattr(sae, "listen", _listen)
-    monkeypatch.setattr(sae, "remove", _remove)
-
-    with backend.engine_with_replica_role(cast(Engine, engine)):
-        pass
-
-    assert events == [
-        ("listen", engine, "connect"),
-        ("remove", engine, "connect"),
-        ("connect", engine, "connect"),
+def _simple_rows(session) -> list[tuple[int, str]]:
+    return [
+        (r.id, r.name)
+        for r in session.execute(sa.select(SimpleTable).order_by(SimpleTable.id)).scalars()
     ]
-    assert statements == [
-        "SET session_replication_role = DEFAULT",
-        "SHOW session_replication_role",
+
+
+def test_staging_table_has_the_target_columns_and_an_identity_row_number(pg_session):
+    resolve_backend(
+        pg_session, staging_schema_tag=STAGING_SCHEMA, mapper=SimpleTable
+    ).create_staging_table(_SimpleTableCls, pg_session)
+    staging_name = resolve_backend(pg_session).staging_name_for_table(SimpleTable.__tablename__)
+    cols = pg_session.execute(
+        sa.text(
+            "SELECT column_name, data_type FROM information_schema.columns"
+            " WHERE table_schema = :s AND table_name = :t ORDER BY ordinal_position"
+        ),
+        {"s": STAGING_SCHEMA, "t": staging_name},
+    ).all()
+    assert [(n, d) for n, d in cols if n != "_rownum"] == [
+        ("id", "integer"),
+        ("name", "character varying"),
     ]
+    assert ("_rownum", "bigint") in [(n, d) for n, d in cols]
+
+
+def test_load_file_merges_into_the_target(pg_session, tmp_path):
+    inserted = SimpleTable.load_file(
+        pg_session,
+        _write_simple(tmp_path, [(1, "alpha"), (2, "beta")]),
+        staging_schema_tag=STAGING_SCHEMA,
+    )
+    pg_session.commit()
+    assert inserted == 2
+    assert _simple_rows(pg_session) == [(1, "alpha"), (2, "beta")]
+
+
+def test_a_large_file_loads_in_full(pg_session, tmp_path):
+    rows = [(i, f"name_{i}") for i in range(1, 10_000)]
+    inserted = SimpleTable.load_file(
+        pg_session, _write_simple(tmp_path, rows), staging_schema_tag=STAGING_SCHEMA
+    )
+    pg_session.commit()
+    assert inserted == 9999
+    assert (
+        pg_session.execute(sa.select(sa.func.count()).select_from(SimpleTable)).scalar_one() == 9999
+    )
+
+
+def test_upsert_does_not_update_existing_rows(pg_session, tmp_path):
+    SimpleTable.load_file(
+        pg_session, _write_simple(tmp_path, [(1, "alpha")]), staging_schema_tag=STAGING_SCHEMA
+    )
+    pg_session.commit()
+    SimpleTable.load_file(
+        pg_session,
+        _write_simple(tmp_path, [(1, "alpha_updated")]),
+        merge_strategy="upsert",
+        staging_schema_tag=STAGING_SCHEMA,
+    )
+    pg_session.commit()
+    assert _simple_rows(pg_session) == [(1, "alpha")]
+
+
+def test_insert_loads_new_keys_and_fails_on_an_existing_key(pg_session, tmp_path):
+    path = _write_simple(tmp_path, [(1, "alpha"), (2, "beta")])
+    assert (
+        SimpleTable.load_file(
+            pg_session, path, merge_strategy="insert", staging_schema_tag=STAGING_SCHEMA
+        )
+        == 2
+    )
+    pg_session.commit()
+    assert _simple_rows(pg_session) == [(1, "alpha"), (2, "beta")]
+    with pytest.raises(sa_exc.IntegrityError):
+        SimpleTable.load_file(
+            pg_session, path, merge_strategy="insert", staging_schema_tag=STAGING_SCHEMA
+        )
+
+
+def test_a_native_enum_column_loads_member_names(pg_session, tmp_path):
+    path = tmp_path / "enum_table.csv"
+    path.write_text("id,role\n1,FIRST_AUTHOR\n2,LAST_AUTHOR\n3,\n")
+    assert EnumTable.load_file(pg_session, path, quote_mode="csv") == 3
+    pg_session.commit()
+    rows = dict(pg_session.execute(sa.select(EnumTable.id, EnumTable.role)).all())
+    assert rows == {1: AuthorRole.FIRST_AUTHOR, 2: AuthorRole.LAST_AUTHOR, 3: None}
