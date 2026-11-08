@@ -82,6 +82,10 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-ra -m 'not db_dialect'"
 
+[tool.ty.rules]
+# raises on stale suppressions
+unused-ignore-comment = "error"
+
 [tool.ty.analysis]
 # pyarrow ships no inline types and pyarrow-stubs is being retired. Upstream typing is
 # not finalised yet (https://github.com/apache/arrow/discussions/45919), so pyarrow is Any.
