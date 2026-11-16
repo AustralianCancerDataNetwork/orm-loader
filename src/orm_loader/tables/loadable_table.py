@@ -6,12 +6,13 @@ policy and the backend's bulk sink, then merges the staging table into the
 target table. Readers choose the file formats; backends choose the merge
 and index handling.
 """
+
 import logging
-from collections.abc import Mapping
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from time import perf_counter
-from typing import Any, Generator, Type
+from typing import Any
 
 import sqlalchemy as sa
 import sqlalchemy.orm as so
@@ -22,7 +23,7 @@ from ..backends.base import DatabaseBackend
 from ..backends.resolve import resolve_backend
 from ..conversion import ConversionPolicy
 from ..helpers import IngestError
-from ..loaders import FileReader, LoadReport, LoaderContext, open_reader, stage_file
+from ..loaders import FileReader, LoaderContext, LoadReport, open_reader, stage_file
 from .orm_table import ORMTableBase
 from .typing import FileTableProtocol
 
@@ -63,7 +64,7 @@ class FileLoadableTableInterface(ORMTableBase):
     @classmethod
     @contextmanager
     def manage_indices(
-        cls: Type['FileTableProtocol'],
+        cls: type["FileTableProtocol"],
         session: so.Session,
         index_strategy: str = "auto",
         *,
@@ -91,9 +92,11 @@ class FileLoadableTableInterface(ORMTableBase):
             connection = session.connection(bind_arguments={"mapper": cls})
             inspector = sa.inspect(connection)
             schema = physical_schema_of(connection, schema_tag=cls.__table__.schema)
-            existing_in_db = {idx['name'] for idx in inspector.get_indexes(cls.__tablename__, schema=schema)}
+            existing_in_db = {
+                idx["name"] for idx in inspector.get_indexes(cls.__tablename__, schema=schema)
+            }
             to_drop = [i for i in indices if i.name in existing_in_db]
-            
+
             if to_drop:
                 logger.info(f"Table `{table_name}`: Dropping {len(to_drop)} active indices.")
                 drop_started = perf_counter()
@@ -133,17 +136,18 @@ class FileLoadableTableInterface(ORMTableBase):
                 except Exception as e:
                     if not merge_failed:
                         raise
-                    logger.error(f"Table `{table_name}`: Index rebuild after the failed merge also failed - {e}")
+                    logger.error(
+                        f"Table `{table_name}`: Index rebuild after the failed merge also failed - {e}"
+                    )
                 else:
                     if failed_indices and not merge_failed:
                         raise IngestError(
                             f"Table `{table_name}`: the merge was committed but index(es) {failed_indices} could not be rebuilt."
                         )
 
-
     @classmethod
     def _restore_indices(
-        cls: Type['FileTableProtocol'],
+        cls: type["FileTableProtocol"],
         session: so.Session,
         indices: list[sa.Index],
     ) -> list[str]:
@@ -169,7 +173,9 @@ class FileLoadableTableInterface(ORMTableBase):
         connection = session.connection(bind_arguments={"mapper": cls})
         inspector = sa.inspect(connection)
         schema = physical_schema_of(connection, schema_tag=cls.__table__.schema)
-        existing_idx_names = {idx['name'] for idx in inspector.get_indexes(table_name, schema=schema)}
+        existing_idx_names = {
+            idx["name"] for idx in inspector.get_indexes(table_name, schema=schema)
+        }
 
         for idx in indices:
             if idx.name not in existing_idx_names:
@@ -187,23 +193,24 @@ class FileLoadableTableInterface(ORMTableBase):
                     logger.info(
                         f"Table `{table_name}`: Commit after restoring index `{idx.name}` "
                         f"completed in {_format_elapsed(perf_counter() - commit_started)}."
-                   )
-                except Exception as e:
+                    )
+                except Exception:
                     session.rollback()
                     failed_indices.append(str(idx.name))
-                    logger.error(f"Table `{table_name}`: Failed to restore {idx.name}: {e}")
+                    logger.exception(f"Table `{table_name}`: Failed to restore {idx.name}")
             else:
-                logger.debug(f"Table `{table_name}`: Index {idx.name} already exists on disk. Skipping.")
+                logger.debug(
+                    f"Table `{table_name}`: Index {idx.name} already exists on disk. Skipping."
+                )
         logger.info(
             f"Table `{table_name}`: Index verification/rebuild completed in "
             f"{_format_elapsed(perf_counter() - rebuild_started)}."
         )
         return failed_indices
 
-
     @classmethod
     def load_file(
-        cls: Type[FileTableProtocol],
+        cls: type[FileTableProtocol],
         session: so.Session,
         path: Path,
         *,
@@ -223,7 +230,6 @@ class FileLoadableTableInterface(ORMTableBase):
         rejects_dir: Path | None = None,
         report: LoadReport | None = None,
     ) -> int:
-
         """
         Load a file into the target table.
 
@@ -314,13 +320,13 @@ class FileLoadableTableInterface(ORMTableBase):
         logger.debug(f"Table `{cls.__tablename__}`: Loading file {path}")
 
         if path.stem.lower() != cls.__tablename__:
-            raise ValueError(
-                f"File name '{path.name}' does not match table '{cls.__tablename__}'"
-            )
+            raise ValueError(f"File name '{path.name}' does not match table '{cls.__tablename__}'")
 
         _require_bind(session, cls)
         if reader is not None and (chunksize is not None or quote_mode is not None):
-            raise ValueError("chunksize and quote_mode configure the default reader; set them on the reader passed as `reader`")
+            raise ValueError(
+                "chunksize and quote_mode configure the default reader; set them on the reader passed as `reader`"
+            )
         policy = policy or ConversionPolicy()
         if reader is None:
             reader = open_reader(
@@ -377,18 +383,21 @@ class FileLoadableTableInterface(ORMTableBase):
                         validate_deferred_fks=validate_deferred_fks,
                     )
                     if validate_deferred_fks:
-                        logger.info(f"Table `{cls.__tablename__}`: Validating deferred foreign keys.")
+                        logger.info(
+                            f"Table `{cls.__tablename__}`: Validating deferred foreign keys."
+                        )
                         backend.validate_deferred_fks(cls, session)
         finally:
             backend.drop_staging_table(cls, session)
 
-        logger.info(f"Table `{cls.__tablename__}`: Successfully finished ingestion. Total rows: {total}")
+        logger.info(
+            f"Table `{cls.__tablename__}`: Successfully finished ingestion. Total rows: {total}"
+        )
         return total
-        
 
     @classmethod
     def _target_has_rows(
-        cls: Type[FileTableProtocol],
+        cls: type[FileTableProtocol],
         session: so.Session,
     ) -> bool:
         """
@@ -400,10 +409,9 @@ class FileLoadableTableInterface(ORMTableBase):
         ).first()
         return row is not None
 
-
     @classmethod
     def validate_foreign_keys(
-        cls: Type[FileTableProtocol],
+        cls: type[FileTableProtocol],
         session: so.Session,
         *,
         staging_schema_tag: str | None = None,
@@ -450,7 +458,7 @@ class FileLoadableTableInterface(ORMTableBase):
 
     @classmethod
     def merge_from_staging(
-        cls: Type[FileTableProtocol],
+        cls: type[FileTableProtocol],
         session: so.Session,
         merge_strategy: str = "replace",
         *,
@@ -490,7 +498,12 @@ class FileLoadableTableInterface(ORMTableBase):
             logger.info(f"Table `{target}`: Merge replace delete phase starting.")
             delete_started = perf_counter()
             backend.merge_replace(
-                cls, session, pk_cols, staging, merge_batch_size=merge_batch_size, validate_deferred_fks=validate_deferred_fks
+                cls,
+                session,
+                pk_cols,
+                staging,
+                merge_batch_size=merge_batch_size,
+                validate_deferred_fks=validate_deferred_fks,
             )
             logger.info(
                 f"Table `{target}`: Merge replace delete phase completed in "
@@ -499,7 +512,11 @@ class FileLoadableTableInterface(ORMTableBase):
             logger.info(f"Table `{target}`: Merge insert phase starting.")
             insert_started = perf_counter()
             backend.merge_insert(
-                cls, session, staging, merge_batch_size=merge_batch_size, validate_deferred_fks=validate_deferred_fks
+                cls,
+                session,
+                staging,
+                merge_batch_size=merge_batch_size,
+                validate_deferred_fks=validate_deferred_fks,
             )
             logger.info(
                 f"Table `{target}`: Merge insert phase completed in "
@@ -514,7 +531,12 @@ class FileLoadableTableInterface(ORMTableBase):
             logger.info(f"Table `{target}`: Merge upsert phase starting.")
             upsert_started = perf_counter()
             backend.merge_upsert(
-                cls, session, pk_cols, staging, merge_batch_size=merge_batch_size, validate_deferred_fks=validate_deferred_fks
+                cls,
+                session,
+                pk_cols,
+                staging,
+                merge_batch_size=merge_batch_size,
+                validate_deferred_fks=validate_deferred_fks,
             )
             logger.info(
                 f"Table `{target}`: Merge upsert phase completed in "
@@ -524,7 +546,11 @@ class FileLoadableTableInterface(ORMTableBase):
             logger.info(f"Table `{target}`: Merge insert phase starting.")
             insert_started = perf_counter()
             backend.merge_insert(
-                cls, session, staging, merge_batch_size=merge_batch_size, validate_deferred_fks=validate_deferred_fks
+                cls,
+                session,
+                staging,
+                merge_batch_size=merge_batch_size,
+                validate_deferred_fks=validate_deferred_fks,
             )
             logger.info(
                 f"Table `{target}`: Merge insert phase completed in "

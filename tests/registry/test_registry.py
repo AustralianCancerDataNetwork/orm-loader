@@ -1,20 +1,29 @@
 import io
-from orm_loader.registry.registry import ModelRegistry
+
 import sqlalchemy as sa
 import sqlalchemy.orm as so
-from orm_loader.tables.orm_table import ORMTableBase
 
 from orm_loader.registry.registry import (
-    load_table_specs,
-    load_field_specs,
-    TableSpec,
     FieldSpec,
+    ModelRegistry,
+    TableSpec,
+    load_field_specs,
+    load_table_specs,
 )
+from orm_loader.tables.orm_table import ORMTableBase
 
 Base = so.declarative_base()
 
+
+def _table_spec(table_name: str, *, is_required: bool) -> TableSpec:
+    return TableSpec(
+        table_name=table_name, schema="cdm", is_required=is_required, description=table_name
+    )
+
+
 class FakeResource:
     """Minimal stand-in for importlib.resources API."""
+
     def __init__(self, text: str):
         self._text = text
 
@@ -54,7 +63,6 @@ Person,gender_concept_id,No,integer,No,Yes,Concept,concept_id
     assert person_fields["gender_concept_id"].fk_table == "Concept"
 
 
-
 def test_register_single_model():
     class B(ORMTableBase, Base):
         __tablename__ = "b"
@@ -88,9 +96,9 @@ def test_missing_required_tables():
     reg = ModelRegistry(model_version="1.0")
 
     # Fake specs injected directly (unit-level test)
-    reg._table_specs = { # type: ignore
-        "person": type("S", (), {"is_required": True})(),
-        "visit": type("S", (), {"is_required": False})(),
+    reg._table_specs = {
+        "person": _table_spec("person", is_required=True),
+        "visit": _table_spec("visit", is_required=False),
     }
 
     assert reg.missing_required_tables() == {"person"}
@@ -102,9 +110,9 @@ def test_known_vs_registered_tables():
         id = sa.Column(sa.Integer, primary_key=True)
 
     reg = ModelRegistry(model_version="1.0")
-    reg._table_specs = { # type: ignore
-        "r": type("S", (), {"is_required": True})(),
-        "x": type("S", (), {"is_required": True})(),
+    reg._table_specs = {
+        "r": _table_spec("r", is_required=True),
+        "x": _table_spec("x", is_required=True),
     }
 
     reg.register_model(R)

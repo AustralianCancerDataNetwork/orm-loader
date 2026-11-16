@@ -102,8 +102,8 @@ class HexHandler(ConvertingHandler):
     def arrow_type(self, sa_type):
         return pa.int64()
 
-    def parse(self, cleaned, sa_type):
-        ...  # return Interpretation(values, invalid)
+    def parse(self, cleaned, sa_type): ...  # return Interpretation(values, invalid)
+
 
 policy = ConversionPolicy(handlers={MyHexType: HexHandler()})
 ```

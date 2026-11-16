@@ -171,7 +171,10 @@ class ConversionPolicy:
         object.__setattr__(self, "columns", MappingProxyType(dict(self.columns)))
 
     def for_column(
-        self, sa_type: TypeEngine[Any], table_name: str | None = None, column_name: str | None = None
+        self,
+        sa_type: TypeEngine[Any],
+        table_name: str | None = None,
+        column_name: str | None = None,
     ) -> ColumnHandler:
         """Return the handler that interprets a column.
 

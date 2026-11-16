@@ -24,18 +24,12 @@ The class declaration is the integration point that downstream code can import a
 ```python
 class RecentObservationMV(Base, MaterializedViewMixin):
     __mv_name__ = "mv_recent_observation"
-    __mv_select__ = (
-        sa.select(
-            Observation.observation_id,
-            Observation.person_id,
-            Observation.observation_date,
-            Observation.value_as_number,
-        )
-        .where(
-            Observation.observation_date
-            >= sa.func.current_date() - sa.text("INTERVAL '30 days'")
-        )
-    )
+    __mv_select__ = sa.select(
+        Observation.observation_id,
+        Observation.person_id,
+        Observation.observation_date,
+        Observation.value_as_number,
+    ).where(Observation.observation_date >= sa.func.current_date() - sa.text("INTERVAL '30 days'"))
     __mv_dependencies__ = {"observation"}
     __mv_indexes__ = (
         MaterializedViewIndex(
@@ -120,11 +114,13 @@ class VocabSummaryMV(MaterializedViewMixin):
     __mv_select__ = ...
     __mv_schema_tag__ = Role.VOCAB.value  # resolves via the connection's vocab schema
 
+
 # Uses __mv_schema_tag__ ("primary" by default) via the connection's own schema_translate_map.
 RecentObservationMV.create_mv(engine)
 
 # Override for one call.
 RecentObservationMV.create_mv(engine, schema_tag=Role.VOCAB.value)
+
 
 # Declaratively mapped: the mapped table's own schema is authoritative, no
 # __mv_schema_tag__ needed (or consulted) at all.

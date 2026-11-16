@@ -13,7 +13,10 @@ pytestmark = [pytest.mark.postgresql, pytest.mark.db_dialect]
 @pytest.fixture
 def pooled_pg_engine(pg_db):
     engine = sa.create_engine(
-        pg_db.connection.engine.url, pool_size=2, max_overflow=0, pool_use_lifo=False,
+        pg_db.connection.engine.url,
+        pool_size=2,
+        max_overflow=0,
+        pool_use_lifo=False,
     )
     try:
         first = engine.connect()
@@ -27,7 +30,8 @@ def pooled_pg_engine(pg_db):
 
 @pytest.mark.parametrize("end_transaction", ["commit", "rollback"])
 def test_relaxation_follows_connection_swaps_without_affecting_other_sessions(
-    pooled_pg_engine, end_transaction,
+    pooled_pg_engine,
+    end_transaction,
 ):
     backend = PostgresBackend()
     with so.Session(pooled_pg_engine) as session:
@@ -53,12 +57,14 @@ def test_relaxation_follows_connection_swaps_without_affecting_other_sessions(
 
 def test_failed_scope_rolls_back_and_removes_transaction_listener(pooled_pg_engine):
     with so.Session(pooled_pg_engine) as session:
-        with pytest.raises(RuntimeError, match="stop the load"):
-            with PostgresBackend().relaxed_foreign_keys(session):
-                session.execute(sa.text("SELECT 1"))
-                session.commit()
-                assert session.scalar(sa.text("SHOW session_replication_role")) == "replica"
-                raise RuntimeError("stop the load")
+        with (
+            pytest.raises(RuntimeError, match="stop the load"),
+            PostgresBackend().relaxed_foreign_keys(session),
+        ):
+            session.execute(sa.text("SELECT 1"))
+            session.commit()
+            assert session.scalar(sa.text("SHOW session_replication_role")) == "replica"
+            raise RuntimeError("stop the load")
         assert session.scalar(sa.text("SHOW session_replication_role")) == "origin"
     with pooled_pg_engine.connect() as first, pooled_pg_engine.connect() as second:
         assert first.scalar(sa.text("SHOW session_replication_role")) == "origin"
@@ -84,14 +90,16 @@ def test_relaxation_is_limited_to_the_mapper_bind(pooled_pg_engine):
 
     other_engine = sa.create_engine(pooled_pg_engine.url)
     try:
-        with so.Session(binds={SimpleTable: pooled_pg_engine, EnumTable: other_engine}) as session:
-            with PostgresBackend().relaxed_foreign_keys(session, mapper=SimpleTable):
-                for _ in range(2):
-                    target = session.connection(bind_arguments={"mapper": SimpleTable})
-                    unrelated = session.connection(bind_arguments={"mapper": EnumTable})
-                    assert target.scalar(sa.text("SHOW session_replication_role")) == "replica"
-                    assert unrelated.scalar(sa.text("SHOW session_replication_role")) == "origin"
-                    session.commit()
+        with (
+            so.Session(binds={SimpleTable: pooled_pg_engine, EnumTable: other_engine}) as session,
+            PostgresBackend().relaxed_foreign_keys(session, mapper=SimpleTable),
+        ):
+            for _ in range(2):
+                target = session.connection(bind_arguments={"mapper": SimpleTable})
+                unrelated = session.connection(bind_arguments={"mapper": EnumTable})
+                assert target.scalar(sa.text("SHOW session_replication_role")) == "replica"
+                assert unrelated.scalar(sa.text("SHOW session_replication_role")) == "origin"
+                session.commit()
     finally:
         other_engine.dispose()
 
@@ -150,6 +158,8 @@ def test_orm_inserts_must_be_flushed_inside_relaxation(pooled_pg_engine, flush_i
                 with pytest.raises(IntegrityError):
                     session.commit()
         with so.Session(pooled_pg_engine) as verify:
-            assert verify.scalar(sa.select(sa.func.count()).select_from(_ScopeChild)) == int(flush_inside)
+            assert verify.scalar(sa.select(sa.func.count()).select_from(_ScopeChild)) == int(
+                flush_inside
+            )
     finally:
         _ScopeBase.metadata.drop_all(pooled_pg_engine)

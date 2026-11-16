@@ -1,11 +1,12 @@
+from typing import cast
+
+import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
-import pandas as pd
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 from oa_configurator import Role
 from sqlalchemy.orm import DeclarativeBase
-from typing import cast, Type
 
 from orm_loader.tables.loadable_table import FileLoadableTableInterface
 from orm_loader.tables.typing import FileTableProtocol
@@ -17,13 +18,13 @@ class Base(DeclarativeBase):
 
 class ParquetTable(Base, FileLoadableTableInterface):
     __tablename__ = "parquet_table"
-    __table_args__ = {"schema": Role.PRIMARY.value}
+    __table_args__ = ({"schema": Role.PRIMARY.value},)
 
     id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     value: so.Mapped[int] = so.mapped_column(sa.Integer, nullable=False)
 
 
-_ParquetTable = cast(Type[FileTableProtocol], ParquetTable)
+_ParquetTable = cast(type[FileTableProtocol], ParquetTable)
 
 
 def test_parquet_loader(sqlite_session, sqlite_engine, tmp_path):
@@ -53,14 +54,14 @@ class NullSentinelTable(Base, FileLoadableTableInterface):
     """Nullable text columns, for checking that marker-like text survives a Parquet load."""
 
     __tablename__ = "null_sentinel_table"
-    __table_args__ = {"schema": Role.PRIMARY.value}
+    __table_args__ = ({"schema": Role.PRIMARY.value},)
 
     id: so.Mapped[int] = so.mapped_column(sa.Integer, primary_key=True)
     name: so.Mapped[str | None] = so.mapped_column(sa.String, nullable=True)
     role: so.Mapped[str | None] = so.mapped_column(sa.String, nullable=True)
 
 
-_NullSentinelTable = cast(Type[FileTableProtocol], NullSentinelTable)
+_NullSentinelTable = cast(type[FileTableProtocol], NullSentinelTable)
 
 _BLANKS = ["  ", ""]
 _MARKER_TEXT = ["NULL", "null", "n/a", "N/A", "NaN", "none", "None"]
@@ -78,6 +79,8 @@ def test_parquet_keeps_marker_text_and_nulls_blanks(sqlite_session, sqlite_engin
     _NullSentinelTable.load_file(sqlite_session, path, dedupe=False)
     sqlite_session.commit()
 
-    stored = dict(sqlite_session.execute(sa.select(NullSentinelTable.id, NullSentinelTable.name)).all())
+    stored = dict(
+        sqlite_session.execute(sa.select(NullSentinelTable.id, NullSentinelTable.name)).all()
+    )
     assert [stored[i] for i in range(1, len(values) + 1)] == _MARKER_TEXT + [None] * len(_BLANKS)
     assert stored[99] == "keep me"

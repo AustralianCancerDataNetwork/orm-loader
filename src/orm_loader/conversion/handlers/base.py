@@ -14,6 +14,7 @@ from ..values import NULL_STRING, Interpretation, as_array, is_text_like, no_fai
 if TYPE_CHECKING:
     from ..policy import NullPolicy
 
+
 class ColumnHandler(ABC):
     """Interprets the raw values of the columns of one kind of column type.
 
@@ -128,7 +129,9 @@ class ConvertingHandler(ColumnHandler):
             arr = arr.dictionary_decode()
         return self._interpret_text(arr, sa_type, nulls)
 
-    def _interpret_text(self, raw: pa.Array, sa_type: TypeEngine[Any], nulls: NullPolicy) -> Interpretation:
+    def _interpret_text(
+        self, raw: pa.Array, sa_type: TypeEngine[Any], nulls: NullPolicy
+    ) -> Interpretation:
         trimmed = pc.utf8_trim_whitespace(raw)
         missing = self.missing(trimmed, nulls)
         cleaned = pc.if_else(missing, NULL_STRING, self.clean(raw, trimmed))

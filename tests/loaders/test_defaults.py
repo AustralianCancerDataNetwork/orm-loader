@@ -2,7 +2,7 @@
 
 from datetime import date, datetime
 from pathlib import Path
-from typing import Type, cast
+from typing import cast
 
 import pytest
 import sqlalchemy as sa
@@ -13,7 +13,7 @@ from orm_loader.helpers import IngestError, RequiredValueError
 from orm_loader.tables.typing import FileTableProtocol
 from tests.models import DemoDefaultedRecord, DemoDefaultKinds
 
-_Table = cast(Type[FileTableProtocol], DemoDefaultedRecord)
+_Table = cast(type[FileTableProtocol], DemoDefaultedRecord)
 FULL = "demo_id,demo_status,demo_priority,demo_stamp,demo_note\n"
 
 
@@ -29,7 +29,13 @@ def _load(session, tmp_path: Path, text: str, **kwargs) -> int:
 
 def _rows(session) -> list[tuple]:
     model = DemoDefaultedRecord
-    columns = (model.demo_id, model.demo_status, model.demo_priority, model.demo_stamp, model.demo_note)
+    columns = (
+        model.demo_id,
+        model.demo_status,
+        model.demo_priority,
+        model.demo_stamp,
+        model.demo_note,
+    )
     return [tuple(r) for r in session.execute(sa.select(*columns).order_by(model.demo_id))]
 
 
@@ -65,8 +71,10 @@ def test_a_missing_callable_default_can_be_rejected_by_row(dialect_session, tmp_
 def test_a_reload_applies_the_default_to_an_existing_row(dialect_session, tmp_path, strategy):
     _load(dialect_session, tmp_path, FULL + "1,closed,9,s,kept\n")
     _load(dialect_session, tmp_path, FULL + "1,,,t,\n2,,,u,\n", merge_strategy=strategy)
-    expected = {"replace": [(1, "open", 5, "t", "n"), (2, "open", 5, "u", "n")],
-                "upsert": [(1, "closed", 9, "s", "kept"), (2, "open", 5, "u", "n")]}
+    expected = {
+        "replace": [(1, "open", 5, "t", "n"), (2, "open", 5, "u", "n")],
+        "upsert": [(1, "closed", 9, "s", "kept"), (2, "open", 5, "u", "n")],
+    }
     assert _rows(dialect_session) == expected[strategy]
 
 
@@ -74,7 +82,9 @@ def test_every_kind_of_default_is_applied_and_read_back_on_every_dialect(dialect
     path = tmp_path / "demo_default_kinds.csv"
     path.write_text("kind_id\n1\n2\n")
     tag = None if dialect_session.get_bind().dialect.name == "sqlite" else STAGING_SCHEMA
-    cast(Type[FileTableProtocol], DemoDefaultKinds).load_file(dialect_session, path, staging_schema_tag=tag)
+    cast(type[FileTableProtocol], DemoDefaultKinds).load_file(
+        dialect_session, path, staging_schema_tag=tag
+    )
     dialect_session.commit()
     dialect_session.expire_all()
     rows = dialect_session.execute(sa.select(DemoDefaultKinds)).scalars().all()
@@ -82,7 +92,11 @@ def test_every_kind_of_default_is_applied_and_read_back_on_every_dialect(dialect
     for row in rows:
         assert (row.kind_text, row.kind_int, row.kind_bool) == ("it's text", 7, True)
         assert (row.kind_date, row.kind_stamp) == (date(2000, 1, 2), datetime(2000, 1, 2, 10, 30))
-        assert (row.kind_expression, row.kind_py_int, row.kind_py_date) == ("expr", 5, date(2001, 2, 3))
+        assert (row.kind_expression, row.kind_py_int, row.kind_py_date) == (
+            "expr",
+            5,
+            date(2001, 2, 3),
+        )
         assert isinstance(row.kind_now, datetime)
 
 
@@ -92,10 +106,14 @@ def _keyed(session, tmp_path: Path, text: str, **kwargs) -> list[tuple]:
     path = tmp_path / "demo_keyed_record.csv"
     path.write_text(text)
     tag = None if session.get_bind().dialect.name == "sqlite" else STAGING_SCHEMA
-    cast(Type[FileTableProtocol], DemoKeyedRecord).load_file(session, path, staging_schema_tag=tag, **kwargs)
+    cast(type[FileTableProtocol], DemoKeyedRecord).load_file(
+        session, path, staging_schema_tag=tag, **kwargs
+    )
     session.commit()
     columns = (DemoKeyedRecord.keyed_id, DemoKeyedRecord.keyed_name)
-    return [tuple(r) for r in session.execute(sa.select(*columns).order_by(DemoKeyedRecord.keyed_id))]
+    return [
+        tuple(r) for r in session.execute(sa.select(*columns).order_by(DemoKeyedRecord.keyed_id))
+    ]
 
 
 def test_a_primary_key_the_file_lacks_is_a_missing_required_column(dialect_session, tmp_path):
@@ -104,7 +122,10 @@ def test_a_primary_key_the_file_lacks_is_a_missing_required_column(dialect_sessi
 
 
 def test_a_key_in_the_file_is_loaded_and_may_not_be_blank(dialect_session, tmp_path):
-    assert _keyed(dialect_session, tmp_path, "keyed_id,keyed_name\n10,a\n20,b\n") == [(10, "a"), (20, "b")]
+    assert _keyed(dialect_session, tmp_path, "keyed_id,keyed_name\n10,a\n20,b\n") == [
+        (10, "a"),
+        (20, "b"),
+    ]
     with pytest.raises(RequiredValueError, match="keyed_id"):
         _keyed(dialect_session, tmp_path, "keyed_id,keyed_name\n,a\n")
 
@@ -114,18 +135,18 @@ def test_expression_defaults_fill_nulls_across_reader_batches(dialect_session, t
 
     path = tmp_path / "demo_default_kinds.csv"
     path.write_text(
-        "kind_id,kind_now\n1,2020-01-01 00:00:00\n"
-        + "".join(f"{i},\n" for i in range(2, 201))
+        "kind_id,kind_now\n1,2020-01-01 00:00:00\n" + "".join(f"{i},\n" for i in range(2, 201))
     )
     tag = None if dialect_session.get_bind().dialect.name == "sqlite" else STAGING_SCHEMA
-    table = cast(Type[FileTableProtocol], DemoDefaultKinds)
+    table = cast(type[FileTableProtocol], DemoDefaultKinds)
     reader = DelimitedTextReader(path, DemoDefaultKinds.model_columns(), block_size=256)
     assert len(list(reader.batches())) > 1
     table.load_file(dialect_session, path, staging_schema_tag=tag, reader=reader)
     dialect_session.commit()
     rows = dialect_session.execute(
-        sa.select(DemoDefaultKinds.kind_id, DemoDefaultKinds.kind_now)
-        .order_by(DemoDefaultKinds.kind_id)
+        sa.select(DemoDefaultKinds.kind_id, DemoDefaultKinds.kind_now).order_by(
+            DemoDefaultKinds.kind_id
+        )
     ).all()
     assert len(rows) == 200
     assert rows[0].kind_now == datetime(2020, 1, 1)
@@ -140,4 +161,6 @@ def test_a_default_the_handler_cannot_read_is_an_error_naming_the_column(dialect
     path.write_text("bad_id\n1\n")
     tag = None if dialect_session.get_bind().dialect.name == "sqlite" else STAGING_SCHEMA
     with pytest.raises(ConversionError, match="bad_count"):
-        cast(Type[FileTableProtocol], DemoBadDefaultRecord).load_file(dialect_session, path, staging_schema_tag=tag)
+        cast(type[FileTableProtocol], DemoBadDefaultRecord).load_file(
+            dialect_session, path, staging_schema_tag=tag
+        )

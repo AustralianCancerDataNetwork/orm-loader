@@ -2,7 +2,14 @@ from __future__ import annotations
 
 import pytest
 import sqlalchemy as sa
-from oa_configurator import CDMDatabaseConfig, ConnectionConfig, Resolver, SchemaClaim, StackConfig
+from oa_configurator import (
+    CDMDatabaseConfig,
+    ConnectionConfig,
+    ResolvedCDMDatabase,
+    Resolver,
+    SchemaClaim,
+    StackConfig,
+)
 
 from orm_loader.helpers import bootstrap, create_db, create_tables
 
@@ -86,7 +93,9 @@ def test_create_tables_crossing_subset_resolves_local_fk_to_existing_table(tmp_p
     parent = sa.Table(
         "local_parent", metadata, sa.Column("id", sa.Integer, primary_key=True), schema="primary"
     )
-    sa.Table("remote_parent", metadata, sa.Column("id", sa.Integer, primary_key=True), schema="vocab")
+    sa.Table(
+        "remote_parent", metadata, sa.Column("id", sa.Integer, primary_key=True), schema="vocab"
+    )
     child = sa.Table(
         "crossing_child",
         metadata,
@@ -102,9 +111,9 @@ def test_create_tables_crossing_subset_resolves_local_fk_to_existing_table(tmp_p
         create_tables(connection, [child], resolved=resolved)
 
     assert sa.inspect(engine).has_table("crossing_child")
-    assert [fk["referred_table"] for fk in sa.inspect(engine).get_foreign_keys("crossing_child")] == [
-        "local_parent"
-    ]
+    assert [
+        fk["referred_table"] for fk in sa.inspect(engine).get_foreign_keys("crossing_child")
+    ] == ["local_parent"]
     engine.dispose()
 
 
@@ -175,6 +184,7 @@ def test_create_tables_resolves_a_schema_claims_only_tag_on_duckdb():
         },
     )
     resolved = Resolver(stack).resolve_database("test_cdm")
+    assert isinstance(resolved, ResolvedCDMDatabase)
     engine, _ = resolved.create_engines(
         schema_claims=[SchemaClaim(schema_tag="custom", physical_schema="cdm")]
     )

@@ -2,7 +2,7 @@
 
 import logging
 from pathlib import Path
-from typing import Type, cast
+from typing import cast
 
 import pyarrow as pa
 import pyarrow.csv as pv
@@ -17,8 +17,8 @@ from orm_loader.loaders import DelimitedTextReader, LoadReport, ParquetReader
 from orm_loader.tables.typing import FileTableProtocol
 from tests.models import DemoBinaryRecord, DemoRecord, DemoRequiredRecord
 
-_Demo = cast(Type[FileTableProtocol], DemoRecord)
-_DemoRequired = cast(Type[FileTableProtocol], DemoRequiredRecord)
+_Demo = cast(type[FileTableProtocol], DemoRecord)
+_DemoRequired = cast(type[FileTableProtocol], DemoRequiredRecord)
 REJECT = ConversionPolicy(errors=ErrorPolicy(on_error="reject_row"))
 COLUMNS = DemoRecord.model_columns()
 
@@ -33,11 +33,16 @@ def _load(session, tmp_path: Path, text: str, **kwargs) -> int:
 
 
 def _ids(session) -> list[int]:
-    return [r[0] for r in session.execute(sa.select(DemoRecord.demo_id).order_by(DemoRecord.demo_id))]
+    return [
+        r[0] for r in session.execute(sa.select(DemoRecord.demo_id).order_by(DemoRecord.demo_id))
+    ]
 
 
-def _rejects(path: Path) -> list[dict]:
-    options = pv.ConvertOptions(column_types={"row": pa.int64(), "column": pa.string(), "reason": pa.string()})
+def _rejects(path: Path | None) -> list[dict]:
+    assert path is not None
+    options = pv.ConvertOptions(
+        column_types={"row": pa.int64(), "column": pa.string(), "reason": pa.string()}
+    )
     return pv.read_csv(path, convert_options=options).to_pylist()
 
 
@@ -66,7 +71,10 @@ def test_row_numbers_count_the_malformed_lines_before_them(dialect_session, tmp_
     report = LoadReport()
     text = "demo_id,demo_label,demo_number\n1,a,1\n2,b\n3,c,3\n4,d,x\n5,e,5\n"
     assert _load(dialect_session, tmp_path, text, policy=REJECT, report=report) == 3
-    assert [(r["row"], r["column"]) for r in _rejects(report.rejects_path)] == [(2, ""), (4, "demo_number")]
+    assert [(r["row"], r["column"]) for r in _rejects(report.rejects_path)] == [
+        (2, ""),
+        (4, "demo_number"),
+    ]
 
 
 def test_a_required_value_error_names_the_row_in_the_file(dialect_session, tmp_path):
@@ -83,7 +91,10 @@ def test_a_required_value_error_names_the_row_in_the_file(dialect_session, tmp_p
 
 def test_a_file_of_only_ragged_lines_is_rejected_not_silently_empty(dialect_session, tmp_path):
     report = LoadReport()
-    assert _load(dialect_session, tmp_path, "demo_id,demo_label\n1\n2\n", policy=REJECT, report=report) == 0
+    assert (
+        _load(dialect_session, tmp_path, "demo_id,demo_label\n1\n2\n", policy=REJECT, report=report)
+        == 0
+    )
     assert report.rows_read == 2 and report.rows_rejected == 2 and report.accounted
 
 
@@ -99,6 +110,7 @@ def test_undecodable_bytes_fail_with_the_file_name(tmp_path):
 def test_a_clean_reload_removes_the_rejects_file_of_the_previous_load(dialect_session, tmp_path):
     first = LoadReport()
     _load(dialect_session, tmp_path, RAGGED, policy=REJECT, report=first)
+    assert first.rejects_path is not None
     assert first.rejects_path.exists()
     second = LoadReport()
     _load(dialect_session, tmp_path, "demo_id,demo_label\n1,a\n", policy=REJECT, report=second)
@@ -133,7 +145,11 @@ def test_parquet_column_names_are_normalised_like_delimited_headers(tmp_path):
 def test_a_hash_suffix_is_stripped_only_at_the_end_of_a_name(tmp_path):
     path = tmp_path / "demo_record.csv"
     path.write_text("demo_id,my_hash_value,demo_label_hash\n1,x,a\n")
-    assert DelimitedTextReader(path, COLUMNS).file_columns == ["demo_id", "my_hash_value", "demo_label"]
+    assert DelimitedTextReader(path, COLUMNS).file_columns == [
+        "demo_id",
+        "my_hash_value",
+        "demo_label",
+    ]
 
 
 def test_duplicate_names_after_normalisation_are_an_error(tmp_path):
@@ -153,11 +169,13 @@ def test_invalid_utf8_is_reported_without_the_quote_mode_hint(tmp_path):
     assert "quote_mode" not in str(error.value)
 
 
-def test_a_column_type_without_a_handler_is_fine_when_values_are_not_interpreted(dialect_session, tmp_path):
+def test_a_column_type_without_a_handler_is_fine_when_values_are_not_interpreted(
+    dialect_session, tmp_path
+):
     path = tmp_path / "demo_binary_record.csv"
     path.write_text("demo_id,demo_blob\n1,abc\n")
     tag = None if dialect_session.get_bind().dialect.name == "sqlite" else STAGING_SCHEMA
-    table = cast(Type[FileTableProtocol], DemoBinaryRecord)
+    table = cast(type[FileTableProtocol], DemoBinaryRecord)
     with pytest.raises(PolicyError, match="demo_blob"):
         table.load_file(dialect_session, path, staging_schema_tag=tag)
     assert table.load_file(dialect_session, path, staging_schema_tag=tag, normalise=False) == 1

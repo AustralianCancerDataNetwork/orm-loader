@@ -8,11 +8,16 @@
 # will not affect package-level consumers. A later breaking release can rename
 # the modules and remove the legacy paths.
 
-
 from .materialised_view_contracts import (
     CreateMaterializedViewIndex,
     DropMaterializedView,
     MaterializedViewIndex,
+)
+from .materialised_view_errors import (
+    ConcurrentRefreshNotEligibleError,
+    MaterializationError,
+    MaterializationFailure,
+    MaterializationOperation,
 )
 from .materialised_view_mixin import (
     CreateMaterializedView,
@@ -20,12 +25,6 @@ from .materialised_view_mixin import (
     MaterializedViewMixin,
     refresh_all_mvs,
     resolve_mv_refresh_order,
-)
-from .materialised_view_errors import (
-    ConcurrentRefreshNotEligibleError,
-    MaterializationError,
-    MaterializationFailure,
-    MaterializationOperation,
 )
 
 __all__ = [

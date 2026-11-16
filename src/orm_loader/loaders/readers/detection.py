@@ -8,17 +8,21 @@ import chardet
 
 logger = logging.getLogger(__name__)
 
+
 def infer_encoding(file):
-    with open(file, 'rb') as infile:
+    with open(file, "rb") as infile:
         encoding = chardet.detect(infile.read(10000))
-    if encoding['encoding'] == 'ascii':
-        encoding['encoding'] = 'utf-8' # utf-8 valid superset of ascii, so being more conservative here just because it flakes occasionally
+    if encoding["encoding"] == "ascii":
+        encoding["encoding"] = (
+            "utf-8"  # utf-8 valid superset of ascii, so being more conservative here just because it flakes occasionally
+        )
     return encoding
 
+
 def infer_delim(file):
-    with open(file, 'rb') as infile:
+    with open(file, "rb") as infile:
         line = infile.readline()
-    return '\t' if line.count(b'\t') > line.count(b',') else ','
+    return "\t" if line.count(b"\t") > line.count(b",") else ","
 
 
 def resolve_quote_mode(quote_mode: str, delimiter: str) -> str:

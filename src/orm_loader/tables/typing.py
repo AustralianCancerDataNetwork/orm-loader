@@ -1,9 +1,20 @@
-from typing import Protocol, ClassVar, runtime_checkable, TYPE_CHECKING, Optional, Dict, Any, Unpack, TypedDict
-import sqlalchemy.orm as so
-import sqlalchemy as sa
 from collections.abc import Mapping
-from pathlib import Path
 from contextlib import AbstractContextManager
+from pathlib import Path
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    ClassVar,
+    Optional,
+    Protocol,
+    TypedDict,
+    Unpack,
+    runtime_checkable,
+)
+
+import sqlalchemy as sa
+import sqlalchemy.orm as so
+
 if TYPE_CHECKING:
     from oa_configurator import ResolvedDatabase
 
@@ -11,10 +22,12 @@ if TYPE_CHECKING:
     from ..conversion import ConversionPolicy
     from ..loaders import FileReader, LoadReport
 
+
 class ToDictKwargs(TypedDict, total=False):
     include_nulls: bool
     only: set[str] | None
     exclude: set[str] | None
+
 
 @runtime_checkable
 class ORMTableProtocol(Protocol):
@@ -58,6 +71,7 @@ class ORMTableProtocol(Protocol):
     @classmethod
     def sql_expression_defaults(cls) -> dict[str, sa.ClauseElement]: ...
 
+
 @runtime_checkable
 class FileTableProtocol(ORMTableProtocol, Protocol):
     """
@@ -91,9 +105,9 @@ class FileTableProtocol(ORMTableProtocol, Protocol):
         staging_schema_tag: str | None = None,
         validate_deferred_fks: bool = True,
         resolved: Optional["ResolvedDatabase"] = None,
-        physical_schemas: Optional[Mapping[str, str | None]] = None,
+        physical_schemas: Mapping[str, str | None] | None = None,
         policy: Optional["ConversionPolicy"] = None,
-        rejects_dir: Optional[Path] = None,
+        rejects_dir: Path | None = None,
         report: Optional["LoadReport"] = None,
     ) -> int: ...
 
@@ -116,7 +130,7 @@ class FileTableProtocol(ORMTableProtocol, Protocol):
         *,
         staging_schema_tag: str | None = None,
         resolved: Optional["ResolvedDatabase"] = None,
-        physical_schemas: Optional[Mapping[str, str | None]] = None,
+        physical_schemas: Mapping[str, str | None] | None = None,
     ) -> None: ...
 
     @classmethod
@@ -128,9 +142,8 @@ class FileTableProtocol(ORMTableProtocol, Protocol):
     @classmethod
     def manage_indices(
         cls, session: so.Session, index_strategy: str = "auto", *, backend: "DatabaseBackend"
-    ) -> AbstractContextManager[None]:
-        ...
-    
+    ) -> AbstractContextManager[None]: ...
+
 
 @runtime_checkable
 class SerializedTableProtocol(Protocol):
@@ -151,7 +164,7 @@ class SerializedTableProtocol(Protocol):
         include_nulls: bool = False,
         only: set[str] | None = None,
         exclude: set[str] | None = None,
-    ) -> Dict[str, Any]: ...
+    ) -> dict[str, Any]: ...
 
     def to_json(self, **kwargs: Unpack[ToDictKwargs]) -> str: ...
 

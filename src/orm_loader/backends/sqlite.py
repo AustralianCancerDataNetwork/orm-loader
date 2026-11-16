@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
 import logging
+from collections.abc import Iterable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
@@ -63,8 +63,7 @@ class SQLiteBackend(DatabaseBackend):
             if normalised in {"0", "OFF"}:
                 return "OFF"
         raise ValueError(
-            f"Invalid SQLite foreign_keys state {previous_state!r}. "
-            "Expected 0, 1, 'OFF', or 'ON'."
+            f"Invalid SQLite foreign_keys state {previous_state!r}. Expected 0, 1, 'OFF', or 'ON'."
         )
 
     @property
@@ -85,7 +84,7 @@ class SQLiteBackend(DatabaseBackend):
 
     def insert_batches(
         self,
-        ctx: "LoaderContext",
+        ctx: LoaderContext,
         staging: sa.Table,
         batches: Iterable[pa.Table],
         columns: Sequence[str],
@@ -116,7 +115,9 @@ class SQLiteBackend(DatabaseBackend):
             column = pc.cast(column, pa.string())
         return column.to_pylist()
 
-    def disable_fk_check(self, session: so.Session, *, mapper: Any | None = None) -> str | int | None:
+    def disable_fk_check(
+        self, session: so.Session, *, mapper: Any | None = None
+    ) -> str | int | None:
         """Turn ``PRAGMA foreign_keys`` off and return its previous value.
 
         SQLite ignores the pragma inside an open transaction, so the state is
@@ -130,7 +131,7 @@ class SQLiteBackend(DatabaseBackend):
         execute_options = {"bind_arguments": {"mapper": mapper}} if mapper is not None else {}
         previous_state = session.execute(text("PRAGMA foreign_keys"), **execute_options).scalar()
         if not isinstance(previous_state, int):
-            raise RuntimeError("Expected SQLite FK state to be an int")
+            raise RuntimeError("Expected SQLite FK state to be an int")  # noqa: TRY004 - bad database result
         session.execute(text("PRAGMA foreign_keys = OFF"), **execute_options)
         if session.execute(text("PRAGMA foreign_keys"), **execute_options).scalar():
             raise RuntimeError(
@@ -151,13 +152,13 @@ class SQLiteBackend(DatabaseBackend):
         session.execute(text(f"PRAGMA foreign_keys = {safe_state}"), **execute_options)
 
     def _pagination_column(
-        self, table_cls: type["FileTableProtocol"], staging: sa.Table
+        self, table_cls: type[FileTableProtocol], staging: sa.Table
     ) -> sa.ColumnElement[int]:
         """SQLite's implicit rowid is already gapless and indexed."""
         return sa.literal_column("rowid")
 
     def _ensure_pagination_index(
-        self, table_cls: type["FileTableProtocol"], staging: sa.Table, session: so.Session
+        self, table_cls: type[FileTableProtocol], staging: sa.Table, session: so.Session
     ) -> None:
         """No-op: rowid needs no index, and the staging table has no _rownum column."""
         return
@@ -172,7 +173,7 @@ class SQLiteBackend(DatabaseBackend):
 
     def merge_replace(
         self,
-        table_cls: type["FileTableProtocol"],
+        table_cls: type[FileTableProtocol],
         session: so.Session,
         pk_cols: list[str],
         staging: sa.Table,
@@ -210,7 +211,7 @@ class SQLiteBackend(DatabaseBackend):
 
     def merge_upsert(
         self,
-        table_cls: type["FileTableProtocol"],
+        table_cls: type[FileTableProtocol],
         session: so.Session,
         pk_cols: list[str],
         staging: sa.Table,
@@ -230,16 +231,19 @@ class SQLiteBackend(DatabaseBackend):
                 .on_conflict_do_nothing(index_elements=[target_columns[c] for c in pk_cols])
             )
 
-        non_paginated_select = sa.select(*(self._staging_value(table_cls, staging, c) for c in insertable_cols))
+        non_paginated_select = sa.select(
+            *(self._staging_value(table_cls, staging, c) for c in insertable_cols)
+        )
 
         for batch_range in self._paginate_batches(table_cls, staging, session, merge_batch_size):
-
-            select_ = non_paginated_select.where(batch_range if batch_range is not None else sa.true())
+            select_ = non_paginated_select.where(
+                batch_range if batch_range is not None else sa.true()
+            )
             session.execute(_upsert(select_))
 
     def merge_insert(
         self,
-        table_cls: type["FileTableProtocol"],
+        table_cls: type[FileTableProtocol],
         session: so.Session,
         staging: sa.Table,
         *,
@@ -250,11 +254,19 @@ class SQLiteBackend(DatabaseBackend):
         target = table_cls.__table__
         target_columns = {column.name: column for column in target.columns}
         insertable_cols = self._insertable_column_names(table_cls, staging)
-        non_paginated_select = sa.select(*(self._staging_value(table_cls, staging, c) for c in insertable_cols))
+        non_paginated_select = sa.select(
+            *(self._staging_value(table_cls, staging, c) for c in insertable_cols)
+        )
 
         def _insert(select_: Any) -> sa.Insert:
-            return sa.insert(target).from_select([target_columns[c] for c in insertable_cols], select_)
+            return sa.insert(target).from_select(
+                [target_columns[c] for c in insertable_cols], select_
+            )
 
         for batch_range in self._paginate_batches(table_cls, staging, session, merge_batch_size):
-            select_ = non_paginated_select if batch_range is None else non_paginated_select.where(batch_range)
+            select_ = (
+                non_paginated_select
+                if batch_range is None
+                else non_paginated_select.where(batch_range)
+            )
             session.execute(_insert(select_))

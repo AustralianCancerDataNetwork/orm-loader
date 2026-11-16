@@ -59,7 +59,10 @@ def test_a_type_without_a_handler_is_an_error_naming_the_column():
 def test_passthrough_is_an_explicit_choice_for_a_column():
     policy = ConversionPolicy(columns={("t", "c"): PassthroughHandler()})
     raw = pa.array([b"a", None])
-    assert interpret(raw, sa.LargeBinary(), policy, table_name="t", column_name="c")[0] == [b"a", None]
+    assert interpret(raw, sa.LargeBinary(), policy, table_name="t", column_name="c")[0] == [
+        b"a",
+        None,
+    ]
 
 
 def test_a_type_decorator_is_handled_as_the_type_it_stores():
@@ -108,9 +111,9 @@ def test_column_handlers_win_over_type_handlers():
 def test_the_handler_and_column_mappings_cannot_be_changed_afterwards():
     policy = ConversionPolicy(columns={("t", "c"): IntegerHandler()})
     with pytest.raises(TypeError):
-        policy.columns[("t", "d")] = IntegerHandler()  # type: ignore[index]
+        policy.columns[("t", "d")] = IntegerHandler()  # ty: ignore[invalid-assignment]
 
 
 def test_unknown_error_mode_is_rejected():
     with pytest.raises(ValueError, match="on_error"):
-        ErrorPolicy(on_error="ignore")  # type: ignore[arg-type]
+        ErrorPolicy(on_error="ignore")  # ty: ignore[invalid-argument-type]

@@ -26,7 +26,9 @@ def test_open_reader_selects_the_reader_by_suffix(tmp_path):
     pq.write_table(pa.table({"demo_id": [1]}), tmp_path / "demo_record.parquet")
     assert isinstance(open_reader(tmp_path / "demo_record.parquet", COLUMNS), ParquetReader)
     for name in ("demo_record.csv", "demo_record.tsv", "demo_record.txt"):
-        assert isinstance(open_reader(_write(tmp_path, "demo_id\n1\n", name), COLUMNS), DelimitedTextReader)
+        assert isinstance(
+            open_reader(_write(tmp_path, "demo_id\n1\n", name), COLUMNS), DelimitedTextReader
+        )
 
 
 def test_delimited_text_is_read_as_raw_strings_of_the_model_columns_in_file_order(tmp_path):
@@ -51,17 +53,21 @@ def test_headers_are_lowercased_and_stripped_of_quotes_and_hash_suffix(tmp_path)
 
 def test_a_quoted_and_an_unquoted_empty_field_are_both_empty_strings(tmp_path):
     path = _write(tmp_path, 'demo_id,demo_label\n1,\n2,""\n')
-    assert [r["demo_label"] for r in _rows(DelimitedTextReader(path, COLUMNS, quote_mode="csv"))] == ["", ""]
+    assert [
+        r["demo_label"] for r in _rows(DelimitedTextReader(path, COLUMNS, quote_mode="csv"))
+    ] == ["", ""]
 
 
 def test_embedded_newlines_and_tabs_survive(tmp_path):
     path = _write(tmp_path, 'demo_id,demo_label\n1,"a\nb"\n2,"c\td"\n')
-    assert [r["demo_label"] for r in _rows(DelimitedTextReader(path, COLUMNS, quote_mode="csv"))] == ["a\nb", "c\td"]
+    assert [
+        r["demo_label"] for r in _rows(DelimitedTextReader(path, COLUMNS, quote_mode="csv"))
+    ] == ["a\nb", "c\td"]
 
 
 def test_quote_modes_decide_what_double_quotes_mean(tmp_path):
     path = _write(tmp_path, 'demo_id\tdemo_label\n1\t"x"\n', "demo_record.tsv")
-    label = lambda mode: _rows(DelimitedTextReader(path, COLUMNS, quote_mode=mode))[0]["demo_label"]  # noqa: E731
+    label = lambda mode: _rows(DelimitedTextReader(path, COLUMNS, quote_mode=mode))[0]["demo_label"]
     assert label("csv") == "x"
     assert label("literal") == '"x"'
     assert label("by_delimiter") == '"x"'
@@ -69,7 +75,11 @@ def test_quote_modes_decide_what_double_quotes_mean(tmp_path):
 
 def test_a_quote_far_into_a_tab_delimited_file_is_read_literally_by_default(tmp_path):
     lines = "".join(f"{i}\tlabel {i}\n" for i in range(1, 5001))
-    path = _write(tmp_path, "demo_id\tdemo_label\n" + lines + '5001\t"Sick" headaches\n5002\tnext\n', "demo_record.tsv")
+    path = _write(
+        tmp_path,
+        "demo_id\tdemo_label\n" + lines + '5001\t"Sick" headaches\n5002\tnext\n',
+        "demo_record.tsv",
+    )
     rows = _rows(DelimitedTextReader(path, COLUMNS))
     assert [r["demo_label"] for r in rows[-2:]] == ['"Sick" headaches', "next"]
 
@@ -80,21 +90,33 @@ def test_a_file_is_read_in_several_batches_without_losing_rows(tmp_path):
     reader = DelimitedTextReader(path, COLUMNS, block_size=64 << 10)
     batches = list(reader.batches())
     assert len(batches) > 1
-    assert [row["demo_id"] for batch in batches for row in batch.to_pylist()] == [str(i) for i in range(1, 20_001)]
+    assert [row["demo_id"] for batch in batches for row in batch.to_pylist()] == [
+        str(i) for i in range(1, 20_001)
+    ]
 
 
 def test_an_empty_file_has_no_content_and_a_header_only_file_has_no_rows(tmp_path):
     empty = DelimitedTextReader(_write(tmp_path, "", "demo_record.csv"), COLUMNS)
     assert empty.empty and list(empty.batches()) == []
-    header_only = DelimitedTextReader(_write(tmp_path, "demo_id,demo_label\n", "other.csv"), COLUMNS)
+    header_only = DelimitedTextReader(
+        _write(tmp_path, "demo_id,demo_label\n", "other.csv"), COLUMNS
+    )
     assert not header_only.empty and list(header_only.batches()) == []
 
 
-@pytest.mark.parametrize("name, quote_mode", [("demo_record.csv", "csv"), ("demo_record.tsv", "literal")])
+@pytest.mark.parametrize(
+    "name, quote_mode", [("demo_record.csv", "csv"), ("demo_record.tsv", "literal")]
+)
 def test_a_delimited_reader_nulls_nothing(tmp_path, name, quote_mode):
     delimiter = "," if name.endswith("csv") else "\t"
-    path = _write(tmp_path, f"demo_id{delimiter}demo_label\n1{delimiter}\n2{delimiter}NULL\n3{delimiter} NA \n", name)
-    labels = [r["demo_label"] for r in _rows(DelimitedTextReader(path, COLUMNS, quote_mode=quote_mode))]
+    path = _write(
+        tmp_path,
+        f"demo_id{delimiter}demo_label\n1{delimiter}\n2{delimiter}NULL\n3{delimiter} NA \n",
+        name,
+    )
+    labels = [
+        r["demo_label"] for r in _rows(DelimitedTextReader(path, COLUMNS, quote_mode=quote_mode))
+    ]
     assert labels == ["", "NULL", " NA "]
 
 
@@ -105,7 +127,10 @@ def test_parquet_keeps_stored_types_and_ignores_other_columns(tmp_path):
     assert reader.columns == ["demo_id", "demo_label"]
     batch = next(iter(reader.batches()))
     assert batch.schema.types == [pa.int64(), pa.string()]
-    assert batch.to_pylist() == [{"demo_id": 1, "demo_label": "a"}, {"demo_id": 2, "demo_label": None}]
+    assert batch.to_pylist() == [
+        {"demo_id": 1, "demo_label": "a"},
+        {"demo_id": 2, "demo_label": None},
+    ]
 
 
 def test_parquet_is_read_in_batches_of_chunksize_rows(tmp_path):

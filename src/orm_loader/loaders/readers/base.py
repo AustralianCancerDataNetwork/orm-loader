@@ -62,7 +62,9 @@ class FileReader(ABC):
         IngestError
             Two columns have the same normalised name.
         """
-        normalised = [name.strip().strip('"').strip().lower().removesuffix("_hash") for name in names]
+        normalised = [
+            name.strip().strip('"').strip().lower().removesuffix("_hash") for name in names
+        ]
         if len(set(normalised)) != len(normalised):
             raise IngestError(f"{self.path.name}: duplicate column names in header {normalised}")
         return normalised

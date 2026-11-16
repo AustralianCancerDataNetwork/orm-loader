@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import cast
 
 import pytest
 import sqlalchemy as sa
@@ -6,7 +7,10 @@ import sqlalchemy as sa
 from orm_loader.backends import resolve_backend
 from orm_loader.helpers import IngestError
 from orm_loader.loaders import LoaderContext, open_reader, stage_file
+from orm_loader.tables.typing import FileTableProtocol
 from tests.models import FileLoaderTable
+
+_FileLoaderTable = cast(type[FileTableProtocol], FileLoaderTable)
 
 
 def _reader(ctx, **options):
@@ -16,9 +20,9 @@ def _reader(ctx, **options):
 def test_loader_context_fields(sqlite_session):
 
     ctx = LoaderContext(
-        tableclass=FileLoaderTable,
+        tableclass=_FileLoaderTable,
         session=sqlite_session,
-        backend=resolve_backend(sqlite_session, mapper=FileLoaderTable),
+        backend=resolve_backend(sqlite_session, mapper=_FileLoaderTable),
         path=Path("file.csv"),
         normalise=False,
         dedupe=True,
@@ -27,6 +31,7 @@ def test_loader_context_fields(sqlite_session):
     assert ctx.normalise is False
     assert ctx.dedupe is True
 
+
 def test_stage_file_case_insensitive_headers(tmp_path, sqlite_session):
     """
     The loader should accept mixed-case CSV headers and map them
@@ -34,24 +39,20 @@ def test_stage_file_case_insensitive_headers(tmp_path, sqlite_session):
     """
 
     csv = tmp_path / "test_case_headers.csv"
-    csv.write_text(
-        "ID,Value\n"
-        "1,alpha\n"
-        "2,beta\n"
-    )
+    csv.write_text("ID,Value\n1,alpha\n2,beta\n")
 
     ctx = LoaderContext(
-        tableclass=FileLoaderTable,
+        tableclass=_FileLoaderTable,
         session=sqlite_session,
-        backend=resolve_backend(sqlite_session, mapper=FileLoaderTable),
+        backend=resolve_backend(sqlite_session, mapper=_FileLoaderTable),
         path=csv,
         dedupe=True,
     )
 
-    n = stage_file(ctx, _reader(ctx), FileLoaderTable.__table__)
+    n = stage_file(ctx, _reader(ctx), _FileLoaderTable.__table__)
 
     rows = sqlite_session.execute(
-        sa.text('SELECT id, value FROM test_file_loader ORDER BY id')
+        sa.text("SELECT id, value FROM test_file_loader ORDER BY id")
     ).all()
 
     assert n == 2
@@ -66,24 +67,20 @@ def test_stage_file_literal_mode_preserves_quotes(tmp_path, sqlite_session):
     """
 
     csv = tmp_path / "quoted.csv"
-    csv.write_text(
-        'id,value\n'
-        '1,"hello"\n'
-        '2,"world"\n'
-    )
+    csv.write_text('id,value\n1,"hello"\n2,"world"\n')
 
     ctx = LoaderContext(
-        tableclass=FileLoaderTable,
+        tableclass=_FileLoaderTable,
         session=sqlite_session,
-        backend=resolve_backend(sqlite_session, mapper=FileLoaderTable),
+        backend=resolve_backend(sqlite_session, mapper=_FileLoaderTable),
         path=csv,
         dedupe=True,
     )
 
-    n = stage_file(ctx, _reader(ctx, quote_mode="literal"), FileLoaderTable.__table__)
+    n = stage_file(ctx, _reader(ctx, quote_mode="literal"), _FileLoaderTable.__table__)
 
     rows = sqlite_session.execute(
-        sa.text('SELECT id, value FROM test_file_loader ORDER BY id')
+        sa.text("SELECT id, value FROM test_file_loader ORDER BY id")
     ).all()
 
     assert n == 2
@@ -97,24 +94,20 @@ def test_stage_file_csv_mode_strips_quotes(tmp_path, sqlite_session):
     """
 
     csv = tmp_path / "quoted.csv"
-    csv.write_text(
-        'id,value\n'
-        '1,"hello"\n'
-        '2,"world"\n'
-    )
+    csv.write_text('id,value\n1,"hello"\n2,"world"\n')
 
     ctx = LoaderContext(
-        tableclass=FileLoaderTable,
+        tableclass=_FileLoaderTable,
         session=sqlite_session,
-        backend=resolve_backend(sqlite_session, mapper=FileLoaderTable),
+        backend=resolve_backend(sqlite_session, mapper=_FileLoaderTable),
         path=csv,
         dedupe=True,
     )
 
-    n = stage_file(ctx, _reader(ctx, quote_mode="csv"), FileLoaderTable.__table__)
+    n = stage_file(ctx, _reader(ctx, quote_mode="csv"), _FileLoaderTable.__table__)
 
     rows = sqlite_session.execute(
-        sa.text('SELECT id, value FROM test_file_loader ORDER BY id')
+        sa.text("SELECT id, value FROM test_file_loader ORDER BY id")
     ).all()
 
     assert n == 2
@@ -128,24 +121,20 @@ def test_stage_file_by_delimiter_tab_preserves_quotes(tmp_path, sqlite_session):
     """
 
     tsv = tmp_path / "tab.tsv"
-    tsv.write_text(
-        'id\tvalue\n'
-        '1\t"hi"\n'
-        '2\tbye\n'
-    )
+    tsv.write_text('id\tvalue\n1\t"hi"\n2\tbye\n')
 
     ctx = LoaderContext(
-        tableclass=FileLoaderTable,
+        tableclass=_FileLoaderTable,
         session=sqlite_session,
-        backend=resolve_backend(sqlite_session, mapper=FileLoaderTable),
+        backend=resolve_backend(sqlite_session, mapper=_FileLoaderTable),
         path=tsv,
         dedupe=True,
     )
 
-    n = stage_file(ctx, _reader(ctx, quote_mode="by_delimiter"), FileLoaderTable.__table__)
+    n = stage_file(ctx, _reader(ctx, quote_mode="by_delimiter"), _FileLoaderTable.__table__)
 
     rows = sqlite_session.execute(
-        sa.text('SELECT id, value FROM test_file_loader ORDER BY id')
+        sa.text("SELECT id, value FROM test_file_loader ORDER BY id")
     ).all()
 
     assert n == 2
@@ -157,12 +146,12 @@ def test_file_without_data_rows_loads_nothing_whatever_its_header(tmp_path, sqli
         csv = tmp_path / "no_rows.csv"
         csv.write_text(text)
         ctx = LoaderContext(
-            tableclass=FileLoaderTable,
+            tableclass=_FileLoaderTable,
             session=sqlite_session,
-        backend=resolve_backend(sqlite_session, mapper=FileLoaderTable),
+            backend=resolve_backend(sqlite_session, mapper=_FileLoaderTable),
             path=csv,
         )
-        assert stage_file(ctx, _reader(ctx), FileLoaderTable.__table__) == 0
+        assert stage_file(ctx, _reader(ctx), _FileLoaderTable.__table__) == 0
         assert ctx.report.rows_read == 0
 
 
@@ -171,13 +160,13 @@ def test_accounting_is_checked_against_the_staging_table(tmp_path, sqlite_sessio
     csv = tmp_path / "test_file_loader.csv"
     csv.write_text("id,value\n1,a\n2,b\n3,c\n")
     ctx = LoaderContext(
-        tableclass=FileLoaderTable,
+        tableclass=_FileLoaderTable,
         session=sqlite_session,
-        backend=resolve_backend(sqlite_session, mapper=FileLoaderTable),
+        backend=resolve_backend(sqlite_session, mapper=_FileLoaderTable),
         path=csv,
         dedupe=False,
     )
-    backend = resolve_backend(sqlite_session, mapper=FileLoaderTable)
+    backend = resolve_backend(sqlite_session, mapper=_FileLoaderTable)
     insert = type(backend).insert_batches
 
     def losing(self, ctx, staging, batches, columns):
@@ -185,4 +174,4 @@ def test_accounting_is_checked_against_the_staging_table(tmp_path, sqlite_sessio
 
     monkeypatch.setattr(type(backend), "insert_batches", losing)
     with pytest.raises(IngestError, match="read 3 rows but loaded 0"):
-        stage_file(ctx, _reader(ctx), FileLoaderTable.__table__)
+        stage_file(ctx, _reader(ctx), _FileLoaderTable.__table__)

@@ -186,7 +186,12 @@ def stage_file(ctx: LoaderContext, reader: FileReader, staging: sa.Table) -> int
         return 0
     ignored = [name for name in reader.file_columns if name not in reader.columns]
     if ignored:
-        logger.warning("File %s has columns that %s does not have, which are ignored: %s", ctx.path.name, table_name, ignored)
+        logger.warning(
+            "File %s has columns that %s does not have, which are ignored: %s",
+            ctx.path.name,
+            table_name,
+            ignored,
+        )
     _require_columns_present(ctx.tableclass, reader.columns, normalise=ctx.normalise)
     backend = ctx.backend
     rejects_dir = ctx.rejects_dir or ctx.path.parent / "rejects"

@@ -79,7 +79,12 @@ class DelimitedTextReader(FileReader):
         return self.normalise_headers(header.lstrip("\ufeff").rstrip("\r\n").split(self.delimiter))
 
     def _skip_row(self, row: pv.InvalidRow) -> Literal["skip"]:
-        self.skipped.append((row.number, f"expected {row.expected_columns} columns, got {row.actual_columns}: {row.text.rstrip()}"))
+        self.skipped.append(
+            (
+                row.number,
+                f"expected {row.expected_columns} columns, got {row.actual_columns}: {row.text.rstrip()}",
+            )
+        )
         return "skip"
 
     def batches(self) -> Iterator[pa.RecordBatch]:
@@ -118,7 +123,9 @@ class DelimitedTextReader(FileReader):
                     if batch.num_rows:
                         yield batch
         except UnicodeDecodeError as exc:
-            raise IngestError(f"{self.path.name}: cannot decode the file as {self.encoding}: {exc.reason}.") from exc
+            raise IngestError(
+                f"{self.path.name}: cannot decode the file as {self.encoding}: {exc.reason}."
+            ) from exc
         except pa.ArrowInvalid as exc:
             if "Empty CSV file" in str(exc):
                 return

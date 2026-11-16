@@ -1,24 +1,24 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Type, cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
 import sqlalchemy as sa
-
 from oa_configurator import Dialect
 from oa_configurator.testing import DIALECT_PARAMS
+
 from orm_loader.backends import STAGING_SCHEMA, DatabaseBackend
 from orm_loader.backends.resolve import resolve_backend
 from tests.conftest import session_for
-from tests.models import ComputedColumnTable, CompositeTable
+from tests.models import CompositeTable, ComputedColumnTable
 
 if TYPE_CHECKING:
     import sqlalchemy.orm as so
 
     from orm_loader.tables.typing import FileTableProtocol
 
-_ComputedTableCls = cast("Type[FileTableProtocol]", ComputedColumnTable)
-_CompositeTableCls = cast("Type[FileTableProtocol]", CompositeTable)
+_ComputedTableCls = cast("type[FileTableProtocol]", ComputedColumnTable)
+_CompositeTableCls = cast("type[FileTableProtocol]", CompositeTable)
 
 # merge_replace deletes on sqlite/postgres but updates in place on DuckDB
 # (see DuckDBBackend.merge_replace); these tests check the delete-only behavior.
@@ -26,7 +26,7 @@ _REPLACE_DELETE_SEMANTICS_PARAMS = tuple(p for p in DIALECT_PARAMS if p.values[0
 
 
 @pytest.fixture(params=DIALECT_PARAMS)
-def merge_backend(request: pytest.FixtureRequest) -> tuple[DatabaseBackend, "so.Session"]:
+def merge_backend(request: pytest.FixtureRequest) -> tuple[DatabaseBackend, so.Session]:
     """Same merge-method contract exercised against every real backend.
 
     DIALECT_PARAMS carries each dialect's own mark plus `forked` directly
@@ -41,7 +41,7 @@ def merge_backend(request: pytest.FixtureRequest) -> tuple[DatabaseBackend, "so.
 
 
 @pytest.mark.parametrize("merge_backend", _REPLACE_DELETE_SEMANTICS_PARAMS, indirect=True)
-def test_merge_replace_single_pk(merge_backend: tuple[DatabaseBackend, "so.Session"]) -> None:
+def test_merge_replace_single_pk(merge_backend: tuple[DatabaseBackend, so.Session]) -> None:
     backend, session = merge_backend
     staging = backend.create_staging_table(_ComputedTableCls, session)
 
@@ -58,7 +58,7 @@ def test_merge_replace_single_pk(merge_backend: tuple[DatabaseBackend, "so.Sessi
 
 
 @pytest.mark.parametrize("merge_backend", _REPLACE_DELETE_SEMANTICS_PARAMS, indirect=True)
-def test_merge_replace_composite_pk(merge_backend: tuple[DatabaseBackend, "so.Session"]) -> None:
+def test_merge_replace_composite_pk(merge_backend: tuple[DatabaseBackend, so.Session]) -> None:
     backend, session = merge_backend
     staging = backend.create_staging_table(_CompositeTableCls, session)
 
@@ -74,7 +74,9 @@ def test_merge_replace_composite_pk(merge_backend: tuple[DatabaseBackend, "so.Se
     assert remaining == [(2, 2)]
 
 
-def test_merge_insert_excludes_computed_columns(merge_backend: tuple[DatabaseBackend, "so.Session"]) -> None:
+def test_merge_insert_excludes_computed_columns(
+    merge_backend: tuple[DatabaseBackend, so.Session],
+) -> None:
     backend, session = merge_backend
     staging = backend.create_staging_table(_ComputedTableCls, session)
     session.execute(sa.insert(staging), [{"id": 1, "name": "alpha"}])
@@ -85,14 +87,14 @@ def test_merge_insert_excludes_computed_columns(merge_backend: tuple[DatabaseBac
     assert (row.id, row.name, row.slug) == (1, "alpha", "alpha")
 
 
-def test_merge_upsert_excludes_computed_columns(merge_backend: tuple[DatabaseBackend, "so.Session"]) -> None:
+def test_merge_upsert_excludes_computed_columns(
+    merge_backend: tuple[DatabaseBackend, so.Session],
+) -> None:
     backend, session = merge_backend
     staging = backend.create_staging_table(_ComputedTableCls, session)
 
     session.execute(sa.insert(ComputedColumnTable), [{"id": 1, "name": "existing"}])
-    session.execute(
-        sa.insert(staging), [{"id": 1, "name": "ignored"}, {"id": 2, "name": "new"}]
-    )
+    session.execute(sa.insert(staging), [{"id": 1, "name": "ignored"}, {"id": 2, "name": "new"}])
 
     backend.merge_upsert(_ComputedTableCls, session, ["id"], staging)
 
@@ -105,9 +107,7 @@ def test_merge_upsert_excludes_computed_columns(merge_backend: tuple[DatabaseBac
 def test_postgres_merge_insert_paginates_rownums_with_initial_gap(pg_session) -> None:
     backend = resolve_backend(pg_session, staging_schema_tag=STAGING_SCHEMA)
     staging = backend.create_staging_table(_ComputedTableCls, pg_session)
-    pg_session.execute(
-        sa.insert(staging), [{"id": i, "name": f"row{i}"} for i in range(10)]
-    )
+    pg_session.execute(sa.insert(staging), [{"id": i, "name": f"row{i}"} for i in range(10)])
     pg_session.execute(
         sa.text(
             'ALTER TABLE "staging"."_staging_computed_column_table" '
@@ -124,14 +124,16 @@ def test_postgres_merge_insert_paginates_rownums_with_initial_gap(pg_session) ->
 
     backend.merge_insert(_ComputedTableCls, pg_session, staging, merge_batch_size=2)
 
-    ids = pg_session.execute(
-        sa.select(ComputedColumnTable.id).order_by(ComputedColumnTable.id)
-    ).scalars().all()
+    ids = (
+        pg_session.execute(sa.select(ComputedColumnTable.id).order_by(ComputedColumnTable.id))
+        .scalars()
+        .all()
+    )
     assert ids == list(range(10))
 
 
 @pytest.mark.parametrize("merge_backend", _REPLACE_DELETE_SEMANTICS_PARAMS, indirect=True)
-def test_merge_replace_paginated_path(merge_backend: tuple[DatabaseBackend, "so.Session"]) -> None:
+def test_merge_replace_paginated_path(merge_backend: tuple[DatabaseBackend, so.Session]) -> None:
     backend, session = merge_backend
     staging = backend.create_staging_table(_ComputedTableCls, session)
 
@@ -148,7 +150,7 @@ def test_merge_replace_paginated_path(merge_backend: tuple[DatabaseBackend, "so.
     assert remaining == 0
 
 
-def test_merge_insert_paginated_path(merge_backend: tuple[DatabaseBackend, "so.Session"]) -> None:
+def test_merge_insert_paginated_path(merge_backend: tuple[DatabaseBackend, so.Session]) -> None:
     backend, session = merge_backend
     staging = backend.create_staging_table(_ComputedTableCls, session)
     session.execute(sa.insert(staging), [{"id": i, "name": f"row{i}"} for i in range(10)])
@@ -159,13 +161,11 @@ def test_merge_insert_paginated_path(merge_backend: tuple[DatabaseBackend, "so.S
     assert ids == list(range(10))
 
 
-def test_merge_upsert_paginated_path(merge_backend: tuple[DatabaseBackend, "so.Session"]) -> None:
+def test_merge_upsert_paginated_path(merge_backend: tuple[DatabaseBackend, so.Session]) -> None:
     backend, session = merge_backend
     staging = backend.create_staging_table(_ComputedTableCls, session)
 
-    session.execute(
-        sa.insert(ComputedColumnTable), [{"id": i, "name": "kept"} for i in range(5)]
-    )
+    session.execute(sa.insert(ComputedColumnTable), [{"id": i, "name": "kept"} for i in range(5)])
     session.execute(
         sa.insert(staging), [{"id": i, "name": "should-not-overwrite"} for i in range(10)]
     )
@@ -173,4 +173,7 @@ def test_merge_upsert_paginated_path(merge_backend: tuple[DatabaseBackend, "so.S
     backend.merge_upsert(_ComputedTableCls, session, ["id"], staging, merge_batch_size=3)
 
     rows = {r.id: r.name for r in session.execute(sa.select(ComputedColumnTable)).scalars().all()}
-    assert rows == {**{i: "kept" for i in range(5)}, **{i: "should-not-overwrite" for i in range(5, 10)}}
+    assert rows == {
+        **{i: "kept" for i in range(5)},
+        **{i: "should-not-overwrite" for i in range(5, 10)},
+    }

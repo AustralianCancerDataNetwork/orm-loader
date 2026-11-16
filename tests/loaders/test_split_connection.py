@@ -1,12 +1,17 @@
-"""Tests split CDM/vocab connection instances.
-"""
+"""Tests split CDM/vocab connection instances."""
 
 from __future__ import annotations
 
 import pandas as pd
 import sqlalchemy as sa
 import sqlalchemy.orm as so
-from oa_configurator import CDMDatabaseConfig, ConnectionConfig, Resolver, StackConfig
+from oa_configurator import (
+    CDMDatabaseConfig,
+    ConnectionConfig,
+    ResolvedCDMDatabase,
+    Resolver,
+    StackConfig,
+)
 from oa_configurator import Role as SchemaRole
 from sqlalchemy.exc import UnboundExecutionError
 
@@ -32,9 +37,8 @@ def test_vocab_file_load_routes_every_session_bind_to_vocab_file(tmp_path):
         )
     )
     resolved = resolver.resolve_database("test_cdm")
-    primary_engine, vocab_engine = resolved.create_engines(
-        schema_claims=[staging_schema_claim()]
-    )
+    assert isinstance(resolved, ResolvedCDMDatabase)
+    primary_engine, vocab_engine = resolved.create_engines(schema_claims=[staging_schema_claim()])
     VocabSchemaTable.__table__.create(vocab_engine)
 
     class MapperRoutedSession(so.Session):
@@ -46,7 +50,9 @@ def test_vocab_file_load_routes_every_session_bind_to_vocab_file(tmp_path):
             if mapper is None and clause is None:
                 raise UnboundExecutionError("a mapper or clause is required")
             if mapper is not None:
-                sqlite_engine = vocab_engine if mapper.__table__.schema == SchemaRole.VOCAB else primary_engine
+                sqlite_engine = (
+                    vocab_engine if mapper.__table__.schema == SchemaRole.VOCAB else primary_engine
+                )
                 self._last_mapper_engine = sqlite_engine
                 return sqlite_engine
             table = getattr(clause, "table", None)
@@ -70,9 +76,7 @@ def test_vocab_file_load_routes_every_session_bind_to_vocab_file(tmp_path):
         sqlite_session.close()
 
     with vocab_engine.connect() as connection:
-        rows = connection.execute(
-            sa.select(VocabSchemaTable.id, VocabSchemaTable.name)
-        ).all()
+        rows = connection.execute(sa.select(VocabSchemaTable.id, VocabSchemaTable.name)).all()
     assert rows == [(7, "vocab-row")]
     assert not sa.inspect(primary_engine).has_table("test_vocab_role_table")
     primary_engine.dispose()
@@ -84,10 +88,15 @@ def test_load_file_across_two_genuinely_separate_connections(pg_db, sqlite_sessi
     SQLite, vocab connection, via the module-level ``sqlite_engine``/``sqlite_session``
     fixtures) are two entirely different engines against two entirely
     different database systems."""
-    with schema_scoped_session(pg_db, SimpleTable.__table__, prefix="loader_split") as (scoped, primary_session):
+    with schema_scoped_session(pg_db, SimpleTable.__table__, prefix="loader_split") as (
+        scoped,
+        primary_session,
+    ):
         primary_schema = scoped.schemas[SchemaRole.PRIMARY]
         primary_csv = tmp_path / "test_table.csv"
-        pd.DataFrame([{"id": 1, "name": "primary-alpha"}]).to_csv(primary_csv, index=False, sep="\t")
+        pd.DataFrame([{"id": 1, "name": "primary-alpha"}]).to_csv(
+            primary_csv, index=False, sep="\t"
+        )
 
         vocab_csv = tmp_path / "test_vocab_role_table.csv"
         pd.DataFrame([{"id": 1, "name": "vocab-alpha"}]).to_csv(vocab_csv, index=False, sep="\t")
@@ -112,7 +121,9 @@ def test_load_file_across_two_genuinely_separate_connections(pg_db, sqlite_sessi
         assert primary_rows == [(1, "primary-alpha")]
         assert leaked_vocab_table_in_pg is None
 
-        vocab_rows = sqlite_session.execute(
-            sa.select(VocabSchemaTable).order_by(VocabSchemaTable.id)
-        ).scalars().all()
+        vocab_rows = (
+            sqlite_session.execute(sa.select(VocabSchemaTable).order_by(VocabSchemaTable.id))
+            .scalars()
+            .all()
+        )
         assert [(r.id, r.name) for r in vocab_rows] == [(1, "vocab-alpha")]

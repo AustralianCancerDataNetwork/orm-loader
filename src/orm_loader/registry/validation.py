@@ -1,7 +1,10 @@
 from __future__ import annotations
+
 from typing import Protocol
-from .validation_report import ValidationIssue, SeverityLevel
-from .registry import ModelDescriptor, TableSpec, FieldSpec
+
+from .registry import FieldSpec, ModelDescriptor, TableSpec
+from .validation_report import SeverityLevel, ValidationIssue
+
 
 class Validator(Protocol):
     def validate(
@@ -10,12 +13,10 @@ class Validator(Protocol):
         model: ModelDescriptor,
         spec: TableSpec | None = None,
         fields: dict[str, FieldSpec] | None = None,
-    ) -> list[ValidationIssue]:
-        ...
+    ) -> list[ValidationIssue]: ...
 
 
 class ColumnNullabilityValidator:
-
     """
     Ensures required columns are NOT NULL in the ORM model.
     """
@@ -55,9 +56,9 @@ class ColumnNullabilityValidator:
                 )
 
         return issues
-        
-class ColumnPresenceValidator:
 
+
+class ColumnPresenceValidator:
     """
     Ensures all specified columns are present on the ORM model.
     """
@@ -75,7 +76,7 @@ class ColumnPresenceValidator:
         issues: list[ValidationIssue] = []
         model_cols = set(model.columns.keys())
 
-        for field_name, field_spec in fields.items():
+        for field_name in fields:
             if field_name not in model_cols:
                 issues.append(
                     ValidationIssue(
@@ -88,6 +89,7 @@ class ColumnPresenceValidator:
                 )
 
         return issues
+
 
 class PrimaryKeyValidator:
     """
@@ -142,11 +144,7 @@ class PrimaryKeyValidator:
                 )
 
         if fields:
-            spec_pks = {
-                name
-                for name, fs in fields.items()
-                if fs.is_primary_key
-            }
+            spec_pks = {name for name, fs in fields.items() if fs.is_primary_key}
 
             for missing in sorted(spec_pks - pk_cols):
                 issues.append(
@@ -183,9 +181,8 @@ class PrimaryKeyValidator:
 
         return issues
 
-    
+
 class ForeignKeyShapeValidator:
-    
     """
     Validates structural correctness of foreign key definitions.
     """

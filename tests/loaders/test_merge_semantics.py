@@ -1,18 +1,19 @@
 """A merge strategy gives the same result whether or not the target already has rows."""
 
 from pathlib import Path
-from typing import Type, cast
+from typing import cast
 
 import pytest
 import sqlalchemy as sa
-
+import sqlalchemy.exc as sa_exc
 from oa_configurator import Dialect
+
 from orm_loader.backends import STAGING_SCHEMA
 from orm_loader.tables.typing import FileTableProtocol
 from tests.models import CompositeTable, SimpleTable
 
-_Simple = cast(Type[FileTableProtocol], SimpleTable)
-_Composite = cast(Type[FileTableProtocol], CompositeTable)
+_Simple = cast(type[FileTableProtocol], SimpleTable)
+_Composite = cast(type[FileTableProtocol], CompositeTable)
 DUPLICATED = "id\tname\n1\tfirst\n1\tsecond\n2\tother\n"
 
 
@@ -34,7 +35,12 @@ def _load(session, tmp_path: Path, text: str, options: dict, **extra) -> None:
 
 
 def _rows(session) -> list[tuple]:
-    return [tuple(r) for r in session.execute(sa.select(SimpleTable.id, SimpleTable.name).order_by(SimpleTable.id))]
+    return [
+        tuple(r)
+        for r in session.execute(
+            sa.select(SimpleTable.id, SimpleTable.name).order_by(SimpleTable.id)
+        )
+    ]
 
 
 def test_upsert_keeps_the_first_duplicate_in_an_empty_target(dialect_session, tmp_path, options):
@@ -63,10 +69,14 @@ def test_replace_with_a_composite_key_overwrites_matching_rows(dialect_session, 
     path = tmp_path / "composite_table.csv"
     for text in ("a\tb\tvalue\n1\t1\told\n1\t2\tkept\n", "a\tb\tvalue\n1\t1\tnew\n2\t2\tadded\n"):
         path.write_text(text)
-        _Composite.load_file(dialect_session, path, dedupe=False, merge_strategy="replace", **options)
+        _Composite.load_file(
+            dialect_session, path, dedupe=False, merge_strategy="replace", **options
+        )
         dialect_session.commit()
     rows = dialect_session.execute(
-        sa.select(CompositeTable.a, CompositeTable.b, CompositeTable.value).order_by(CompositeTable.a, CompositeTable.b)
+        sa.select(CompositeTable.a, CompositeTable.b, CompositeTable.value).order_by(
+            CompositeTable.a, CompositeTable.b
+        )
     )
     assert [tuple(r) for r in rows] == [(1, 1, "new"), (1, 2, "kept"), (2, 2, "added")]
 
@@ -75,5 +85,5 @@ def test_insert_fails_on_an_existing_key_and_adds_new_ones(dialect_session, tmp_
     _load(dialect_session, tmp_path, "id\tname\n1\ta\n", options, merge_strategy="insert")
     _load(dialect_session, tmp_path, "id\tname\n2\tb\n", options, merge_strategy="insert")
     assert _rows(dialect_session) == [(1, "a"), (2, "b")]
-    with pytest.raises(sa.exc.IntegrityError):
+    with pytest.raises(sa_exc.IntegrityError):
         _load(dialect_session, tmp_path, "id\tname\n2\tagain\n", options, merge_strategy="insert")
