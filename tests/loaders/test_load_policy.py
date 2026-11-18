@@ -297,6 +297,7 @@ def test_dedupe_reports_zero_when_nothing_is_duplicated(dialect_session, tmp_pat
     assert report.dedupe == DedupeResult(("demo_id",), rows_before=2, rows_removed=0)
 
 
+@pytest.mark.sqlite
 def test_dedupe_works_across_read_batches(sqlite_session, tmp_path):
     rows = (
         ["demo_id,demo_label"]

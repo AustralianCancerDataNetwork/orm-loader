@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 from oa_configurator import (
     CDMDatabaseConfig,
     ConnectionConfig,
+    Dialect,
     ResolvedCDMDatabase,
     Resolver,
     StackConfig,
@@ -25,10 +27,10 @@ def test_vocab_file_load_routes_every_session_bind_to_vocab_file(tmp_path):
         StackConfig.for_session(
             connections={
                 "primary": ConnectionConfig(
-                    dialect="sqlite", database_name=str(tmp_path / "primary.db")
+                    dialect=Dialect.SQLITE, database_name=str(tmp_path / "primary.db")
                 ),
                 "vocab": ConnectionConfig(
-                    dialect="sqlite", database_name=str(tmp_path / "vocab.db")
+                    dialect=Dialect.SQLITE, database_name=str(tmp_path / "vocab.db")
                 ),
             },
             databases={
@@ -83,6 +85,8 @@ def test_vocab_file_load_routes_every_session_bind_to_vocab_file(tmp_path):
     vocab_engine.dispose()
 
 
+@pytest.mark.postgresql
+@pytest.mark.sqlite
 def test_load_file_across_two_genuinely_separate_connections(pg_db, sqlite_session, tmp_path):
     """``pg_db`` (real Postgres, primary connection) and ``sqlite_session`` (real
     SQLite, vocab connection, via the module-level ``sqlite_engine``/``sqlite_session``

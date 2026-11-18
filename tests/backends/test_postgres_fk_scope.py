@@ -3,29 +3,12 @@
 import pytest
 import sqlalchemy as sa
 import sqlalchemy.orm as so
+from oa_configurator import Role
 from sqlalchemy.exc import IntegrityError
 
 from orm_loader.backends import PostgresBackend
 
-pytestmark = [pytest.mark.postgresql, pytest.mark.db_dialect]
-
-
-@pytest.fixture
-def pooled_pg_engine(pg_db):
-    engine = sa.create_engine(
-        pg_db.connection.engine.url,
-        pool_size=2,
-        max_overflow=0,
-        pool_use_lifo=False,
-    )
-    try:
-        first = engine.connect()
-        second = engine.connect()
-        first.close()
-        second.close()
-        yield engine
-    finally:
-        engine.dispose()
+pytestmark = pytest.mark.postgresql
 
 
 @pytest.mark.parametrize("end_transaction", ["commit", "rollback"])
@@ -85,23 +68,20 @@ def test_nested_scopes_restore_the_existing_transaction_role(pooled_pg_engine):
         assert session.scalar(sa.text("SHOW session_replication_role")) == "origin"
 
 
-def test_relaxation_is_limited_to_the_mapper_bind(pooled_pg_engine):
+def test_relaxation_is_limited_to_the_mapper_bind(pg_db, pooled_pg_engine):
     from tests.models import EnumTable, SimpleTable
 
-    other_engine = sa.create_engine(pooled_pg_engine.url)
-    try:
-        with (
-            so.Session(binds={SimpleTable: pooled_pg_engine, EnumTable: other_engine}) as session,
-            PostgresBackend().relaxed_foreign_keys(session, mapper=SimpleTable),
-        ):
-            for _ in range(2):
-                target = session.connection(bind_arguments={"mapper": SimpleTable})
-                unrelated = session.connection(bind_arguments={"mapper": EnumTable})
-                assert target.scalar(sa.text("SHOW session_replication_role")) == "replica"
-                assert unrelated.scalar(sa.text("SHOW session_replication_role")) == "origin"
-                session.commit()
-    finally:
-        other_engine.dispose()
+    other_engine = pg_db.committing_engine
+    with (
+        so.Session(binds={SimpleTable: pooled_pg_engine, EnumTable: other_engine}) as session,
+        PostgresBackend().relaxed_foreign_keys(session, mapper=SimpleTable),
+    ):
+        for _ in range(2):
+            target = session.connection(bind_arguments={"mapper": SimpleTable})
+            unrelated = session.connection(bind_arguments={"mapper": EnumTable})
+            assert target.scalar(sa.text("SHOW session_replication_role")) == "replica"
+            assert unrelated.scalar(sa.text("SHOW session_replication_role")) == "origin"
+            session.commit()
 
 
 def test_scoped_session_relaxation_does_not_affect_another_thread(pooled_pg_engine):
@@ -129,7 +109,7 @@ def test_scoped_session_relaxation_does_not_affect_another_thread(pooled_pg_engi
 
 
 class _ScopeBase(so.DeclarativeBase):
-    pass
+    metadata = sa.MetaData(schema=Role.PRIMARY.value)
 
 
 class _ScopeParent(_ScopeBase):
@@ -140,26 +120,25 @@ class _ScopeParent(_ScopeBase):
 class _ScopeChild(_ScopeBase):
     __tablename__ = "_fk_scope_child"
     id: so.Mapped[int] = so.mapped_column(primary_key=True, autoincrement=False)
-    parent_id: so.Mapped[int] = so.mapped_column(sa.ForeignKey("_fk_scope_parent.id"))
+    parent_id: so.Mapped[int] = so.mapped_column(
+        sa.ForeignKey(f"{Role.PRIMARY.value}._fk_scope_parent.id")
+    )
 
 
 @pytest.mark.parametrize("flush_inside", [False, True])
 def test_orm_inserts_must_be_flushed_inside_relaxation(pooled_pg_engine, flush_inside):
     _ScopeBase.metadata.create_all(pooled_pg_engine)
-    try:
-        with so.Session(pooled_pg_engine) as session:
-            with PostgresBackend().relaxed_foreign_keys(session):
-                session.add_all([_ScopeChild(id=1, parent_id=999)])
-                if flush_inside:
-                    session.flush()
+    with so.Session(pooled_pg_engine) as session:
+        with PostgresBackend().relaxed_foreign_keys(session):
+            session.add_all([_ScopeChild(id=1, parent_id=999)])
             if flush_inside:
+                session.flush()
+        if flush_inside:
+            session.commit()
+        else:
+            with pytest.raises(IntegrityError):
                 session.commit()
-            else:
-                with pytest.raises(IntegrityError):
-                    session.commit()
-        with so.Session(pooled_pg_engine) as verify:
-            assert verify.scalar(sa.select(sa.func.count()).select_from(_ScopeChild)) == int(
-                flush_inside
-            )
-    finally:
-        _ScopeBase.metadata.drop_all(pooled_pg_engine)
+    with so.Session(pooled_pg_engine) as verify:
+        assert verify.scalar(sa.select(sa.func.count()).select_from(_ScopeChild)) == int(
+            flush_inside
+        )

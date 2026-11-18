@@ -22,11 +22,12 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 
 
 @pytest.fixture
-def sqlite_engine():
+def sqlite_engine(request):
     with isolated_test_database(
         OrmLoaderConfig,
         "test_orm_db_sqlite",
-        dialect="sqlite",
+        dialect=Dialect.SQLITE,
+        request=request,
     ) as db:
         sqlite_engine = db.connection.engine
         Base.metadata.create_all(sqlite_engine)
@@ -82,7 +83,7 @@ def duckdb_db(request):
     with isolated_test_database(
         OrmLoaderConfig,
         "test_orm_db_duckdb",
-        dialect="duckdb",
+        dialect=Dialect.DUCKDB,
         request=request,
         schema_claims=[staging_schema_claim()],
     ) as db:
@@ -97,6 +98,23 @@ def duckdb_session(duckdb_db):
     Base.metadata.create_all(conn)
     conn.commit()
     return duckdb_db.session
+
+
+@pytest.fixture
+def pooled_pg_engine(pg_db):
+    """A two-connection pooled engine on a committed schema that is dropped afterwards."""
+    with scoped_test_schema(
+        pg_db.resolved,
+        prefix="fk_scope",
+        pool_size=2,
+        max_overflow=0,
+        pool_use_lifo=False,
+    ) as scoped:
+        first = scoped.engine.connect()
+        second = scoped.engine.connect()
+        first.close()
+        second.close()
+        yield scoped.engine
 
 
 @contextmanager
@@ -134,7 +152,7 @@ assert set(_SESSION_FIXTURE_BY_DIALECT) == {param.values[0] for param in DIALECT
 def session_for(request: pytest.FixtureRequest, dialect: Dialect) -> so.Session:
     """Return the session fixture of one dialect.
 
-    The lookup is dynamic, so the dialect's own mark and ``forked`` come from
+    The lookup is dynamic, so the dialect's own mark comes from
     ``DIALECT_PARAMS`` on the parametrised value rather than from fixture names.
     """
     return request.getfixturevalue(_SESSION_FIXTURE_BY_DIALECT[dialect])

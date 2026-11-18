@@ -3,6 +3,7 @@ from typing import cast
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
+import pytest
 import sqlalchemy as sa
 import sqlalchemy.orm as so
 from oa_configurator import Role
@@ -10,6 +11,8 @@ from sqlalchemy.orm import DeclarativeBase
 
 from orm_loader.tables.loadable_table import FileLoadableTableInterface
 from orm_loader.tables.typing import FileTableProtocol
+
+pytestmark = pytest.mark.sqlite
 
 
 class Base(DeclarativeBase):

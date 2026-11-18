@@ -29,7 +29,7 @@ from oa_configurator.testing import reset_schema_registry_rows
 
 from orm_loader.backends import STAGING_SCHEMA, staging_schema_claim
 
-pytestmark = [pytest.mark.postgresql, pytest.mark.db_dialect]
+pytestmark = pytest.mark.postgresql
 
 
 def test_resolving_cdm_database_with_staging_schema_name_raises(pg_db, cleanup_after_test) -> None:
@@ -47,6 +47,7 @@ def test_resolving_cdm_database_with_staging_schema_name_raises(pg_db, cleanup_a
             cdm_name: CDMDatabaseConfig(connection=connection, cdm_schema=STAGING_SCHEMA),
         },
     )
+    # An engine from a resolver override, which isolated_test_database cannot build.
     engine = resolver.resolve_database("loader").create_engine(
         schema_claims=[staging_schema_claim()]
     )

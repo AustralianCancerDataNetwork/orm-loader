@@ -29,6 +29,7 @@ class _VocabRoleMV(MaterializedViewMixin):
     __mv_schema_tag__ = Role.VOCAB.value
 
 
+@pytest.mark.postgresql
 def test_refresh_all_mvs_resolves_each_views_own_schema_tag(pg_db) -> None:
     with scoped_test_schema(pg_db.resolved, prefix="mv", split_roles=[Role.VOCAB]) as scoped:
         primary_schema = scoped.schemas[Role.PRIMARY]
@@ -56,6 +57,7 @@ class _IndexedPgMv(MaterializedViewMixin):
     )
 
 
+@pytest.mark.postgresql
 def test_create_mv_with_declared_index_against_postgres(pg_db) -> None:
     """create_mv() through the mixin creates both the view and its declared
     index against a real database.test_create_mv_creates_declared_indexes_after_the_view
@@ -74,6 +76,7 @@ def test_create_mv_with_declared_index_against_postgres(pg_db) -> None:
             assert "mv_indexed_pg_test_row_id_uq" in index_names
 
 
+@pytest.mark.postgresql
 def test_drop_mv_cascade_against_postgres(pg_db) -> None:
     """drop_mv() through the mixin actually drops the view against a real
     database. test_drop_mv_forwards_default_args only proves the right
@@ -91,6 +94,7 @@ def test_drop_mv_cascade_against_postgres(pg_db) -> None:
             assert not sa.inspect(conn).has_table("mv_primary_role_test", schema=schema)
 
 
+@pytest.mark.postgresql
 def test_refresh_mv_concurrently_against_postgres(pg_db) -> None:
     """refresh_mv(concurrently=True) through the mixin succeeds against a
     real database when a unique index is declared.
@@ -133,11 +137,9 @@ def fake_backend(monkeypatch: pytest.MonkeyPatch) -> _FakeBackend:
 
 
 @pytest.fixture
-def bind():
-    engine = sa.create_engine("sqlite:///:memory:", future=True)
-    with engine.connect() as connection:
+def bind(sqlite_engine):
+    with sqlite_engine.connect() as connection:
         yield connection
-    engine.dispose()
 
 
 _SELECT = sa.select(sa.literal(1).label("row_id"))
@@ -155,6 +157,7 @@ class _IndexedMv(MaterializedViewMixin):
     __mv_indexes__ = (_INDEX,)
 
 
+@pytest.mark.sqlite
 def test_create_mv_forwards_default_args_to_backend(fake_backend: _FakeBackend, bind):
     _NoIndexMv.create_mv(bind)
 
@@ -176,6 +179,7 @@ def test_create_mv_rejects_invalid_bind(fake_backend: _FakeBackend):
     assert fake_backend.calls == []
 
 
+@pytest.mark.sqlite
 def test_create_mv_creates_declared_indexes_after_the_view(fake_backend: _FakeBackend, bind):
     _IndexedMv.create_mv(bind)
 
@@ -188,12 +192,14 @@ def test_create_mv_creates_declared_indexes_after_the_view(fake_backend: _FakeBa
     assert fake_backend.calls[1][2] == {"schema": None, "if_not_exists": True}
 
 
+@pytest.mark.sqlite
 def test_create_mv_create_indexes_false_skips_index_creation(fake_backend: _FakeBackend, bind):
     _IndexedMv.create_mv(bind, create_indexes=False)
 
     assert [call[0] for call in fake_backend.calls] == ["create_materialized_view"]
 
 
+@pytest.mark.sqlite
 def test_create_mv_forwards_schema_tag_with_data_and_if_not_exists_overrides(
     fake_backend: _FakeBackend, bind
 ):
@@ -233,6 +239,7 @@ class _MappedNoSchemaMv(_MappedMvBase, MaterializedViewMixin):
     row_id = sa.Column(sa.Integer, primary_key=True)
 
 
+@pytest.mark.sqlite
 def test_create_mv_defers_to_the_mapped_tables_own_schema(
     fake_backend: _FakeBackend, bind, monkeypatch: pytest.MonkeyPatch
 ):
@@ -248,6 +255,7 @@ def test_create_mv_defers_to_the_mapped_tables_own_schema(
     assert fake_backend.calls[0][2]["schema"] == Role.VOCAB.value
 
 
+@pytest.mark.sqlite
 def test_create_mv_mapped_table_with_no_schema_resolves_to_none_not_primary(
     fake_backend: _FakeBackend, bind
 ):
@@ -256,6 +264,7 @@ def test_create_mv_mapped_table_with_no_schema_resolves_to_none_not_primary(
     assert fake_backend.calls[0][2]["schema"] is None
 
 
+@pytest.mark.sqlite
 def test_create_mv_explicit_schema_tag_overrides_the_mapped_tables_own_schema(
     fake_backend: _FakeBackend, bind, monkeypatch: pytest.MonkeyPatch
 ):
@@ -268,16 +277,19 @@ def test_create_mv_explicit_schema_tag_overrides_the_mapped_tables_own_schema(
     assert fake_backend.calls[0][2]["schema"] == Role.PRIMARY.value
 
 
+@pytest.mark.sqlite
 def test_create_mv_forwards_if_not_exists_to_declared_indexes(fake_backend: _FakeBackend, bind):
     _IndexedMv.create_mv(bind, if_not_exists=False)
 
     assert fake_backend.calls[1][2] == {"schema": None, "if_not_exists": False}
 
 
+@pytest.mark.sqlite
 def test_create_mv_engine_uses_one_transaction_for_view_and_indexes(
     monkeypatch: pytest.MonkeyPatch,
+    sqlite_engine,
 ):
-    engine = sa.create_engine("sqlite:///:memory:", future=True)
+    engine = sqlite_engine
     with engine.begin() as connection:
         connection.execute(sa.text("CREATE TABLE materialization_steps (step TEXT NOT NULL)"))
 
@@ -323,6 +335,7 @@ def test_create_mv_engine_uses_one_transaction_for_view_and_indexes(
         ).all() == [("view",), ("index",)]
 
 
+@pytest.mark.sqlite
 def test_refresh_mv_forwards_default_args_and_declared_indexes(fake_backend: _FakeBackend, bind):
     _IndexedMv.refresh_mv(bind)
 
@@ -335,6 +348,7 @@ def test_refresh_mv_forwards_default_args_and_declared_indexes(fake_backend: _Fa
     ]
 
 
+@pytest.mark.sqlite
 def test_refresh_mv_forwards_schema_tag_and_concurrently(fake_backend: _FakeBackend, bind):
     _IndexedMv.refresh_mv(bind, schema_tag=Role.VOCAB, concurrently=True)
 
@@ -345,6 +359,7 @@ def test_refresh_mv_forwards_schema_tag_and_concurrently(fake_backend: _FakeBack
     }
 
 
+@pytest.mark.sqlite
 def test_drop_mv_forwards_default_args(fake_backend: _FakeBackend, bind):
     _NoIndexMv.drop_mv(bind)
 
@@ -358,6 +373,7 @@ def test_drop_mv_forwards_default_args(fake_backend: _FakeBackend, bind):
     ]
 
 
+@pytest.mark.sqlite
 def test_drop_mv_forwards_schema_tag_if_exists_and_cascade(fake_backend: _FakeBackend, bind):
     _NoIndexMv.drop_mv(bind, schema_tag=Role.VOCAB, if_exists=False, cascade=True)
 
@@ -419,6 +435,7 @@ def test_resolve_mv_refresh_order_raises_on_cycle():
         resolve_mv_refresh_order([_CycleA, _CycleB])
 
 
+@pytest.mark.sqlite
 def test_refresh_all_mvs_refreshes_in_dependency_order(fake_backend: _FakeBackend, bind):
     refresh_all_mvs(bind, [_MvB, _MvA])
 
@@ -426,6 +443,7 @@ def test_refresh_all_mvs_refreshes_in_dependency_order(fake_backend: _FakeBacken
     assert refreshed_names == ["mv_a", "mv_b"]
 
 
+@pytest.mark.sqlite
 def test_a_backend_without_materialized_views_is_refused(bind):
     with pytest.raises(
         NotImplementedError, match="Backend 'sqlite' does not support materialized views"

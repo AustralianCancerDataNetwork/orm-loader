@@ -13,6 +13,7 @@ from oa_configurator import (
     is_ephemeral_url,
     open_connection,
     physical_schema_of,
+    preserve_create_rules,
     referred_schema_tag,
     without_cross_engine_foreign_keys,
 )
@@ -119,7 +120,8 @@ def create_tables(
         for table in tables:
             tables_by_metadata.setdefault(table.metadata, []).append(table)
         for metadata, metadata_tables in tables_by_metadata.items():
-            metadata.create_all(connection, tables=metadata_tables, checkfirst=True)
+            with preserve_create_rules(metadata):
+                metadata.create_all(connection, tables=metadata_tables, checkfirst=True)
         return
 
     related_by_metadata: dict[sa.MetaData, set[sa.Table]] = {}

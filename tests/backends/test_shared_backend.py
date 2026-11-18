@@ -29,7 +29,7 @@ _REPLACE_DELETE_SEMANTICS_PARAMS = tuple(p for p in DIALECT_PARAMS if p.values[0
 def merge_backend(request: pytest.FixtureRequest) -> tuple[DatabaseBackend, so.Session]:
     """Same merge-method contract exercised against every real backend.
 
-    DIALECT_PARAMS carries each dialect's own mark plus `forked` directly
+    DIALECT_PARAMS carries each dialect's own mark directly
     on the param value, so this still works correctly even though
     request.getfixturevalue(...) is a dynamic, runtime lookup invisible to
     pytest's collection-time fixturenames computation (the usual
@@ -103,7 +103,6 @@ def test_merge_upsert_excludes_computed_columns(
 
 
 @pytest.mark.postgresql
-@pytest.mark.db_dialect
 def test_postgres_merge_insert_paginates_rownums_with_initial_gap(pg_session) -> None:
     backend = resolve_backend(pg_session, staging_schema_tag=STAGING_SCHEMA)
     staging = backend.create_staging_table(_ComputedTableCls, pg_session)

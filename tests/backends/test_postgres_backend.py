@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
+import psycopg
 import pytest
 import sqlalchemy as sa
 import sqlalchemy.orm as so
@@ -119,6 +120,7 @@ def test_postgres_backend_default_staging_schema_is_none():
     )
 
 
+@pytest.mark.postgresql
 def test_postgres_backend_create_staging_table_drops_computed_columns(pg_session):
     backend = resolve_backend(pg_session, staging_schema_tag=STAGING_SCHEMA)
 
@@ -129,6 +131,7 @@ def test_postgres_backend_create_staging_table_drops_computed_columns(pg_session
     assert cols == {"id", "name", "_rownum"}  # slug is computed, excluded
 
 
+@pytest.mark.postgresql
 def test_postgres_backend_materialized_view_methods_work_end_to_end(pg_db):
     """Real create + refresh + query, not just checking emitted SQL text.
     The whole point is proving this DDL actually round-trips correctly."""
@@ -142,6 +145,7 @@ def test_postgres_backend_materialized_view_methods_work_end_to_end(pg_db):
     assert conn.execute(sa.text("SELECT n FROM mv_test")).scalar() == 1
 
 
+@pytest.mark.postgresql
 def test_postgres_backend_materialized_view_respects_schema(pg_db) -> None:
     """Resolving a schema_tag to a physical schema is the caller's job
     now (see MaterializedViewMixin.create_mv, which calls physical_schema_of() before
@@ -351,7 +355,6 @@ def test_postgres_backend_refresh_concurrently_without_declared_unique_index_rai
 
 
 def test_postgres_backend_refresh_concurrently_declared_but_database_rejects_it_translates_error():
-    psycopg = pytest.importorskip("psycopg")
 
     from orm_loader.mappers.materialised_view_contracts import MaterializedViewIndex
     from orm_loader.mappers.materialised_view_errors import ConcurrentRefreshNotEligibleError
@@ -384,7 +387,6 @@ def test_postgres_backend_refresh_concurrently_declared_but_database_rejects_it_
 
 
 def test_postgres_backend_refresh_concurrently_unrelated_operational_error_propagates_unchanged():
-    psycopg = pytest.importorskip("psycopg")
 
     from orm_loader.mappers.materialised_view_contracts import MaterializedViewIndex
 
@@ -425,6 +427,7 @@ def test_postgres_backend_refresh_concurrently_with_declared_index_emits_concurr
     assert session.statements[-1] == ("REFRESH MATERIALIZED VIEW CONCURRENTLY reporting.mv_test;")
 
 
+@pytest.mark.postgresql
 def test_postgres_backend_materialized_view_lifecycle_is_schema_isolated_with_adversarial_identifiers(
     pg_db,
 ):
@@ -486,6 +489,7 @@ def test_postgres_backend_materialized_view_lifecycle_is_schema_isolated_with_ad
                 )
 
 
+@pytest.mark.postgresql
 def test_postgres_backend_refresh_concurrently_raises_when_declared_index_was_never_created(pg_db):
     from orm_loader.mappers.materialised_view_contracts import MaterializedViewIndex
     from orm_loader.mappers.materialised_view_errors import ConcurrentRefreshNotEligibleError
@@ -510,6 +514,7 @@ def test_postgres_backend_refresh_concurrently_raises_when_declared_index_was_ne
     assert isinstance(exc_info.value.__cause__, sa_exc.OperationalError)
 
 
+@pytest.mark.postgresql
 def test_postgres_backend_materialized_view_legacy_unqualified_path_still_round_trips(pg_db):
     backend = PostgresBackend()
     conn = pg_db.connection
@@ -557,6 +562,7 @@ def _simple_rows(session) -> list[tuple[int, str]]:
     ]
 
 
+@pytest.mark.postgresql
 def test_staging_table_has_the_target_columns_and_an_identity_row_number(pg_session):
     resolve_backend(
         pg_session, staging_schema_tag=STAGING_SCHEMA, mapper=SimpleTable
@@ -576,6 +582,7 @@ def test_staging_table_has_the_target_columns_and_an_identity_row_number(pg_sess
     assert ("_rownum", "bigint") in [(n, d) for n, d in cols]
 
 
+@pytest.mark.postgresql
 def test_load_file_merges_into_the_target(pg_session, tmp_path):
     inserted = SimpleTable.load_file(
         pg_session,
@@ -587,6 +594,7 @@ def test_load_file_merges_into_the_target(pg_session, tmp_path):
     assert _simple_rows(pg_session) == [(1, "alpha"), (2, "beta")]
 
 
+@pytest.mark.postgresql
 def test_a_large_file_loads_in_full(pg_session, tmp_path):
     rows = [(i, f"name_{i}") for i in range(1, 10_000)]
     inserted = SimpleTable.load_file(
@@ -599,6 +607,7 @@ def test_a_large_file_loads_in_full(pg_session, tmp_path):
     )
 
 
+@pytest.mark.postgresql
 def test_upsert_does_not_update_existing_rows(pg_session, tmp_path):
     SimpleTable.load_file(
         pg_session, _write_simple(tmp_path, [(1, "alpha")]), staging_schema_tag=STAGING_SCHEMA
@@ -614,6 +623,7 @@ def test_upsert_does_not_update_existing_rows(pg_session, tmp_path):
     assert _simple_rows(pg_session) == [(1, "alpha")]
 
 
+@pytest.mark.postgresql
 def test_insert_loads_new_keys_and_fails_on_an_existing_key(pg_session, tmp_path):
     path = _write_simple(tmp_path, [(1, "alpha"), (2, "beta")])
     assert (
@@ -630,6 +640,7 @@ def test_insert_loads_new_keys_and_fails_on_an_existing_key(pg_session, tmp_path
         )
 
 
+@pytest.mark.postgresql
 def test_a_native_enum_column_loads_member_names(pg_session, tmp_path):
     path = tmp_path / "enum_table.csv"
     path.write_text("id,role\n1,FIRST_AUTHOR\n2,LAST_AUTHOR\n3,\n")

@@ -177,6 +177,7 @@ def test_parquet_columns_load_exactly_or_are_rejected(
     assert report.accounted
 
 
+@pytest.mark.sqlite
 @pytest.mark.parametrize(
     "model, declared", [(WideAmount, r"\(50, 2\)"), (UnboundedAmount, r"\(None, None\)")]
 )
@@ -192,6 +193,7 @@ def test_a_numeric_column_an_arrow_decimal_cannot_hold_is_refused_before_any_row
     assert sqlite_session.scalar(sa.select(sa.func.count()).select_from(model)) == 0
 
 
+@pytest.mark.postgresql
 @pytest.mark.parametrize(
     "model, expected",
     [

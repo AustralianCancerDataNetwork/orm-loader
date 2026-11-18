@@ -5,6 +5,7 @@ import sqlalchemy as sa
 from oa_configurator import (
     CDMDatabaseConfig,
     ConnectionConfig,
+    Dialect,
     ResolvedCDMDatabase,
     Resolver,
     SchemaClaim,
@@ -16,12 +17,14 @@ from orm_loader.helpers import bootstrap, create_db, create_tables
 
 def _resolved(tmp_path, *, split: bool):
     connections = {
-        "primary": ConnectionConfig(dialect="sqlite", database_name=str(tmp_path / "primary.db")),
+        "primary": ConnectionConfig(
+            dialect=Dialect.SQLITE, database_name=str(tmp_path / "primary.db")
+        ),
     }
     vocab_connection = "primary"
     if split:
         connections["vocab"] = ConnectionConfig(
-            dialect="sqlite", database_name=str(tmp_path / "vocab.db")
+            dialect=Dialect.SQLITE, database_name=str(tmp_path / "vocab.db")
         )
         vocab_connection = "vocab"
     resolver = Resolver(
@@ -37,14 +40,12 @@ def _resolved(tmp_path, *, split: bool):
     return resolver.resolve_database("test_cdm")
 
 
-def _engine():
-    return sa.create_engine(
-        "sqlite://",
-        execution_options={"schema_translate_map": {"primary": None, "vocab": None}},
-    )
+def _engine(sqlite_engine):
+    return sqlite_engine.execution_options(schema_translate_map={"primary": None, "vocab": None})
 
 
-def test_create_tables_colocated(tmp_path):
+@pytest.mark.sqlite
+def test_create_tables_colocated(tmp_path, sqlite_engine):
     resolved = _resolved(tmp_path, split=False)
     metadata = sa.MetaData()
     primary = sa.Table(
@@ -53,7 +54,7 @@ def test_create_tables_colocated(tmp_path):
     vocab = sa.Table(
         "vocab_table", metadata, sa.Column("id", sa.Integer, primary_key=True), schema="vocab"
     )
-    engine = _engine()
+    engine = _engine(sqlite_engine)
 
     with engine.begin() as connection:
         create_tables(connection, [primary, vocab], resolved=resolved)
@@ -63,7 +64,8 @@ def test_create_tables_colocated(tmp_path):
     engine.dispose()
 
 
-def test_create_tables_split_drops_cross_database_fk_and_keeps_local_fk(tmp_path):
+@pytest.mark.sqlite
+def test_create_tables_split_drops_cross_database_fk_and_keeps_local_fk(tmp_path, sqlite_engine):
     resolved = _resolved(tmp_path, split=True)
     metadata = sa.MetaData()
     parent = sa.Table(
@@ -77,7 +79,7 @@ def test_create_tables_split_drops_cross_database_fk_and_keeps_local_fk(tmp_path
         sa.Column("remote_id", sa.Integer, sa.ForeignKey("vocab.remote.id")),
         schema="primary",
     )
-    engine = _engine()
+    engine = _engine(sqlite_engine)
 
     with engine.begin() as connection:
         create_tables(connection, [parent, child], resolved=resolved)
@@ -87,7 +89,8 @@ def test_create_tables_split_drops_cross_database_fk_and_keeps_local_fk(tmp_path
     engine.dispose()
 
 
-def test_create_tables_crossing_subset_resolves_local_fk_to_existing_table(tmp_path):
+@pytest.mark.sqlite
+def test_create_tables_crossing_subset_resolves_local_fk_to_existing_table(tmp_path, sqlite_engine):
     resolved = _resolved(tmp_path, split=True)
     metadata = sa.MetaData()
     parent = sa.Table(
@@ -104,7 +107,7 @@ def test_create_tables_crossing_subset_resolves_local_fk_to_existing_table(tmp_p
         sa.Column("remote_id", sa.Integer, sa.ForeignKey("vocab.remote_parent.id")),
         schema="primary",
     )
-    engine = _engine()
+    engine = _engine(sqlite_engine)
 
     with engine.begin() as connection:
         parent.create(connection)
@@ -117,12 +120,13 @@ def test_create_tables_crossing_subset_resolves_local_fk_to_existing_table(tmp_p
     engine.dispose()
 
 
-def test_create_tables_rejects_multiple_database_transactions(tmp_path):
+@pytest.mark.sqlite
+def test_create_tables_rejects_multiple_database_transactions(tmp_path, sqlite_engine):
     resolved = _resolved(tmp_path, split=True)
     metadata = sa.MetaData()
     primary = sa.Table("primary_table", metadata, sa.Column("id", sa.Integer), schema="primary")
     vocab = sa.Table("vocab_table", metadata, sa.Column("id", sa.Integer), schema="vocab")
-    engine = _engine()
+    engine = _engine(sqlite_engine)
 
     with (
         engine.begin() as connection,
@@ -133,7 +137,8 @@ def test_create_tables_rejects_multiple_database_transactions(tmp_path):
     engine.dispose()
 
 
-def test_create_tables_crossing_path_accepts_non_base_metadata(tmp_path):
+@pytest.mark.sqlite
+def test_create_tables_crossing_path_accepts_non_base_metadata(tmp_path, sqlite_engine):
     resolved = _resolved(tmp_path, split=True)
     metadata = sa.MetaData()
     external = sa.Table(
@@ -143,7 +148,7 @@ def test_create_tables_crossing_path_accepts_non_base_metadata(tmp_path):
         sa.Column("remote_id", sa.Integer, sa.ForeignKey("vocab.remote.id")),
         schema="primary",
     )
-    engine = _engine()
+    engine = _engine(sqlite_engine)
 
     with engine.begin() as connection:
         create_tables(connection, [external], resolved=resolved)
@@ -153,9 +158,10 @@ def test_create_tables_crossing_path_accepts_non_base_metadata(tmp_path):
     engine.dispose()
 
 
-def test_create_db_rejects_one_bind_for_split_database(tmp_path):
+@pytest.mark.sqlite
+def test_create_db_rejects_one_bind_for_split_database(tmp_path, sqlite_engine):
     resolved = _resolved(tmp_path, split=True)
-    engine = _engine()
+    engine = _engine(sqlite_engine)
 
     with pytest.raises(ValueError, match="one bind cannot host both databases"):
         create_db(resolved, bindable=engine)
@@ -163,22 +169,22 @@ def test_create_db_rejects_one_bind_for_split_database(tmp_path):
     engine.dispose()
 
 
+@pytest.mark.sqlite
 @pytest.mark.parametrize("entry", [create_db, bootstrap])
-def test_bootstrap_entry_points_require_resolved_database(entry):
-    engine = _engine()
+def test_bootstrap_entry_points_require_resolved_database(entry, sqlite_engine):
+    engine = _engine(sqlite_engine)
     with pytest.raises(TypeError, match="requires a ResolvedDatabase"):
         entry(engine)
     engine.dispose()
 
 
 @pytest.mark.duckdb
-@pytest.mark.db_dialect
 def test_create_tables_resolves_a_schema_claims_only_tag_on_duckdb():
     """A tag claimed only via create_engine(schema_claims=[...]), not present in
     resolved's own config, must still resolve inside foreign_key_can_span()
     instead of raising UnregisteredSchemaTagError."""
     stack = StackConfig.for_session(
-        connections={"main": ConnectionConfig(dialect="duckdb", database_name=":memory:")},
+        connections={"main": ConnectionConfig(dialect=Dialect.DUCKDB, database_name=":memory:")},
         databases={
             "test_cdm": CDMDatabaseConfig(connection="main", cdm_schema="cdm", vocab_schema="vocab")
         },
@@ -207,3 +213,35 @@ def test_create_tables_resolves_a_schema_claims_only_tag_on_duckdb():
 
     assert [fk["referred_table"] for fk in foreign_keys] == ["primary_table"]
     engine.dispose()
+
+
+@pytest.mark.postgresql
+def test_create_tables_on_postgresql_leaves_shared_metadata_unchanged(pg_db, monkeypatch):
+    """Without the plugin's own guard, a later SQLite create must still keep every foreign key."""
+    monkeypatch.setattr(
+        sa.MetaData, "create_all", getattr(sa.MetaData.create_all, "__wrapped__", None)
+    )
+    metadata = sa.MetaData()
+    sa.Table(
+        "cycle_a",
+        metadata,
+        sa.Column("id", sa.Integer, primary_key=True),
+        sa.Column("b_id", sa.Integer, sa.ForeignKey("primary.cycle_b.id", name="fk_cycle_a_b")),
+        schema="primary",
+    )
+    sa.Table(
+        "cycle_b",
+        metadata,
+        sa.Column("id", sa.Integer, primary_key=True),
+        sa.Column("a_id", sa.Integer, sa.ForeignKey("primary.cycle_a.id", name="fk_cycle_b_a")),
+        schema="primary",
+    )
+
+    create_tables(pg_db.connection, list(metadata.tables.values()), resolved=pg_db.resolved)
+
+    statements: list[str] = []
+    mock_sqlite = sa.create_mock_engine(
+        "sqlite://", lambda sql, *_, **__: statements.append(str(sql.compile(mock_sqlite)))
+    )
+    metadata.create_all(mock_sqlite, checkfirst=False)
+    assert "\n".join(statements).count("FOREIGN KEY") == 2
