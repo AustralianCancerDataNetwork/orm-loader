@@ -21,6 +21,8 @@ from orm_loader.backends import staging_schema_claim
 from tests.conftest import schema_scoped_session
 from tests.models import SimpleTable, VocabSchemaTable
 
+pytestmark = pytest.mark.sqlite
+
 
 def test_vocab_file_load_routes_every_session_bind_to_vocab_file(tmp_path):
     resolver = Resolver(
