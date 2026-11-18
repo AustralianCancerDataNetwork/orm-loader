@@ -76,7 +76,7 @@ def duckdb_split_schema_session():
         stack = StackConfig.for_session(
             connections={
                 "db": ConnectionConfig(
-                    dialect="duckdb",
+                    dialect=Dialect.DUCKDB,
                     database_name=str(Path(tmp_dir) / "split.duckdb"),
                     test_only=True,
                 )
@@ -117,12 +117,12 @@ def duckdb_split_database_session():
         stack = StackConfig.for_session(
             connections={
                 "primary": ConnectionConfig(
-                    dialect="duckdb",
+                    dialect=Dialect.DUCKDB,
                     database_name=str(Path(tmp_dir) / "primary.duckdb"),
                     test_only=True,
                 ),
                 "vocab": ConnectionConfig(
-                    dialect="duckdb",
+                    dialect=Dialect.DUCKDB,
                     database_name=str(Path(tmp_dir) / "vocab.duckdb"),
                     test_only=True,
                 ),
@@ -158,12 +158,12 @@ def duckdb_split_database_session_with_ephemeral_vocab():
         stack = StackConfig.for_session(
             connections={
                 "primary": ConnectionConfig(
-                    dialect="duckdb",
+                    dialect=Dialect.DUCKDB,
                     database_name=str(Path(tmp_dir) / "primary.duckdb"),
                     test_only=True,
                 ),
                 "vocab": ConnectionConfig(
-                    dialect="duckdb", database_name=":memory:", test_only=True
+                    dialect=Dialect.DUCKDB, database_name=":memory:", test_only=True
                 ),
             },
             databases={"cdm": CDMDatabaseConfig(connection="primary", vocab_connection="vocab")},
@@ -191,7 +191,6 @@ def test_duckdb_backend_identity_and_capabilities():
 
 
 @pytest.mark.duckdb
-@pytest.mark.db_dialect
 @pytest.mark.parametrize("merge_batch_size", [0, -1])
 @pytest.mark.parametrize("merge_strategy", ["replace", "upsert", "insert"])
 def test_duckdb_backend_rejects_non_positive_merge_batch_size(
@@ -209,7 +208,6 @@ def test_duckdb_backend_rejects_non_positive_merge_batch_size(
 
 
 @pytest.mark.duckdb
-@pytest.mark.db_dialect
 def test_duckdb_backend_create_staging_table(duckdb_session):
     backend = DuckDBBackend()
 
@@ -225,7 +223,6 @@ def test_duckdb_backend_create_staging_table(duckdb_session):
 
 
 @pytest.mark.duckdb
-@pytest.mark.db_dialect
 def test_duckdb_backend_drop_staging_table(duckdb_session):
     backend = DuckDBBackend()
 
@@ -237,7 +234,6 @@ def test_duckdb_backend_drop_staging_table(duckdb_session):
 
 
 @pytest.mark.duckdb
-@pytest.mark.db_dialect
 def test_duckdb_backend_drop_staging_table_also_drops_rownum_sequence(duckdb_session):
     """The staging table's _rownum column is backed by a real sequence, so
     dropping the staging table must drop that sequence too.
@@ -263,7 +259,6 @@ def test_duckdb_backend_drop_staging_table_also_drops_rownum_sequence(duckdb_ses
 
 
 @pytest.mark.duckdb
-@pytest.mark.db_dialect
 def test_duckdb_backend_creates_staging_again_when_only_its_sequence_was_left_behind(
     duckdb_session,
 ):
@@ -278,7 +273,6 @@ def test_duckdb_backend_creates_staging_again_when_only_its_sequence_was_left_be
 
 
 @pytest.mark.duckdb
-@pytest.mark.db_dialect
 def test_duckdb_backend_rownum_populates_monotonically_on_insert(duckdb_session):
     backend = DuckDBBackend()
     staging = backend.create_staging_table(_ComputedTableCls, duckdb_session)
@@ -299,7 +293,6 @@ def test_duckdb_backend_has_nothing_to_relax():
 
 
 @pytest.mark.duckdb
-@pytest.mark.db_dialect
 def test_duckdb_backend_relaxed_foreign_keys_runs_without_toggling_fk(duckdb_session):
     """DuckDB has no foreign key toggle, so the context leaves its keys enforced."""
     backend = DuckDBBackend()
@@ -309,7 +302,6 @@ def test_duckdb_backend_relaxed_foreign_keys_runs_without_toggling_fk(duckdb_ses
 
 
 @pytest.mark.duckdb
-@pytest.mark.db_dialect
 def test_relaxed_foreign_keys_on_duckdb_does_not_log_toggling(duckdb_session, caplog):
     with (
         caplog.at_level("INFO", logger="orm_loader.backends.base"),
@@ -325,7 +317,6 @@ def test_duckdb_backend_has_no_materialized_views():
 
 
 @pytest.mark.duckdb
-@pytest.mark.db_dialect
 def test_duckdb_backend_deferred_fk_constraints_finds_the_cycle(duckdb_session, duckdb_backend):
     a_fks = duckdb_backend.deferred_fk_constraints(_CycleATableCls)
     b_fks = duckdb_backend.deferred_fk_constraints(_CycleBTableCls)
@@ -335,7 +326,6 @@ def test_duckdb_backend_deferred_fk_constraints_finds_the_cycle(duckdb_session, 
 
 
 @pytest.mark.duckdb
-@pytest.mark.db_dialect
 def test_duckdb_backend_validate_deferred_fks_passes_for_consistent_data(
     duckdb_session, duckdb_backend
 ):
@@ -347,7 +337,6 @@ def test_duckdb_backend_validate_deferred_fks_passes_for_consistent_data(
 
 
 @pytest.mark.duckdb
-@pytest.mark.db_dialect
 def test_duckdb_backend_validate_deferred_fks_catches_an_orphan(duckdb_session, duckdb_backend):
     """The cyclic FK was never created as a real constraint, so an orphaned
     reference inserts without error; only the anti-join check catches it.
@@ -359,7 +348,6 @@ def test_duckdb_backend_validate_deferred_fks_catches_an_orphan(duckdb_session, 
 
 
 @pytest.mark.duckdb
-@pytest.mark.db_dialect
 def test_duckdb_backend_merge_replace_updates_in_place(duckdb_session):
     """merge_replace updates matching rows in place and leaves non-matching
     staging rows for the follow-up merge_insert() call.
@@ -385,7 +373,6 @@ def test_duckdb_backend_merge_replace_updates_in_place(duckdb_session):
 
 
 @pytest.mark.duckdb
-@pytest.mark.db_dialect
 def test_duckdb_backend_merge_replace_paginated_updates_in_place(duckdb_session):
     backend = DuckDBBackend()
     staging = backend.create_staging_table(_ComputedTableCls, duckdb_session)
@@ -405,7 +392,6 @@ def test_duckdb_backend_merge_replace_paginated_updates_in_place(duckdb_session)
 
 
 @pytest.mark.duckdb
-@pytest.mark.db_dialect
 def test_duckdb_backend_merge_replace_rejects_referenced_table_with_own_fk(
     duckdb_session, duckdb_backend
 ):
@@ -428,7 +414,6 @@ def test_duckdb_backend_merge_replace_rejects_referenced_table_with_own_fk(
 
 
 @pytest.mark.duckdb
-@pytest.mark.db_dialect
 def test_duckdb_backend_merge_insert_batch_validation_prevents_partial_commit(
     duckdb_session_with_committed_schema,
     duckdb_backend,
@@ -453,7 +438,6 @@ def test_duckdb_backend_merge_insert_batch_validation_prevents_partial_commit(
 
 
 @pytest.mark.duckdb
-@pytest.mark.db_dialect
 def test_duckdb_backend_merge_insert_loads_self_referential_rows_in_dependency_order(
     duckdb_session,
     duckdb_backend,
@@ -480,7 +464,6 @@ def test_duckdb_backend_merge_insert_loads_self_referential_rows_in_dependency_o
 
 
 @pytest.mark.duckdb
-@pytest.mark.db_dialect
 def test_duckdb_backend_merge_upsert_loads_self_referential_rows_in_dependency_order(
     duckdb_session,
     duckdb_backend,
@@ -502,7 +485,6 @@ def test_duckdb_backend_merge_upsert_loads_self_referential_rows_in_dependency_o
 
 
 @pytest.mark.duckdb
-@pytest.mark.db_dialect
 def test_duckdb_backend_merge_replace_updates_and_inserts_self_referential_rows_together(
     duckdb_session,
     duckdb_backend,
@@ -537,7 +519,6 @@ def test_duckdb_backend_merge_replace_updates_and_inserts_self_referential_rows_
 
 
 @pytest.mark.duckdb
-@pytest.mark.db_dialect
 def test_duckdb_backend_merge_replace_catches_a_genuine_orphan(
     duckdb_session_with_committed_schema,
     duckdb_backend,
@@ -563,7 +544,6 @@ def test_duckdb_backend_merge_replace_catches_a_genuine_orphan(
 
 
 @pytest.mark.duckdb
-@pytest.mark.db_dialect
 def test_duckdb_backend_merge_insert_catches_a_genuine_orphan_in_its_own_batch(
     duckdb_session_with_committed_schema,
     duckdb_backend,
@@ -585,7 +565,6 @@ def test_duckdb_backend_merge_insert_catches_a_genuine_orphan_in_its_own_batch(
 
 
 @pytest.mark.duckdb
-@pytest.mark.db_dialect
 def test_duckdb_backend_merge_insert_unbatched_has_no_intermediate_commit(
     duckdb_session_with_committed_schema,
     duckdb_backend,
@@ -609,7 +588,6 @@ def test_duckdb_backend_merge_insert_unbatched_has_no_intermediate_commit(
 
 
 @pytest.mark.duckdb
-@pytest.mark.db_dialect
 def test_duckdb_backend_merge_insert_accepts_a_self_link(duckdb_session, duckdb_backend):
     """A row whose parent is itself is valid once it exists, not an orphan
     merely because the target was empty when it was considered.
@@ -630,7 +608,6 @@ def test_duckdb_backend_merge_insert_accepts_a_self_link(duckdb_session, duckdb_
 
 
 @pytest.mark.duckdb
-@pytest.mark.db_dialect
 def test_duckdb_backend_merge_insert_accepts_a_two_row_cycle(duckdb_session, duckdb_backend):
     """Two rows referencing each other are valid once both exist. Neither
     can ever become ready on its own, which is not a reason to reject them.
@@ -653,7 +630,6 @@ def test_duckdb_backend_merge_insert_accepts_a_two_row_cycle(duckdb_session, duc
 
 
 @pytest.mark.duckdb
-@pytest.mark.db_dialect
 def test_duckdb_backend_merge_upsert_ignores_a_duplicate_with_a_bad_reference(
     duckdb_session_with_committed_schema,
     duckdb_backend,
@@ -678,7 +654,6 @@ def test_duckdb_backend_merge_upsert_ignores_a_duplicate_with_a_bad_reference(
 
 
 @pytest.mark.duckdb
-@pytest.mark.db_dialect
 def test_duckdb_backend_merge_insert_respects_validate_deferred_fks_false(
     duckdb_session_with_committed_schema,
     duckdb_backend,
@@ -701,7 +676,6 @@ def test_duckdb_backend_merge_insert_respects_validate_deferred_fks_false(
 
 
 @pytest.mark.duckdb
-@pytest.mark.db_dialect
 def test_duckdb_backend_validate_deferred_fks_catches_a_cross_database_orphan(
     duckdb_split_database_session,
 ):
@@ -717,7 +691,6 @@ def test_duckdb_backend_validate_deferred_fks_catches_a_cross_database_orphan(
 
 
 @pytest.mark.duckdb
-@pytest.mark.db_dialect
 def test_duckdb_backend_validate_deferred_fks_passes_a_real_cross_database_reference(
     duckdb_split_database_session,
 ):
@@ -744,7 +717,6 @@ def test_duckdb_backend_validate_deferred_fks_passes_a_real_cross_database_refer
 
 
 @pytest.mark.duckdb
-@pytest.mark.db_dialect
 def test_duckdb_backend_validate_deferred_fks_refuses_an_ephemeral_remote_connection(
     duckdb_split_database_session_with_ephemeral_vocab,
 ):
@@ -761,7 +733,6 @@ def test_duckdb_backend_validate_deferred_fks_refuses_an_ephemeral_remote_connec
 
 
 @pytest.mark.duckdb
-@pytest.mark.db_dialect
 def test_duckdb_backend_merge_insert_batch_validation_is_a_no_op_without_deferred_fks(
     duckdb_session,
 ):
@@ -800,7 +771,6 @@ def test_duckdb_backend_deferred_fk_constraints_without_resolved_raises_even_for
 
 
 @pytest.mark.duckdb
-@pytest.mark.db_dialect
 def test_duckdb_backend_deferred_fk_constraints_classifies_cross_schema_fk_with_resolved(
     duckdb_split_schema_session,
 ):
@@ -816,7 +786,6 @@ def test_duckdb_backend_deferred_fk_constraints_classifies_cross_schema_fk_with_
 
 
 @pytest.mark.duckdb
-@pytest.mark.db_dialect
 def test_duckdb_backend_validate_deferred_fks_catches_a_cross_schema_orphan(
     duckdb_split_schema_session,
 ):
@@ -832,7 +801,6 @@ def test_duckdb_backend_validate_deferred_fks_catches_a_cross_schema_orphan(
 
 
 @pytest.mark.duckdb
-@pytest.mark.db_dialect
 def test_duckdb_backend_tables_referencing_excludes_an_omitted_cross_schema_fk(
     duckdb_split_schema_session,
 ):

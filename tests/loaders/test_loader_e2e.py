@@ -34,6 +34,7 @@ _VocabSchemaTable = cast(type[FileTableProtocol], VocabSchemaTable)
 _CycleATable = cast(type[FileTableProtocol], CycleATable)
 
 
+@pytest.mark.sqlite
 def test_initial_file_load(sqlite_session, tmp_path):
     csv_path = tmp_path / "test_table.csv"
 
@@ -63,6 +64,7 @@ def test_initial_file_load(sqlite_session, tmp_path):
     ]
 
 
+@pytest.mark.sqlite
 def test_initial_file_load_for_a_non_primary_schema_table(sqlite_session, tmp_path):
     """SQLite has no real schema concept, so every Role folds to None
     on this connection (see oa_configurator's SQLiteTestStrategy).
@@ -90,6 +92,7 @@ def test_initial_file_load_for_a_non_primary_schema_table(sqlite_session, tmp_pa
     assert [(r.id, r.name) for r in rows] == [(1, "alpha"), (2, "beta")]
 
 
+@pytest.mark.sqlite
 def test_replace_merge_strategy(sqlite_session, tmp_path):
     csv_path = tmp_path / "test_table.csv"
 
@@ -136,6 +139,7 @@ def test_replace_merge_strategy(sqlite_session, tmp_path):
     ]
 
 
+@pytest.mark.sqlite
 def test_empty_file_is_noop(sqlite_session, tmp_path):
     csv_path = tmp_path / "test_table.csv"
     csv_path.touch()
@@ -153,6 +157,7 @@ def test_empty_file_is_noop(sqlite_session, tmp_path):
     assert rows == []
 
 
+@pytest.mark.sqlite
 def test_required_column_violation_raises(sqlite_session, tmp_path):
     csv = tmp_path / "required_table.csv"
     pd.DataFrame(
@@ -170,6 +175,7 @@ def test_required_column_violation_raises(sqlite_session, tmp_path):
         )
 
 
+@pytest.mark.sqlite
 def test_required_column_entirely_missing_raises(sqlite_session, tmp_path):
     # Distinct from test_required_column_violation_raises above: here
     # the required column isn't present with a bad value, it's absent from
@@ -187,6 +193,7 @@ def test_required_column_entirely_missing_raises(sqlite_session, tmp_path):
         )
 
 
+@pytest.mark.sqlite
 def test_composite_pk_dedup(sqlite_session, tmp_path):
     csv = tmp_path / "composite_table.csv"
     pd.DataFrame(
@@ -207,6 +214,7 @@ def test_composite_pk_dedup(sqlite_session, tmp_path):
     assert inserted == 2
 
 
+@pytest.mark.sqlite
 @pytest.mark.parametrize(
     "merge_strategy,expected_rows,expected_inserted",
     [
@@ -272,6 +280,7 @@ def test_merge_strategies(
     assert [(r.id, r.name) for r in rows] == expected_rows
 
 
+@pytest.mark.sqlite
 def test_a_load_resolves_its_backend_once(sqlite_session, tmp_path, monkeypatch):
     from orm_loader.tables import loadable_table
 
@@ -288,6 +297,7 @@ def test_a_load_resolves_its_backend_once(sqlite_session, tmp_path, monkeypatch)
     assert len(calls) == 1
 
 
+@pytest.mark.sqlite
 def test_insert_merge_strategy(sqlite_session, tmp_path):
     csv_path = tmp_path / "test_table.csv"
 
@@ -316,6 +326,7 @@ def test_insert_merge_strategy(sqlite_session, tmp_path):
     ]
 
 
+@pytest.mark.sqlite
 def test_insert_adds_new_keys_to_a_populated_target_and_fails_on_an_existing_key(
     sqlite_session, sqlite_engine, tmp_path
 ):
@@ -342,6 +353,7 @@ def test_insert_adds_new_keys_to_a_populated_target_and_fails_on_an_existing_key
     assert not inspector.has_table(staging_name)
 
 
+@pytest.mark.sqlite
 @pytest.mark.parametrize("merge_strategy", ["replace", "upsert"])
 def test_empty_target_runs_the_requested_merge(sqlite_session, tmp_path, caplog, merge_strategy):
     csv_path = tmp_path / "test_table.csv"
@@ -381,6 +393,7 @@ def test_empty_target_runs_the_requested_merge(sqlite_session, tmp_path, caplog,
         assert not any("Merge insert phase starting." in message for message in messages)
 
 
+@pytest.mark.sqlite
 def test_staging_table_is_created_and_dropped(sqlite_session, sqlite_engine, tmp_path):
     csv_path = tmp_path / "test_table.csv"
 
@@ -398,6 +411,7 @@ def test_staging_table_is_created_and_dropped(sqlite_session, sqlite_engine, tmp
     assert not inspector.has_table(staging_name)
 
 
+@pytest.mark.sqlite
 def test_composite_pk_replace_merge(sqlite_session, tmp_path):
     csv = tmp_path / "composite_table.csv"
 
@@ -438,6 +452,7 @@ def test_composite_pk_replace_merge(sqlite_session, tmp_path):
     ]
 
 
+@pytest.mark.sqlite
 def test_filename_must_match_tablename(sqlite_session, tmp_path):
     csv = tmp_path / "wrong_name.csv"
     pd.DataFrame([{"id": 1, "name": "x"}]).to_csv(csv, index=False)
@@ -449,6 +464,7 @@ def test_filename_must_match_tablename(sqlite_session, tmp_path):
         )
 
 
+@pytest.mark.sqlite
 def test_nullable_column_with_nan_does_not_crash(sqlite_session, sqlite_engine, tmp_path):
     class NullableTable(Base, FileLoadableTableInterface):
         __tablename__ = "nullable_table"
@@ -487,6 +503,7 @@ def test_nullable_column_with_nan_does_not_crash(sqlite_session, sqlite_engine, 
     ]
 
 
+@pytest.mark.sqlite
 def test_embedded_newline_in_field_is_preserved(sqlite_session, sqlite_engine, tmp_path):
     class TextTable(Base, FileLoadableTableInterface):
         __tablename__ = "text_table"
@@ -515,6 +532,7 @@ def test_embedded_newline_in_field_is_preserved(sqlite_session, sqlite_engine, t
     assert rows[0].name == "hello\nworld"
 
 
+@pytest.mark.sqlite
 def test_embedded_tab_in_field(sqlite_session, sqlite_engine, tmp_path):
     class TextTable2(Base, FileLoadableTableInterface):
         __tablename__ = "tab_table"
@@ -558,6 +576,7 @@ def _make_ddl_tracker(sqlite_engine):
     return ddl_log
 
 
+@pytest.mark.sqlite
 def test_auto_strategy_keeps_indices_on_sqlite(sqlite_session, sqlite_engine, tmp_path):
     """On SQLite, 'auto' resolves to 'keep' — no index DDL should be emitted."""
     ddl_log = _make_ddl_tracker(sqlite_engine)
@@ -576,6 +595,7 @@ def test_auto_strategy_keeps_indices_on_sqlite(sqlite_session, sqlite_engine, tm
     assert "ix_test_table_name" in {idx["name"] for idx in inspector.get_indexes("test_table")}
 
 
+@pytest.mark.sqlite
 def test_explicit_keep_preserves_indices(sqlite_session, sqlite_engine, tmp_path):
     """Explicit 'keep' emits no index DDL regardless of dialect."""
     ddl_log = _make_ddl_tracker(sqlite_engine)
@@ -591,6 +611,7 @@ def test_explicit_keep_preserves_indices(sqlite_session, sqlite_engine, tmp_path
     assert "ix_test_table_name" in {idx["name"] for idx in inspector.get_indexes("test_table")}
 
 
+@pytest.mark.sqlite
 def test_explicit_drop_rebuild_on_sqlite_restores_index(sqlite_session, sqlite_engine, tmp_path):
     """Explicit 'drop_rebuild' drops then restores the index even on SQLite."""
     ddl_log = _make_ddl_tracker(sqlite_engine)
@@ -609,6 +630,7 @@ def test_explicit_drop_rebuild_on_sqlite_restores_index(sqlite_session, sqlite_e
     assert "ix_test_table_name" in {idx["name"] for idx in inspector.get_indexes("test_table")}
 
 
+@pytest.mark.sqlite
 def test_a_failed_index_rebuild_raises_after_the_merge_is_committed(
     sqlite_session, tmp_path, monkeypatch
 ):
@@ -629,6 +651,7 @@ def test_a_failed_index_rebuild_raises_after_the_merge_is_committed(
     )
 
 
+@pytest.mark.sqlite
 def test_a_failed_merge_is_not_masked_by_a_failed_index_rebuild(
     sqlite_session, tmp_path, monkeypatch
 ):
@@ -644,6 +667,7 @@ def test_a_failed_merge_is_not_masked_by_a_failed_index_rebuild(
         _SimpleTable.load_file(sqlite_session, csv_path, index_strategy="drop_rebuild")
 
 
+@pytest.mark.sqlite
 def test_drop_rebuild_logging_shows_merge_phases(sqlite_session, tmp_path, caplog):
     csv_path = tmp_path / "test_table.csv"
 
@@ -702,6 +726,7 @@ def test_drop_rebuild_logging_shows_merge_phases(sqlite_session, tmp_path, caplo
     assert any("Index verification/rebuild completed in " in message for message in messages)
 
 
+@pytest.mark.sqlite
 def test_invalid_index_strategy_raises(sqlite_session, tmp_path):
     """An unrecognised strategy value raises ValueError before any DB work."""
     csv_path = tmp_path / "test_table.csv"
@@ -757,6 +782,7 @@ def test_invalid_index_strategy_raises(sqlite_session, tmp_path):
 #             assert rows[0].txt.encode("utf-8", errors="replace") == s.encode("utf-8", errors="replace")
 
 
+@pytest.mark.sqlite
 def test_sqlite_failed_batched_replace_keeps_original_target_rows(sqlite_session, tmp_path):
     sqlite_session.add_all(
         [SimpleTable(id=1, name="original-1"), SimpleTable(id=2, name="original-2")]
@@ -786,7 +812,6 @@ def test_sqlite_failed_batched_replace_keeps_original_target_rows(sqlite_session
 
 
 @pytest.mark.duckdb
-@pytest.mark.db_dialect
 def test_validate_deferred_fks_catches_an_orphan_introduced_by_load_file(
     duckdb_session, duckdb_db, tmp_path
 ):
@@ -821,7 +846,6 @@ def test_validate_deferred_fks_catches_an_orphan_introduced_by_load_file(
 
 
 @pytest.mark.duckdb
-@pytest.mark.db_dialect
 def test_load_file_rejects_replace_with_keep_index_strategy_on_duckdb_upfront(
     duckdb_session, tmp_path
 ):

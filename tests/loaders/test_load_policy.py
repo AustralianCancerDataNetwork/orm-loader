@@ -1,6 +1,5 @@
 """Loading under a null policy: markers, rejected rows, row accounting and sources."""
 
-import os
 from datetime import date
 from pathlib import Path
 from typing import cast
@@ -201,23 +200,17 @@ def test_rejects_go_to_the_requested_directory(dialect_session, tmp_path):
 
 
 def test_unwritable_rejects_directory_fails_before_loading(dialect_session, tmp_path):
-    blocked = tmp_path / "blocked"
-    blocked.mkdir()
-    blocked.chmod(0o500)
-    try:
-        if os.access(blocked, os.W_OK):
-            pytest.skip("directory permissions are not enforced for this user")
-        with pytest.raises(IngestError, match="not writable"):
-            _load(
-                dialect_session,
-                tmp_path,
-                _Demo,
-                MESSY,
-                policy=ConversionPolicy(errors=ErrorPolicy(on_error="reject_row")),
-                rejects_dir=blocked / "inner",
-            )
-    finally:
-        blocked.chmod(0o700)
+    blocker = tmp_path / "blocker"
+    blocker.write_text("a file where the rejects directory would be created")
+    with pytest.raises(IngestError, match="not writable"):
+        _load(
+            dialect_session,
+            tmp_path,
+            _Demo,
+            MESSY,
+            policy=ConversionPolicy(errors=ErrorPolicy(on_error="reject_row")),
+            rejects_dir=blocker / "inner",
+        )
     assert (
         dialect_session.execute(sa.select(sa.func.count()).select_from(DemoRecord)).scalar_one()
         == 0
@@ -297,6 +290,7 @@ def test_dedupe_reports_zero_when_nothing_is_duplicated(dialect_session, tmp_pat
     assert report.dedupe == DedupeResult(("demo_id",), rows_before=2, rows_removed=0)
 
 
+@pytest.mark.sqlite
 def test_dedupe_works_across_read_batches(sqlite_session, tmp_path):
     rows = (
         ["demo_id,demo_label"]

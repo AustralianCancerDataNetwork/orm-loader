@@ -174,6 +174,7 @@ def test_insertable_column_names_exclude_computed_columns():
     assert backend._insertable_column_names(_ComputedTableCls) == ["id", "name"]
 
 
+@pytest.mark.sqlite
 def test_relaxed_foreign_keys_toggles_fk_and_restores(sqlite_session):
     backend = FakeBackend()
 
@@ -186,6 +187,7 @@ def test_relaxed_foreign_keys_toggles_fk_and_restores(sqlite_session):
     ]
 
 
+@pytest.mark.sqlite
 def test_relaxed_foreign_keys_leaves_keys_enforced_when_backend_cannot_toggle(sqlite_session):
     class NoFKBackend(FakeBackend):
         def disable_fk_check(
@@ -201,6 +203,7 @@ def test_relaxed_foreign_keys_leaves_keys_enforced_when_backend_cannot_toggle(sq
     assert backend.calls == []
 
 
+@pytest.mark.sqlite
 def test_relaxed_foreign_keys_rolls_back_and_restores(sqlite_session):
     backend = FakeBackend()
 
@@ -224,8 +227,8 @@ def test_backends_package_exports():
     assert backends.resolve_backend is resolve_backend
 
 
-def test_resolve_backend_for_sqlite_engine_and_session():
-    sqlite_engine = sa.create_engine("sqlite:///:memory:", future=True)
+@pytest.mark.sqlite
+def test_resolve_backend_for_sqlite_engine_and_session(sqlite_engine):
     sqlite_session = so.Session(sqlite_engine)
 
     try:

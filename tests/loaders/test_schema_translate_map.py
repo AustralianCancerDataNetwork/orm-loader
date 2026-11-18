@@ -19,12 +19,15 @@ not translation actually works. Real Postgres, via pg_db.
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 import sqlalchemy as sa
 from oa_configurator import Role as SchemaRole
 
 from orm_loader.backends import STAGING_SCHEMA
 from tests.conftest import schema_scoped_session
 from tests.models import SimpleTable, VocabSchemaTable
+
+pytestmark = pytest.mark.postgresql
 
 
 def test_load_file_respects_non_default_schema_end_to_end(pg_db, tmp_path):

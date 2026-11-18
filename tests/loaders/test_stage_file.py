@@ -10,6 +10,8 @@ from orm_loader.loaders import LoaderContext, open_reader, stage_file
 from orm_loader.tables.typing import FileTableProtocol
 from tests.models import FileLoaderTable
 
+pytestmark = pytest.mark.sqlite
+
 _FileLoaderTable = cast(type[FileTableProtocol], FileLoaderTable)
 
 

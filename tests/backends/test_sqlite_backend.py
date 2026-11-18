@@ -74,6 +74,7 @@ def test_sqlite_backend_rejects_non_positive_merge_batch_size(merge_batch_size, 
         merge(*args, merge_batch_size=merge_batch_size)
 
 
+@pytest.mark.sqlite
 def test_sqlite_backend_create_staging_table(sqlite_session, sqlite_engine):
     backend = SQLiteBackend()
 
@@ -178,6 +179,7 @@ def test_sqlite_backend_restore_fk_accepts_string_values():
     ]
 
 
+@pytest.mark.sqlite
 def test_sqlite_backend_fk_toggle_round_trip(sqlite_session):
     backend = SQLiteBackend()
 
@@ -192,6 +194,7 @@ def test_sqlite_backend_fk_toggle_round_trip(sqlite_session):
     assert sqlite_session.execute(sa.text("PRAGMA foreign_keys")).scalar() == 1
 
 
+@pytest.mark.sqlite
 def test_relaxed_foreign_keys_on_sqlite_logs_the_toggling(sqlite_session, caplog):
     with (
         caplog.at_level("INFO", logger="orm_loader.backends.base"),
@@ -216,6 +219,7 @@ def _foreign_keys(session: so.Session) -> int:
     return session.execute(sa.text("PRAGMA foreign_keys")).scalar_one()
 
 
+@pytest.mark.sqlite
 def test_a_load_relaxes_enforced_foreign_keys_and_restores_them(enforcing_session, tmp_path):
     path = tmp_path / "referencing_child_table.csv"
     path.write_text("id,parent_id\n1,1\n")
@@ -226,6 +230,7 @@ def test_a_load_relaxes_enforced_foreign_keys_and_restores_them(enforcing_sessio
     assert _foreign_keys(enforcing_session) == 1
 
 
+@pytest.mark.sqlite
 def test_a_load_on_a_session_with_pending_writes_raises_and_keeps_them(enforcing_session, tmp_path):
     enforcing_session.add(SimpleTable(id=1, name="pending"))
     enforcing_session.flush()
