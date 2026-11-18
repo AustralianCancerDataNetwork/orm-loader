@@ -5,6 +5,7 @@ from typing import cast
 
 import pytest
 from oa_configurator import Dialect
+from sqlalchemy.exc import IntegrityError
 
 from orm_loader.backends import STAGING_SCHEMA, ForeignKeyViolationError
 from orm_loader.tables.typing import FileTableProtocol
@@ -80,7 +81,9 @@ def test_tables_loaded_child_first_validate_once_the_parents_are_loaded(
     dialect_session, tmp_path, options
 ):
     if dialect_session.get_bind().dialect.name == Dialect.DUCKDB:
-        pytest.skip("DuckDB enforces this key itself, so a child cannot be loaded first")
+        with pytest.raises(IntegrityError, match="foreign key"):
+            _load(dialect_session, _Child, tmp_path, "id,parent_id\n1,1\n", options)
+        return
     _load(dialect_session, _Child, tmp_path, "id,parent_id\n1,1\n", options)
     with pytest.raises(ForeignKeyViolationError, match="referencing_child_table"):
         _validate(dialect_session, _Child, options)
